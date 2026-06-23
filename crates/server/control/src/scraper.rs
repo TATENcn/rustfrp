@@ -41,9 +41,7 @@ impl Scraper {
         interval: Duration,
         timeout: Duration,
     ) -> Result<Self, anyhow::Error> {
-        let client = reqwest::Client::builder()
-            .timeout(timeout)
-            .build()?;
+        let client = reqwest::Client::builder().timeout(timeout).build()?;
         Ok(Self {
             targets,
             interval,

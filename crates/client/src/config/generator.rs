@@ -207,7 +207,7 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
 }
 
 /// 文件名安全处理：替换空格、去除非安全字符
-fn sanitize_filename(name: &str) -> String {
+pub(crate) fn sanitize_filename(name: &str) -> String {
     name.chars()
         .map(|c| match c {
             'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => c,

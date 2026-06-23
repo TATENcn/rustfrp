@@ -26,6 +26,7 @@ tracing-subscriber = { workspace = true }
 uuid.workspace = true
 chrono.workspace = true
 sha2 = "0.10"
+anyhow.workspace = true
 clap = { workspace = true }
 dirs = "5"
 

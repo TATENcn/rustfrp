@@ -4,6 +4,7 @@
 //! Uses `rustfrp_common` for plugin infrastructure and signal handling.
 
 pub mod config;
+pub mod core;
 pub mod db;
 pub mod error;
 pub mod process;

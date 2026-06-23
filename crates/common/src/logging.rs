@@ -12,10 +12,9 @@ use tracing_subscriber::EnvFilter;
 /// Behavior controlled by environment variables:
 /// - `RUST_LOG`: tracing filter (default: `info`)
 /// - `RUSTFRP_LOG_MODE`: `json` = JSON to `~/.rustfrp/logs/rustfrp.log` (append);
-///    anything else = human-readable to stderr.
+///   anything else = human-readable to stderr.
 pub fn init() {
-    let env_filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     let log_mode = std::env::var("RUSTFRP_LOG_MODE").unwrap_or_default();
 
@@ -37,9 +36,7 @@ pub fn init() {
             }
             Err(e) => {
                 // Fallback: console output so the startup error is visible
-                tracing_subscriber::fmt()
-                    .with_env_filter(env_filter)
-                    .init();
+                tracing_subscriber::fmt().with_env_filter(env_filter).init();
                 tracing::warn!(
                     dir = %log_dir.display(),
                     error = %e,
@@ -48,9 +45,7 @@ pub fn init() {
             }
         }
     } else {
-        tracing_subscriber::fmt()
-            .with_env_filter(env_filter)
-            .init();
+        tracing_subscriber::fmt().with_env_filter(env_filter).init();
     }
 }
 

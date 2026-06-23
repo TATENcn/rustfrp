@@ -159,16 +159,7 @@ impl ProcessManager {
     }
 }
 
-/// 文件名安全处理
-fn sanitize_filename(name: &str) -> String {
-    name.chars()
-        .map(|c| match c {
-            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => c,
-            ' ' => '_',
-            _ => '_',
-        })
-        .collect()
-}
+use crate::config::generator::sanitize_filename;
 
 #[cfg(test)]
 mod tests {
