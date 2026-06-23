@@ -1,0 +1,82 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/rustfrp-core",
+    "crates/rustfrp-frp",
+    "crates/rustfrp-sdk",
+    "crates/rustfrp-monitor",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0"
+repository = "https://github.com/taten/rustfrp"
+rust-version = "1.81"
+
+[workspace.dependencies]
+# === 异步运行时 ===
+tokio = { version = "1", features = ["full"] }
+
+# === 序列化 ===
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# === 数据库 ===
+rusqlite = { version = "0.31", features = ["bundled", "vtab"] }
+
+# === 错误处理 ===
+thiserror = "1"
+async-trait = "0.1"
+anyhow = "1"                # 仅应用层（monitor、gui），核心层禁止使用
+
+# === 日志 ===
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# === 跨平台 ===
+cfg-if = "1"
+
+# === ID 生成 ===
+uuid = { version = "1", features = ["v4"] }
+
+# === 时间 ===
+chrono = { version = "0.4", features = ["serde"] }
+
+# === 内存分配（各 crate 按需声明，含 optional） ===
+# mimalloc = { version = "0.1", optional = true }
+# tikv-jemallocator = { version = "0.5", optional = true }
+
+# === CLI ===
+clap = { version = "4", features = ["derive"] }
+
+# === HTTP 客户端（仅 monitor 和 frp 管理 crate 使用） ===
+reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
+
+# === 开发 / 测试（各 crate 通过 dev-dependencies 继承） ===
+tempfile = "3"
+test-log = "0.2"
+rstest = "0.22"
+mockall = "0.13"
+criterion = "0.5"
+proptest = "1.5"
+serial_test = "3.1"
+pretty_assertions = "1"
+tokio-test = "0.4"
+insta = "1"
+loom = "0.7"
+
+# 只在顶层控制 profile，所有 member 继承
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
+[profile.dev]
+opt-level = 0
+
+[profile.test]
+opt-level = 1

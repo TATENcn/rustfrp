@@ -1,0 +1,86 @@
+# RustFRP 开发命令
+
+# --- 默认目标 ---
+default:
+    @just --list
+
+# === 开发 ===
+
+# 启动 GUI 开发模式
+dev:
+    cd plugins/gui && npm run tauri dev
+
+# 启动监控服务器开发模式
+dev-monitor:
+    cargo run -p rustfrp-monitor
+
+# === 测试 ===
+
+# 单元测试（每次 push 前跑）
+test-fast:
+    cargo test --lib --all
+
+# 全量测试（含集成测试）
+test-all:
+    cargo test --all
+
+# 带日志的测试
+test-log:
+    RUST_LOG=debug cargo test -- --nocapture
+
+# === 代码质量 ===
+
+# 格式化检查 + clippy
+lint:
+    cargo fmt --all -- --check
+    cargo clippy --all-targets --all-features -- -D warnings
+
+# 自动格式化
+fmt:
+    cargo fmt --all
+
+# 安全审计
+audit:
+    cargo audit
+    cargo deny check
+
+# === 构建 ===
+
+# 发布构建
+build-release:
+    cargo build --release
+
+# 交叉编译 armv7
+build-armv7:
+    cross build --release --target armv7-unknown-linux-gnueabihf
+
+# 交叉编译 aarch64
+build-aarch64:
+    cross build --release --target aarch64-unknown-linux-gnueabihf
+
+# === 基准测试 ===
+
+# 运行基准
+bench:
+    cargo bench --all
+
+# === 文档 ===
+
+# 生成并打开文档
+doc:
+    cargo doc --no-deps --open
+
+# === 清理 ===
+
+# 清理构建产物
+clean:
+    cargo clean
+
+# === CI 相关 ===
+
+# CI 全套（等价于 CI pipeline）
+ci:
+    just lint
+    just test-all
+    just build-release
+    just audit

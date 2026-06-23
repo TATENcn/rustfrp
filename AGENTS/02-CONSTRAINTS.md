@@ -23,8 +23,10 @@ modification_policy: constitution
 | ARCH-004 | 字段 1:1 映射 FRP 规范 | [→](#一架构约束) |
 | ARCH-005 | Profile/Proxy/Binding 三表解耦 | [→](#一架构约束) |
 | ARCH-006 | FRP 子进程运行，优雅退出 | [→](#一架构约束) |
-| ARCH-007 | 监控与配置分离，监控只读 | [→](#一架构约束) |
+| ARCH-007 | 监控只读无状态，配置下发走 Agent Pull（监控不写回，Agent 自主拉取） | [→](#一架构约束) |
 | ARCH-008 | 单体部署，不引入中间件 | [→](#一架构约束) |
+| ARCH-009 | 支持多 frpc 实例（一个 Profile 一个进程） | [→](#一架构约束) |
+| ARCH-010 | FrpsProfile 与 LocalProxy 通过 BindingRule 多对多解耦 | [→](#一架构约束) |
 | PERF-001 | Core < 10MB，低配设备可用 | [→](#二性能约束) |
 | PERF-002 | 配置原子生成，热重载不断连 | [→](#二性能约束) |
 | PERF-003 | TOML 原子写入（tmp + rename） | [→](#二性能约束) |
@@ -33,6 +35,9 @@ modification_policy: constitution
 | PLG-003 | 完整生命周期 | [→](#三插件约束) |
 | PLG-004 | 禁止 panic | [→](#三插件约束) |
 | PLG-005 | 资源限制 | [→](#三插件约束) |
+| CODE-006 | 核心层错误/校验信息全英文 | [→](#四代码规范) |
+| CODE-007 | 禁止 query_map 静默吞错 | [→](#四代码规范) |
+| CFG-001 | LocalProxy 支持 FRP 原生插件配置（plugin_config JSON blob） | [→](#五配置约束) |
 
 ### P1（推荐）
 
@@ -40,9 +45,11 @@ modification_policy: constitution
 |---|---|---|
 | PERF-004 | 监控拉取超时 3s，熔断 | [→](#二性能约束) |
 | PLG-006 | 插件 API 向后兼容 | [→](#三插件约束) |
+| PLG-007 | Permission 枚举在 core 统一定义，sdk 通过 re-export 引用，禁止重复 | [→](#三插件约束) |
 | CODE-001 | 异步优先 | [→](#四代码规范) |
 | CODE-002 | Result 错误处理 | [→](#四代码规范) |
 | CODE-003 | 文档注释 | [→](#四代码规范) |
+| PERF-005 | 日志文件 append 模式，不截断历史日志 | [→](#二性能约束) |
 
 ---
 
@@ -136,14 +143,17 @@ SELECT name FROM sqlite_master WHERE type='table'
 
 ---
 
-### ARCH-007：监控与配置彻底分离
+### ARCH-007：监控只读无状态，配置下发走 Agent Pull
 
 **优先级**：P0
 
 **规定**：
-- 中央监控服务器只读，不存储业务配置，不提供配置下发接口
-- 监控服务器宕机不得影响 FRPS/FRPC 穿透
+- 监控服务器（rustfrp-monitor）绝对只读，拉取 /metrics 不写回任何数据
+- 控制面可提供配置模板 API（只读 GET），供 frps-agent 定期拉取
+- Agent 宕机 → frps 继续运行；控制面宕机 → Agent 缓存上次配置
 - 配置变更只能通过客户端 GUI 用户主动触发
+- **禁止**控制面直接向 frps 进程写入配置或发信号
+- 监控服务器宕机不得影响 FRPS/FRPC 穿透
 
 **验证**：停掉监控服务器，确认穿透链路正常。
 
@@ -157,6 +167,34 @@ SELECT name FROM sqlite_master WHERE type='table'
 - 项目作为单体应用运行，一个二进制 + 一个 SQLite 文件即可
 - 不引入 etcd、Consul、消息队列、分布式数据库等重量级中间件
 - 不为 HA 而将工具本体微服务化
+
+---
+
+### ARCH-009：支持多 frpc 实例
+
+**优先级**：P0
+
+**规定**：
+- 系统支持同时运行多个 frpc 子进程，每个对应一个 FrpsProfile
+- 一个 FrpsProfile → 一个 `frpc_{name}.toml` → 一个 ProcessGuard 实例
+- ProcessManager 管理所有 ProcessGuard 的生命周期
+- 新增/修改/删除 Profile 时自动增减对应的 frpc 实例
+
+**验证**：测试中同时创建 3 个 Profile 并绑定 Proxy，断言 3 个 frpc.toml 文件和 3 个进程 Guard。
+
+---
+
+### ARCH-010：FrpsProfile / LocalProxy / BindingRule 三表多对多解耦
+
+**优先级**：P0
+
+**规定**：
+- 一个 FrpsProfile 可绑定多个 LocalProxy
+- 一个 LocalProxy 可绑定到多个 FrpsProfile（同一服务暴露到多个服务器）
+- 绑定关系通过 BindingRule 表达，包含 enabled / priority / group 元数据
+- TOML 生成时按 Profile 分组，每组生成独立的 TOML 文件
+
+**验证**：创建一个 Profile 绑定 2 个 Proxy，再创建第二个 Profile 绑定其中 1 个 Proxy + 另 1 个新 Proxy，断言 TOML 分组正确。
 
 ---
 
@@ -208,6 +246,19 @@ SELECT name FROM sqlite_master WHERE type='table'
 - 监控服务器拉取 /metrics 超时设为 3 秒
 - 单节点拉取失败不影响其他节点的采集
 - 连续失败 N 次 → 降低该节点拉取频率（熔断）
+
+---
+
+### PERF-005：日志文件 append 模式
+
+**优先级**：P1
+
+**规定**：
+- frpc 子进程的 stdout/stderr 日志文件使用 append 模式打开
+- 禁止使用 `File::create()` 截断已有日志
+- 使用 `OpenOptions::new().append(true).create(true).open()`
+
+**验证**：检查 `process/guard.rs` 中所有 `File::create` 调用均已替换为 append 模式。
 
 ---
 
@@ -305,6 +356,16 @@ SELECT name FROM sqlite_master WHERE type='table'
 
 ---
 
+### PLG-007：Permission 枚举在 core 统一定义，sdk 通过 re-export 引用
+
+**优先级**：P1
+
+**规定**：Permission 枚举在 core 统一定义（`crates/rustfrp-core/src/plugin/manifest.rs`），sdk 通过 `pub use rustfrp_core::plugin::manifest::Permission;` 重新导出。禁止在 sdk 中重复定义 Permission 枚举。
+
+**验证**：`grep -r 'pub enum Permission' crates/` 预期只匹配 core 中的定义。
+
+---
+
 ## 四、代码规范
 
 ### CODE-001：异步优先
@@ -360,7 +421,52 @@ SELECT name FROM sqlite_master WHERE type='table'
 
 ---
 
-## 五、约束速查表
+### CODE-006：核心层错误和校验信息全英文
+
+**优先级**：P0
+
+**规定**：
+- `CoreError::Display` 信息（`#[error("...")]`）必须为全英文，面向开发者/日志
+- `user_message_key()` 使用英文 i18n key（面向翻译框架）
+- 所有 `CoreError::ConfigValidation("...")` 和校验返回值中的字符串必须为英文
+- 插件 manifest 校验的返回消息（`Vec<String>`）必须为英文
+- `tracing` 日志和文档注释可使用中文（面向中文运维/团队）
+- 测试数据中的非关键字符串（如 name 字段）可以使用中文
+
+**验证**：`grep -rP '[\x{4e00}-\x{9fff}]' crates/rustfrp-core/src/ --include='*.rs' | grep -v '//' | grep -v '///'` 预期零输出（tracing 宏内的中文除外）。
+
+---
+
+### CODE-007：禁止 query_map 静默吞错
+
+**优先级**：P0
+
+**规定**：
+- 数据库 `query_map` 结果必须用 `collect::<Result<Vec<_>, _>>()` 向上传播错误
+- 禁止使用 `.filter_map(|r| r.ok())` 丢弃反序列化错误
+- 若确有业务理由必须跳过个别错误行，必须同时打 `tracing::warn!` 记录原因
+
+**验证**：`grep -r 'filter_map.*\.ok()'` 在 db/ 目录下零匹配。
+
+---
+
+## 五、配置约束
+
+### CFG-001：支持 FRP 原生插件配置
+
+**优先级**：P0
+
+**规定**：
+- `LocalProxy` 数据模型必须包含 `plugin_config: Option<serde_json::Value>` 字段
+- 字段 1:1 对应 FRP TOML 中的 `[proxies.plugin]` 段
+- 写入时校验：若 `plugin_config` 不为 None，必须至少包含 `type` 字段
+- TOML 生成时将其序列化到对应 `[[proxies]]` 条目下
+
+**验证**：创建包含 `https2http` plugin_config 的 Proxy，断言生成的 TOML 包含 `[proxies.plugin]` 段。
+
+---
+
+## 六、约束速查表
 
 | ID | 内容 | 级别 |
 |---|---|---|
@@ -370,20 +476,27 @@ SELECT name FROM sqlite_master WHERE type='table'
 | ARCH-004 | 字段 1:1 映射 FRP 规范 | P0 |
 | ARCH-005 | Profile/Proxy/Binding 三表解耦 | P0 |
 | ARCH-006 | FRP 子进程运行，优雅退出 | P0 |
-| ARCH-007 | 监控与配置分离，监控只读 | P0 |
+| ARCH-007 | 监控只读无状态，配置下发走 Agent Pull | P0 |
 | ARCH-008 | 单体部署，不引入中间件 | P0 |
+| ARCH-009 | 支持多 frpc 实例（一个 Profile 一个进程） | P0 |
+| ARCH-010 | Profile/Proxy/Binding 三表多对多解耦，TOML 按 Profile 分组 | P0 |
 | PERF-001 | Core < 10MB，低配可用 | P0 |
 | PERF-002 | 配置原子生成，热重载不断连 | P0 |
 | PERF-003 | TOML 原子写入（tmp + rename） | P0 |
 | PERF-004 | 监控拉取超时 3s，熔断 | P1 |
+| PERF-005 | 日志文件 append 模式，不截断历史日志 | P1 |
 | PLG-001 | manifest.json 必填 | P0 |
 | PLG-002 | 权限声明与调用前校验 | P0 |
 | PLG-003 | 完整生命周期 | P0 |
 | PLG-004 | 禁止 panic | P0 |
 | PLG-005 | 资源限制 | P0 |
 | PLG-006 | 插件 API 向后兼容 | P1 |
+| PLG-007 | Permission 枚举在 core 统一定义，sdk re-export | P1 |
 | CODE-001 | 异步优先 | P1 |
 | CODE-002 | Result 错误处理 | P1 |
 | CODE-003 | 错误码规范 | P0 |
 | CODE-004 | 日志规范与脱敏 | P0 |
 | CODE-005 | 文档注释 | P1 |
+| CODE-006 | 核心层错误/校验信息全英文 | P0 |
+| CODE-007 | 禁止 query_map 静默吞错 | P0 |
+| CFG-001 | 支持 FRP 原生插件配置（plugin_config JSON blob） | P0 |

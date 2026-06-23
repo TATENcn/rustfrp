@@ -1,0 +1,27 @@
+[package]
+name = "rustfrp-sdk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "RustFRP 插件 SDK — 供插件开发者使用"
+
+[dependencies]
+tokio = { workspace = true, features = ["sync"] }
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+
+rustfrp-core = { path = "../rustfrp-core" }
+
+# WASM 运行时（未来 Wasmtime 集成）
+# wasmtime = "24"
+
+# 动态库加载（未来 libloading 集成）
+# libloading = "0.8"
+
+[lib]
+name = "rustfrp_sdk"
+path = "src/lib.rs"

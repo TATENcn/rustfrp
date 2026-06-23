@@ -1,0 +1,37 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# FRP 运行时产物
+*.toml.tmp
+frpc.log
+frpc_err.log
+frpc.toml
+frps.toml
+
+# 日志
+~/.rustfrp/logs/
+
+# 测试数据库
+*.test.db
+
+# Node (GUI)
+node_modules/
+dist/
+.vite/
+
+# 环境文件
+.env
+.env.local
