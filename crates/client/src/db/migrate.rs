@@ -1,0 +1,320 @@
+//! 数据库增量迁移
+//!
+//! 迁移采用版本号递增策略。每个迁移是一个 `ALTER TABLE` / `CREATE TABLE IF NOT EXISTS`
+//! 或数据迁移操作。启动时校验 schema checksum，不匹配则拒绝启动。
+
+use crate::error::{ClientError, Result};
+use rusqlite::Connection;
+use sha2::{Digest, Sha256};
+
+/// 当前最新的 schema 版本
+const LATEST_VERSION: i32 = 2;
+
+/// 运行所有待执行的迁移
+///
+/// 幂等：已执行的迁移不会重复执行。
+/// 以事务方式执行每条迁移。
+pub fn run(conn: &Connection) -> Result<()> {
+    // 确保版本管理表存在
+    ensure_meta_table(conn)?;
+
+    let current_version = get_current_version(conn)?;
+
+    tracing::info!(
+        current_version,
+        latest_version = LATEST_VERSION,
+        "开始数据库迁移"
+    );
+
+    if current_version >= LATEST_VERSION {
+        tracing::info!("数据库已在最新版本，无需迁移");
+        verify_checksum(conn)?;
+        return Ok(());
+    }
+
+    for version in (current_version + 1)..=LATEST_VERSION {
+        apply_migration(conn, version)?;
+    }
+
+    verify_checksum(conn)?;
+
+    tracing::info!(from = current_version, to = LATEST_VERSION, "迁移完成");
+    Ok(())
+}
+
+/// 确保元数据表存在
+fn ensure_meta_table(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS _schema_meta (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )",
+        [],
+    )
+    .map_err(|e| ClientError::DatabaseMigration(format!("Failed to create _schema_meta: {e}")))?;
+    Ok(())
+}
+
+/// 获取当前 schema 版本
+fn get_current_version(conn: &Connection) -> Result<i32> {
+    let version: String = conn
+        .query_row(
+            "SELECT value FROM _schema_meta WHERE key = 'version'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or_else(|_| "0".to_string());
+
+    version
+        .parse::<i32>()
+        .map_err(|_| ClientError::DatabaseMigration(format!("Invalid schema version: {version}")))
+}
+
+/// 应用指定版本的迁移
+fn apply_migration(conn: &Connection, version: i32) -> Result<()> {
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| ClientError::DatabaseMigration(format!("Failed to begin transaction: {e}")))?;
+
+    match version {
+        1 => migrate_v1(&tx)?,
+        2 => migrate_v2(&tx)?,
+        _ => {
+            return Err(ClientError::DatabaseMigration(format!(
+                "Unknown migration version: {version}"
+            )));
+        }
+    }
+
+    // 记录版本
+    tx.execute(
+        "INSERT OR REPLACE INTO _schema_meta (key, value) VALUES ('version', ?1)",
+        [version.to_string()],
+    )
+    .map_err(|e| ClientError::DatabaseMigration(format!("Failed to update version number: {e}")))?;
+
+    tx.commit()
+        .map_err(|e| ClientError::DatabaseMigration(format!("Migration commit failed: {e}")))?;
+
+    tracing::info!(version, "迁移已完成");
+    Ok(())
+}
+
+/// V1 迁移：创建三张核心表
+///
+/// 表字段 1:1 对应 FRP 官方 TOML 规范（ARCH-004）。
+fn migrate_v1(tx: &rusqlite::Transaction) -> Result<()> {
+    // === FrpsProfile：服务端连接配置 ===
+    tx.execute(
+        "CREATE TABLE IF NOT EXISTS frps_profile (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            name               TEXT NOT NULL,
+            server_addr        TEXT NOT NULL,
+            server_port        INTEGER NOT NULL DEFAULT 7000,
+            token              TEXT NOT NULL DEFAULT '',
+            tls_enable         INTEGER NOT NULL DEFAULT 0,
+            tls_cert_file      TEXT DEFAULT NULL,
+            tls_key_file       TEXT DEFAULT NULL,
+            tls_trusted_ca_file TEXT DEFAULT NULL,
+            transport_protocol TEXT NOT NULL DEFAULT 'tcp',
+            heartbeat_interval INTEGER DEFAULT 30,
+            heartbeat_timeout  INTEGER DEFAULT 90,
+            created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
+        )",
+        [],
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to create frps_profile table: {e}"))
+    })?;
+
+    // === LocalProxy：本地代理配置 ===
+    tx.execute(
+        "CREATE TABLE IF NOT EXISTS local_proxy (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            name               TEXT NOT NULL,
+            proxy_type         TEXT NOT NULL DEFAULT 'tcp',
+            local_ip           TEXT NOT NULL DEFAULT '127.0.0.1',
+            local_port         INTEGER NOT NULL,
+            remote_port        INTEGER DEFAULT NULL,
+            custom_domains     TEXT DEFAULT NULL,
+            subdomain          TEXT DEFAULT NULL,
+            use_encryption     INTEGER NOT NULL DEFAULT 1,
+            use_compression    INTEGER NOT NULL DEFAULT 1,
+            bandwidth_limit    TEXT DEFAULT NULL,
+            health_check_type  TEXT DEFAULT NULL,
+            health_check_timeout_s INTEGER DEFAULT 3,
+            health_check_max_failed INTEGER DEFAULT 3,
+            health_check_interval_s INTEGER DEFAULT 10,
+            created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
+        )",
+        [],
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to create local_proxy table: {e}"))
+    })?;
+
+    // === BindingRule：多对多绑定规则 ===
+    tx.execute(
+        "CREATE TABLE IF NOT EXISTS binding_rule (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id    INTEGER NOT NULL,
+            proxy_id      INTEGER NOT NULL,
+            enabled       INTEGER NOT NULL DEFAULT 1,
+            priority      INTEGER NOT NULL DEFAULT 0,
+            group_name    TEXT DEFAULT NULL,
+            group_key     TEXT DEFAULT NULL,
+            created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (profile_id) REFERENCES frps_profile(id) ON DELETE CASCADE,
+            FOREIGN KEY (proxy_id)   REFERENCES local_proxy(id)    ON DELETE CASCADE
+        )",
+        [],
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to create binding_rule table: {e}"))
+    })?;
+
+    // 创建索引
+    tx.execute(
+        "CREATE INDEX IF NOT EXISTS idx_binding_rule_profile ON binding_rule(profile_id)",
+        [],
+    )
+    .ok();
+    tx.execute(
+        "CREATE INDEX IF NOT EXISTS idx_binding_rule_proxy ON binding_rule(proxy_id)",
+        [],
+    )
+    .ok();
+    tx.execute(
+        "CREATE INDEX IF NOT EXISTS idx_binding_rule_enabled ON binding_rule(enabled)",
+        [],
+    )
+    .ok();
+
+    tracing::info!("V1 迁移: 创建三张核心表 frps_profile / local_proxy / binding_rule");
+    Ok(())
+}
+
+/// V2 迁移：为 local_proxy 添加 FRP 原生插件配置字段
+fn migrate_v2(tx: &rusqlite::Transaction) -> Result<()> {
+    tx.execute(
+        "ALTER TABLE local_proxy ADD COLUMN plugin_config TEXT DEFAULT NULL",
+        [],
+    )
+    .map_err(|e| {
+        if e.to_string().contains("duplicate column") {
+            tracing::info!("plugin_config column already exists, skipping");
+        }
+        ClientError::DatabaseMigration(format!("Failed to add plugin_config column: {e}"))
+    })?;
+
+    tracing::info!("V2 迁移: 添加 local_proxy.plugin_config 列");
+    Ok(())
+}
+
+/// 校验当前 schema checksum
+///
+/// 计算所有表结构的 SHA256，与存储的 checksum 比对。
+/// 不匹配则拒绝启动，防止手动修改数据库导致的不一致。
+pub fn verify_checksum(conn: &Connection) -> Result<()> {
+    let schema_hash = compute_schema_hash(conn)?;
+
+    let stored: Option<String> = conn
+        .query_row(
+            "SELECT value FROM _schema_meta WHERE key = 'checksum'",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+
+    match stored {
+        Some(stored_hash) if stored_hash != schema_hash => {
+            Err(ClientError::DatabaseMigration(format!(
+                "Schema checksum mismatch! Stored: {}, Current: {}. Do not manually modify the database schema.",
+                &stored_hash[..16],
+                &schema_hash[..16]
+            )))
+        }
+        None => {
+            // 首次运行，记录 checksum
+            conn.execute(
+                "INSERT OR REPLACE INTO _schema_meta (key, value) VALUES ('checksum', ?1)",
+                [&schema_hash],
+            )
+            .map_err(|e| ClientError::DatabaseMigration(format!("Failed to store checksum: {e}")))?;
+            tracing::info!(checksum = %&schema_hash[..16], "首次记录 schema checksum");
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// 计算当前数据库 schema 的 SHA256 哈希
+fn compute_schema_hash(conn: &Connection) -> Result<String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT sql FROM sqlite_master
+             WHERE type IN ('table', 'index', 'trigger')
+             AND name NOT LIKE 'sqlite_%'
+             AND name NOT LIKE '_schema_meta%'
+             ORDER BY name, type",
+        )
+        .map_err(|e| ClientError::DatabaseMigration(format!("Failed to read schema: {e}")))?;
+
+    let schemas: Vec<String> = stmt
+        .query_map([], |row| row.get(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(ClientError::DatabaseQuery)?;
+
+    let concatenated = schemas.join("\n");
+    let mut hasher = Sha256::new();
+    hasher.update(concatenated.as_bytes());
+    let result = hasher.finalize();
+
+    Ok(format!("{:x}", result))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_migration_is_idempotent() {
+        let conn = Connection::open_in_memory().unwrap();
+        // 第一次运行
+        run(&conn).unwrap();
+        // 第二次运行（幂等）
+        run(&conn).unwrap();
+
+        // 验证三表存在
+        let table_count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table'
+                 AND name IN ('frps_profile', 'local_proxy', 'binding_rule')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(table_count, 3);
+    }
+
+    #[test]
+    fn test_schema_hash_detects_changes() {
+        let conn = Connection::open_in_memory().unwrap();
+        run(&conn).unwrap();
+
+        // 手动修改 schema（模拟未被追踪的修改）
+        conn.execute("CREATE TABLE IF NOT EXISTS hacker_table (id INTEGER)", [])
+            .unwrap();
+
+        // checksum 验证应该失败
+        let result = verify_checksum(&conn);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("checksum mismatch"));
+    }
+}

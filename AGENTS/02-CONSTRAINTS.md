@@ -360,9 +360,9 @@ SELECT name FROM sqlite_master WHERE type='table'
 
 **优先级**：P1
 
-**规定**：Permission 枚举在 core 统一定义（`crates/rustfrp-core/src/plugin/manifest.rs`），sdk 通过 `pub use rustfrp_core::plugin::manifest::Permission;` 重新导出。禁止在 sdk 中重复定义 Permission 枚举。
+**规定**：Permission 枚举在 common 统一定义（`crates/common/src/plugin/manifest.rs`），sdk 通过 `pub use rustfrp_common::plugin::manifest::Permission;` 重新导出。禁止在 sdk 中重复定义 Permission 枚举。
 
-**验证**：`grep -r 'pub enum Permission' crates/` 预期只匹配 core 中的定义。
+**验证**：`grep -r 'pub enum Permission' crates/` 预期只匹配 common 中的定义。
 
 ---
 

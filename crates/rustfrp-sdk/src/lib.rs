@@ -28,6 +28,8 @@ pub use context::PluginContext;
 pub use permissions::Permission;
 
 /// 插件错误类型
+///
+/// Each variant carries a unique error code and i18n key (CODE-003).
 #[derive(Debug, thiserror::Error)]
 pub enum PluginError {
     #[error("Permission denied: {0}")]
@@ -44,6 +46,30 @@ pub enum PluginError {
 
     #[error("Internal error: {0}")]
     Internal(String),
+}
+
+impl PluginError {
+    /// Return unique error code, format `SDK_{sequence}`
+    pub fn code(&self) -> &'static str {
+        match self {
+            PluginError::PermissionDenied(_) => "SDK_001",
+            PluginError::NotInitialized => "SDK_002",
+            PluginError::AlreadyStopped => "SDK_003",
+            PluginError::InvalidArgument(_) => "SDK_004",
+            PluginError::Internal(_) => "SDK_005",
+        }
+    }
+
+    /// Return i18n translation key for frontend
+    pub fn user_message_key(&self) -> &'static str {
+        match self {
+            PluginError::PermissionDenied(_) => "error.sdk.permission_denied",
+            PluginError::NotInitialized => "error.sdk.not_initialized",
+            PluginError::AlreadyStopped => "error.sdk.already_stopped",
+            PluginError::InvalidArgument(_) => "error.sdk.invalid_argument",
+            PluginError::Internal(_) => "error.sdk.internal",
+        }
+    }
 }
 
 /// 插件 Result 类型

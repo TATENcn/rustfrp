@@ -133,11 +133,11 @@ rustfrp-manager/
 
 ### 关键设计决策
 
-1. **`crates/` 而非顶层散放**：`rustfrp-core`、`rustfrp-sdk`、`rustfrp-monitor`、`rustfrp-frp` 四个独立 crate 放入 `crates/`，顶层 workspace 通过 `members` 统一管理。与 `plugins/` 区分——前者是核心基础设施，后者是可选功能。
+1. **`crates/` 而非顶层散放**：`common`（共享基础设施）、`client`（frpc 客户端）、`rustfrp-sdk`（插件 SDK）、`rustfrp-bin`（FRP 二进制管理）、`server/control`（控制服务器）、`server/agent`（frps-agent）六个 crate 放入 `crates/`，顶层 workspace 通过 `members` 统一管理。与 `plugins/` 区分——前者是基础设施，后者是可选功能。
 2. **`db/` 子模块按表拆分**：`profile.rs` / `proxy.rs` / `binding.rs` 各管一张表的 CRUD，`mod.rs` 做连接池和迁移，`migrate.rs` 独立管理迁移逻辑。比单个 `db.rs` 更好维护。
 3. **`tests/` 从 crate 内移出**：集成测试放在工作区顶层的 `tests/` 目录，避免与单元测试混淆，且能跨 crate 测试。
 4. **`benches/` 在根目录**：基准测试通常跨 crate（如「从 SQLite 读取 → 生成 TOML」涉及 db + config 模块），工作区根目录是 `criterion` 推荐的组织方式。
-5. **`rustfrp-frp` 独立 crate**：FRP 二进制下载/校验/解压从 core 拆出。无头模式（路由器）不编译此 crate，实现真正零网络依赖。
+5. **`rustfrp-bin` 独立 crate**：FRP 二进制下载/校验/解压独立管理。无头模式（路由器）不编译此 crate，实现真正零网络依赖。`common` 提供插件基础设施、信号处理、panic 钩子等真正客户端与服务端共享的能力。
 
 ## 二、核心模块代码模板
 

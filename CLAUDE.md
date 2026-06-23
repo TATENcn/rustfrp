@@ -17,11 +17,13 @@
 
 | 改动范围 | 必读文档 |
 |---|---|
-| `crates/rustfrp-core/` | `AGENTS/01-ARCHITECTURE.md` 第二章 + `AGENTS/02-CONSTRAINTS.md` 全部 P0 + `AGENTS/03-DEVELOPMENT.md` 第二节 |
+| `crates/client/` | `AGENTS/01-ARCHITECTURE.md` 第二章 + `AGENTS/02-CONSTRAINTS.md` 全部 P0 + `AGENTS/03-DEVELOPMENT.md` 第二节 |
+| `crates/common/` | `AGENTS/01-ARCHITECTURE.md` 第二章插件部分 + `AGENTS/02-CONSTRAINTS.md` PLG-001~005, PLG-007 + `AGENTS/03-DEVELOPMENT.md` 第三节 |
 | `plugins/` 或 `crates/rustfrp-sdk/` | `AGENTS/01-ARCHITECTURE.md` 第二章插件部分 + `AGENTS/02-CONSTRAINTS.md` PLG-001~005 + `AGENTS/03-DEVELOPMENT.md` 第三节 + `AGENTS/08-SECURITY.md` |
 | `plugins/gui/src/`（前端） | `AGENTS/07-UI-DESIGN.md` + `AGENTS/04-DEPENDENCIES.md` 第六章 + `AGENTS/03-DEVELOPMENT.md` 第十节 |
-| `crates/rustfrp-monitor/` | `AGENTS/01-ARCHITECTURE.md` 第四章 + `AGENTS/02-CONSTRAINTS.md` ARCH-007 + PERF-004 |
-| `crates/rustfrp-frp/` | `AGENTS/03-DEVELOPMENT.md` 第十二节 |
+| `crates/server/control/` | `AGENTS/01-ARCHITECTURE.md` 第四章 + `AGENTS/02-CONSTRAINTS.md` ARCH-007 + PERF-004 |
+| `crates/server/agent/` | `AGENTS/01-ARCHITECTURE.md` 第二、四章 + `AGENTS/02-CONSTRAINTS.md` ARCH-006~007 |
+| `crates/rustfrp-bin/` | `AGENTS/03-DEVELOPMENT.md` 第十二节 |
 | `AGENTS/`（文档目录） | `AGENTS/README.md` 文档修改权限表（宪法级文件不可直接修改） |
 | 跨目录大范围改动 | `AGENTS/README.md` 快速启动指南 → 按涉及模块查上表 |
 
@@ -37,9 +39,11 @@
 ## 开发命令速查
 
 ```
-just dev           # 启动 GUI 开发模式
-just test-fast     # 单元测试（每次 push 前跑）
-just test-all      # 全量测试（含集成测试）
-just lint          # fmt --check + clippy -- -D warnings
-just build-release # 发布构建
+just dev             # 启动 GUI 开发模式
+just dev-client      # 启动客户端开发模式
+just dev-control     # 启动控制服务器开发模式
+just test-fast       # 单元测试（每次 push 前跑）
+just test-all        # 全量测试（含集成测试）
+just lint            # fmt --check + clippy -- -D warnings
+just build-release   # 发布构建
 ```

@@ -1,10 +1,12 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/rustfrp-core",
-    "crates/rustfrp-frp",
+    "crates/common",
+    "crates/client",
+    "crates/rustfrp-bin",
     "crates/rustfrp-sdk",
-    "crates/rustfrp-monitor",
+    "crates/server/control",
+    "crates/server/agent",
 ]
 
 [workspace.package]

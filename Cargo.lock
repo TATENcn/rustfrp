@@ -1504,34 +1504,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "rustfrp-core"
+name = "rustfrp-agent"
 version = "0.1.0"
 dependencies = [
- "async-trait",
+ "anyhow",
  "chrono",
+ "clap",
  "dirs",
- "insta",
- "mimalloc",
  "nix",
- "pretty_assertions",
- "rstest",
- "rusqlite",
+ "rustfrp-common",
  "serde",
  "serde_json",
- "serial_test",
- "sha2",
  "tempfile",
  "thiserror 1.0.69",
- "tikv-jemallocator",
  "tokio",
- "tokio-test",
- "toml",
  "tracing",
- "uuid",
+ "tracing-subscriber",
 ]
 
 [[package]]
-name = "rustfrp-frp"
+name = "rustfrp-bin"
 version = "0.1.0"
 dependencies = [
  "dirs",
@@ -1547,7 +1539,56 @@ dependencies = [
 ]
 
 [[package]]
-name = "rustfrp-monitor"
+name = "rustfrp-client"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "clap",
+ "dirs",
+ "insta",
+ "mimalloc",
+ "nix",
+ "pretty_assertions",
+ "rstest",
+ "rusqlite",
+ "rustfrp-common",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha2",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tikv-jemallocator",
+ "tokio",
+ "tokio-test",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "rustfrp-common"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dirs",
+ "pretty_assertions",
+ "rstest",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "rustfrp-control"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1556,6 +1597,7 @@ dependencies = [
  "clap",
  "prometheus",
  "reqwest",
+ "rustfrp-common",
  "serde",
  "serde_json",
  "tempfile",
@@ -1571,7 +1613,7 @@ dependencies = [
 name = "rustfrp-sdk"
 version = "0.1.0"
 dependencies = [
- "rustfrp-core",
+ "rustfrp-common",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

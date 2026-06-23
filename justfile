@@ -10,9 +10,17 @@ default:
 dev:
     cd plugins/gui && npm run tauri dev
 
-# 启动监控服务器开发模式
-dev-monitor:
-    cargo run -p rustfrp-monitor
+# 启动客户端开发模式
+dev-client:
+    cargo run -p rustfrp-client
+
+# 启动控制服务器开发模式
+dev-control:
+    cargo run -p rustfrp-control
+
+# 启动 agent 开发模式
+dev-agent:
+    cargo run -p rustfrp-agent
 
 # === 测试 ===
 

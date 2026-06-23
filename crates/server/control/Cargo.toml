@@ -1,0 +1,33 @@
+[package]
+name = "rustfrp-control"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Control server — frps management, metrics collection, config template API"
+
+[dependencies]
+rustfrp-common = { path = "../../common" }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+chrono.workspace = true
+
+axum = "0.7"
+tower = { version = "0.4", features = ["util"] }
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+prometheus = "0.13"
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[[bin]]
+name = "rustfrp-control"
+path = "src/main.rs"

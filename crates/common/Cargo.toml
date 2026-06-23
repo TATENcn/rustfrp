@@ -1,0 +1,31 @@
+[package]
+name = "rustfrp-common"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "RustFRP shared infrastructure — plugin system, signal handling, error types"
+
+[dependencies]
+tokio = { workspace = true, features = ["process", "sync", "time"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber = { workspace = true }
+chrono.workspace = true
+
+# Zero network dependencies
+dirs = "5"
+
+[dev-dependencies]
+tempfile.workspace = true
+rstest.workspace = true
+serial_test.workspace = true
+pretty_assertions.workspace = true
+tokio-test.workspace = true
+
+[lib]
+name = "rustfrp_common"
+path = "src/lib.rs"
