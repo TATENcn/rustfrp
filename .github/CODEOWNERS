@@ -1,0 +1,13 @@
+# CODEOWNERS — 文档保护与代码审查规则
+#
+# 架构文档和约束（宪法级）→ 修改必须经仓库 owner 批准
+docs/01-ARCHITECTURE.md    @CN059
+docs/02-CONSTRAINTS.md     @CN059
+docs/08-SECURITY.md        @CN059
+
+# CI/CD 配置 → 流水线变更需 owner 确认
+.github/workflows/ci.yml       @CN059
+.github/workflows/release.yml  @CN059
+
+# 核心层代码 → 修改需 owner 审查
+crates/rustfrp-core/    @CN059
