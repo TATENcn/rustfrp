@@ -35,7 +35,7 @@ modification_policy: constitution
 | PLG-003 | 完整生命周期 | [→](#三插件约束) |
 | PLG-004 | 禁止 panic | [→](#三插件约束) |
 | PLG-005 | 资源限制 | [→](#三插件约束) |
-| CODE-006 | 核心层错误/校验信息全英文 | [→](#四代码规范) |
+| CODE-006 | 代码字符串全英文 | [→](#四代码规范) |
 | CODE-007 | 禁止 query_map 静默吞错 | [→](#四代码规范) |
 | CFG-001 | LocalProxy 支持 FRP 原生插件配置（plugin_config JSON blob） | [→](#五配置约束) |
 
@@ -421,19 +421,22 @@ SELECT name FROM sqlite_master WHERE type='table'
 
 ---
 
-### CODE-006：核心层错误和校验信息全英文
+### CODE-006：代码字符串全英文
 
 **优先级**：P0
 
 **规定**：
-- `CoreError::Display` 信息（`#[error("...")]`）必须为全英文，面向开发者/日志
+- 所有 Rust 代码中的字符串字面量必须为英文，包括但不限于：
+  - `CoreError::Display` 信息（`#[error("...")]`）
+  - `CoreError::ConfigValidation("...")` 和所有校验返回值
+  - 插件 manifest 校验的返回消息（`Vec<String>`）
+  - `tracing` 宏中的日志消息
+  - `anyhow::bail!` / `anyhow::Context` 等错误上下文
 - `user_message_key()` 使用英文 i18n key（面向翻译框架）
-- 所有 `CoreError::ConfigValidation("...")` 和校验返回值中的字符串必须为英文
-- 插件 manifest 校验的返回消息（`Vec<String>`）必须为英文
-- `tracing` 日志和文档注释可使用中文（面向中文运维/团队）
-- 测试数据中的非关键字符串（如 name 字段）可以使用中文
+- 仅注释（`//` / `///` / `/* */`）和文档可使用中文（面向中文团队协作）
+- 测试数据中的非关键字符串（如 `name` 字段）可以使用中文
 
-**验证**：`grep -rP '[\x{4e00}-\x{9fff}]' crates/rustfrp-core/src/ --include='*.rs' | grep -v '//' | grep -v '///'` 预期零输出（tracing 宏内的中文除外）。
+**验证**：`grep -rP '[\x{4e00}-\x{9fff}]' crates/ --include='*.rs' | grep -v '//' | grep -v '///' | grep -v '/\*'` 预期零输出（注释内的中文除外）。
 
 ---
 

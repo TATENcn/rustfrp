@@ -116,7 +116,7 @@ impl ProcessGuard {
         tracing::info!(
             pid,
             config = %config_path.display(),
-            "frpc 已启动"
+            "frpc has started"
         );
 
         *self.child.lock().await = Some(child);
@@ -167,7 +167,7 @@ impl ProcessGuard {
 
             // 子进程意外退出
             let code = exit_status.and_then(|s| s.code()).unwrap_or(-1);
-            tracing::warn!(exit_code = code, "frpc 意外退出");
+            tracing::warn!(exit_code = code, "frpc exited unexpectedly");
 
             let count = restart_count.load(Ordering::SeqCst);
             if count < MAX_RESTART_COUNT {
@@ -175,7 +175,7 @@ impl ProcessGuard {
                 tracing::info!(
                     attempt = count + 1,
                     max = MAX_RESTART_COUNT,
-                    "自动重启 frpc"
+                    "Automatically restart frpc"
                 );
 
                 // 等待 1 秒后重启
@@ -215,16 +215,16 @@ impl ProcessGuard {
                 {
                     Ok(new_child) => {
                         let pid = new_child.id().unwrap_or(0);
-                        tracing::info!(pid, "frpc 已重启");
+                        tracing::info!(pid, "frpc restarted");
                         *child_arc.lock().await = Some(new_child);
                     }
                     Err(e) => {
-                        tracing::error!(error = %e, "frpc 重启失败");
+                        tracing::error!(error = %e, "frpc restart failed");
                         running.store(false, Ordering::SeqCst);
                     }
                 }
             } else {
-                tracing::error!(count, "frpc 已达到最大重启次数，停止重启");
+                tracing::error!(count, "frpc reached max restart count, stopping restart");
                 running.store(false, Ordering::SeqCst);
             }
         });
@@ -252,7 +252,7 @@ impl ProcessGuard {
             kill(Pid::from_raw(pid as i32), Signal::SIGHUP)
                 .map_err(|e| ClientError::SignalError(format!("SIGHUP send failed: {e}")))?;
 
-            tracing::info!(pid, "已发送 SIGHUP（热重载）");
+            tracing::info!(pid, "SIGHUP sent (hot reload)");
         }
 
         #[cfg(not(unix))]
@@ -281,13 +281,13 @@ impl ProcessGuard {
         let mut child = match guard.take() {
             Some(c) => c,
             None => {
-                tracing::info!("frpc 未在运行，跳过退出");
+                tracing::info!("frpc is not running, skipping exit");
                 return Ok(());
             }
         };
 
         let pid = child.id().unwrap_or(0);
-        tracing::info!(pid, "正在停止 frpc");
+        tracing::info!(pid, "Stopping frpc");
 
         // 1. SIGTERM
         #[cfg(unix)]
@@ -302,11 +302,11 @@ impl ProcessGuard {
         {
             Ok(status) => {
                 let code = status.ok().and_then(|s| s.code()).unwrap_or(-1);
-                tracing::info!(pid, exit_code = code, "frpc 已正常退出");
+                tracing::info!(pid, exit_code = code, "frpc exited normally");
             }
             Err(_) => {
                 // 3. SIGKILL（超时未退出）
-                tracing::warn!(pid, "frpc 超时未退出，发送 SIGKILL");
+                tracing::warn!(pid, "frpc timeout, sending SIGKILL");
                 child.kill().await.ok();
                 child.wait().await.ok();
             }
@@ -337,7 +337,7 @@ impl Drop for ProcessGuard {
         if self.running.load(Ordering::SeqCst) {
             self.running.store(false, Ordering::SeqCst);
             // 注意：Drop 中不能调用 async，但 `kill_on_drop(true)` 会处理
-            tracing::info!("ProcessGuard dropped，子进程将自动清理");
+            tracing::info!("ProcessGuard dropped, child process will be automatically cleaned up");
         }
     }
 }

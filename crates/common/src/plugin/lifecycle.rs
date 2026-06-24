@@ -114,7 +114,7 @@ impl LifecycleManager {
             ));
         }
 
-        tracing::debug!(from = %current, to = %target, "插件生命周期状态变更");
+        tracing::debug!(from = %current, to = %target, "Plugin lifecycle state change");
         *current = target;
         Ok(())
     }

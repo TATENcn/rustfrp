@@ -134,7 +134,7 @@ impl Database {
                 id,
             });
         }
-        tracing::info!(profile_id = id, "Profile 已删除");
+        tracing::info!(profile_id = id, "Profile deleted");
         Ok(())
     }
 }

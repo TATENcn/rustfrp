@@ -147,7 +147,7 @@ impl Database {
                 id,
             });
         }
-        tracing::info!(proxy_id = id, "Proxy 已删除");
+        tracing::info!(proxy_id = id, "Proxy deleted");
         Ok(())
     }
 }

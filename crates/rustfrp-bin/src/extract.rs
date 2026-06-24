@@ -17,7 +17,7 @@ pub fn extract(archive_path: &Path, output_dir: &Path) -> Result<(), FrpError> {
     tracing::info!(
         archive = %archive_path.display(),
         output = %output_dir.display(),
-        "正在解压 FRP"
+        "Extracting FRP"
     );
 
     std::fs::create_dir_all(output_dir)?;
@@ -30,7 +30,7 @@ pub fn extract(archive_path: &Path, output_dir: &Path) -> Result<(), FrpError> {
         .unpack(output_dir)
         .map_err(|e| FrpError::Extract(format!("Extraction failed: {e}")))?;
 
-    tracing::info!(dir = %output_dir.display(), "FRP 解压完成");
+    tracing::info!(dir = %output_dir.display(), "FRP extraction completed");
 
     // 标记二进制文件为可执行（Unix）
     #[cfg(unix)]

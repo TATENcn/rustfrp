@@ -23,11 +23,11 @@ pub fn run(conn: &Connection) -> Result<()> {
     tracing::info!(
         current_version,
         latest_version = LATEST_VERSION,
-        "开始数据库迁移"
+        "Start database migration"
     );
 
     if current_version >= LATEST_VERSION {
-        tracing::info!("数据库已在最新版本，无需迁移");
+        tracing::info!("The database is already at the latest version, no migration needed.");
         verify_checksum(conn)?;
         return Ok(());
     }
@@ -38,7 +38,7 @@ pub fn run(conn: &Connection) -> Result<()> {
 
     verify_checksum(conn)?;
 
-    tracing::info!(from = current_version, to = LATEST_VERSION, "迁移完成");
+    tracing::info!(from = current_version, to = LATEST_VERSION, "Migration completed");
     Ok(())
 }
 
@@ -96,7 +96,7 @@ fn apply_migration(conn: &Connection, version: i32) -> Result<()> {
     tx.commit()
         .map_err(|e| ClientError::DatabaseMigration(format!("Migration commit failed: {e}")))?;
 
-    tracing::info!(version, "迁移已完成");
+    tracing::info!(version, "Migration finished");
     Ok(())
 }
 
@@ -193,7 +193,7 @@ fn migrate_v1(tx: &rusqlite::Transaction) -> Result<()> {
     )
     .ok();
 
-    tracing::info!("V1 迁移: 创建三张核心表 frps_profile / local_proxy / binding_rule");
+    tracing::info!("V1 Migration: Create three core tables frps_profile / local_proxy / binding_rule");
     Ok(())
 }
 
@@ -210,7 +210,7 @@ fn migrate_v2(tx: &rusqlite::Transaction) -> Result<()> {
         ClientError::DatabaseMigration(format!("Failed to add plugin_config column: {e}"))
     })?;
 
-    tracing::info!("V2 迁移: 添加 local_proxy.plugin_config 列");
+    tracing::info!("V2 Migration: Add local_proxy.plugin_config column");
     Ok(())
 }
 
@@ -244,7 +244,7 @@ pub fn verify_checksum(conn: &Connection) -> Result<()> {
                 [&schema_hash],
             )
             .map_err(|e| ClientError::DatabaseMigration(format!("Failed to store checksum: {e}")))?;
-            tracing::info!(checksum = %&schema_hash[..16], "首次记录 schema checksum");
+            tracing::info!(checksum = %&schema_hash[..16], "Schema checksum recorded");
             Ok(())
         }
         _ => Ok(()),

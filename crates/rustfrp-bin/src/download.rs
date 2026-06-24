@@ -28,11 +28,11 @@ pub async fn download(
 
     // 如果已存在，跳过下载
     if output_path.exists() {
-        tracing::info!(path = %output_path.display(), "FRP 已存在，跳过下载");
+        tracing::info!(path = %output_path.display(), "FRP already exists, skipping download");
         return Ok(output_path);
     }
 
-    tracing::info!(url = %url, "正在下载 FRP");
+    tracing::info!(url = %url, "Downloading FRP from {url}");
 
     std::fs::create_dir_all(download_dir)?;
 
@@ -69,7 +69,7 @@ pub async fn download(
     tracing::info!(
         path = %output_path.display(),
         size_mb = bytes.len() as f64 / 1_048_576.0,
-        "FRP 下载完成"
+        "FRP download completed"
     );
 
     Ok(output_path)

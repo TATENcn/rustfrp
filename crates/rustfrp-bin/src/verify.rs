@@ -35,7 +35,7 @@ pub async fn verify_sha256(file_path: &Path, expected_hash: &str) -> Result<(), 
     if actual_hash.eq_ignore_ascii_case(expected_hash) {
         tracing::info!(
             hash = %&actual_hash[..16],
-            "SHA256 校验通过"
+            "SHA256 verification passed"
         );
         Ok(())
     } else {

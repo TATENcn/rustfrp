@@ -194,7 +194,7 @@ impl Database {
                 id,
             });
         }
-        tracing::info!(binding_id = id, "Binding 已删除");
+        tracing::info!(binding_id = id, "Binding deleted");
         Ok(())
     }
 }

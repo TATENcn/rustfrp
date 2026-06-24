@@ -112,7 +112,7 @@ impl PluginManager {
 
             let manifest_path = dir.join("manifest.json");
             if !manifest_path.exists() {
-                tracing::debug!(dir = %dir.display(), "跳过非插件目录（无 manifest.json）");
+                tracing::debug!(dir = %dir.display(), "Skipping non-plugin directory (no manifest.json)");
                 continue;
             }
 
@@ -122,13 +122,13 @@ impl PluginManager {
                     tracing::warn!(
                         dir = %dir.display(),
                         error = %e,
-                        "插件加载失败，继续加载其他插件（插件隔离原则）"
+                        "Plugin load failed, continue loading other plugins (plugin isolation)"
                     );
                 }
             }
         }
 
-        tracing::info!(count = loaded.len(), "插件加载完成");
+        tracing::info!(count = loaded.len(), "Plugins loaded");
 
         Ok(loaded)
     }
@@ -182,7 +182,7 @@ impl PluginManager {
         tracing::info!(
             name = %name,
             plugin_type = ?instance.manifest.plugin_type,
-            "插件已加载"
+            "Plugin loaded successfully"
         );
 
         self.instances.write().await.insert(name.clone(), instance);
@@ -214,7 +214,7 @@ impl PluginManager {
         }
 
         instances.remove(name);
-        tracing::info!(name, "插件已卸载");
+        tracing::info!(name, "Plugin unloaded successfully");
         Ok(())
     }
 

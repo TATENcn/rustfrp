@@ -60,7 +60,7 @@ impl Database {
                 ClientError::DatabaseConnection(format!("Failed to enable foreign keys: {e}"))
             })?;
 
-        tracing::info!(path = %db_path.display(), "数据库已打开 (WAL)");
+        tracing::info!(path = %db_path.display(), "Database opened (WAL mode)");
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
