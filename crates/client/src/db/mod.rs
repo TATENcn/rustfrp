@@ -9,11 +9,13 @@
 //! - `profile.rs` — FrpsProfile CRUD
 //! - `proxy.rs` — LocalProxy CRUD
 //! - `binding.rs` — BindingRule CRUD
+//! - `visitor.rs` — LocalVisitor CRUD
 
 pub mod binding;
 pub mod migrate;
 pub mod profile;
 pub mod proxy;
+pub mod visitor;
 
 use crate::error::{ClientError, Result};
 use rusqlite::Connection;

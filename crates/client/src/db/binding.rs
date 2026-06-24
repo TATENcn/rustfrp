@@ -2,14 +2,28 @@
 //!
 //! 管理 Profile 与 Proxy 的多对多绑定关系。
 
-use crate::config::model::BindingRule;
+use crate::config::model::{BindingRule, ProxyType};
 use crate::db::Database;
 use crate::error::{ClientError, Result};
 use rusqlite::params;
 
 impl Database {
     /// 插入新的绑定规则
+    ///
+    /// Checks STCP/XTCP conflict: these proxy types cannot be bound to multiple profiles
+    /// (port conflict on local machine).
     pub async fn insert_binding(&self, binding: &BindingRule) -> Result<i64> {
+        // Check STCP/XTCP conflict
+        let proxy = self.get_proxy(binding.proxy_id).await?;
+        if matches!(proxy.proxy_type, ProxyType::Stcp | ProxyType::Xtcp) {
+            let existing = self.list_bindings_for_proxy(binding.proxy_id).await?;
+            if !existing.is_empty() {
+                return Err(ClientError::ConfigValidation(
+                    "STCP/XTCP proxy cannot be bound to multiple profiles (port conflict)".into(),
+                ));
+            }
+        }
+
         let conn = self.lock().await;
         conn.execute(
             "INSERT INTO binding_rule
@@ -261,10 +275,26 @@ mod tests {
             use_encryption: true,
             use_compression: true,
             bandwidth_limit: None,
+            bandwidth_limit_mode: None,
+            secret_key: None,
+            locations: None,
+            http_user: None,
+            http_password: None,
+            host_header_rewrite: None,
+            request_headers: None,
+            response_headers: None,
+            route_by_http_user: None,
+            annotations: None,
+            metadatas: None,
+            allow_users: None,
+            nat_traversal_disable_assisted_addrs: None,
+            proxy_protocol_version: None,
             health_check_type: None,
             health_check_timeout_s: 3,
             health_check_max_failed: 3,
             health_check_interval_s: 10,
+            health_check_path: None,
+            health_check_http_headers: None,
             plugin_config: None,
             created_at: String::new(),
             updated_at: String::new(),

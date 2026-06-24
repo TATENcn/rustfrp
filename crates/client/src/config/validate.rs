@@ -8,7 +8,7 @@
 //!
 //! 手写实现，不引入 validator/garde 等第三方校验框架（04-DEPENDENCIES.md）。
 
-use crate::config::model::{BindingRule, FrpsProfile, LocalProxy, ProxyType};
+use crate::config::model::{BindingRule, FrpsProfile, LocalProxy, LocalVisitor, ProxyType, VisitorType};
 use crate::error::{ClientError, Result};
 use std::net::IpAddr;
 
@@ -90,13 +90,38 @@ impl LocalProxy {
             }
         }
 
-        // HTTP/HTTPS 需要 custom_domains 或 subdomain
-        if matches!(self.proxy_type, ProxyType::Http | ProxyType::Https)
-            && self.custom_domains.is_none()
+        // HTTP/HTTPS/TCPMux needs custom_domains or subdomain
+        if matches!(
+            self.proxy_type,
+            ProxyType::Http | ProxyType::Https | ProxyType::Tcpmux
+        ) && self.custom_domains.is_none()
             && self.subdomain.is_none()
         {
             return Err(ClientError::ConfigValidation(
-                "HTTP/HTTPS proxy requires custom_domains or subdomain".into(),
+                "HTTP/HTTPS/TCPMux proxy requires custom_domains or subdomain".into(),
+            ));
+        }
+
+        // proxy_protocol_version must be "v1" or "v2" when set
+        if let Some(ref ver) = self.proxy_protocol_version {
+            if !["v1", "v2"].contains(&ver.as_str()) {
+                return Err(ClientError::ConfigValidation(format!(
+                    "proxy_protocol_version must be 'v1' or 'v2', got: {ver}"
+                )));
+            }
+        }
+
+        // STCP/XTCP/SUDP must have secret_key
+        if matches!(
+            self.proxy_type,
+            ProxyType::Stcp | ProxyType::Xtcp | ProxyType::Sudp
+        ) && self
+            .secret_key
+            .as_ref()
+            .map_or(true, |k| k.trim().is_empty())
+        {
+            return Err(ClientError::MissingRequiredField(
+                "secret_key is required for stcp/xtcp/sudp proxy types".into(),
             ));
         }
 
@@ -132,6 +157,45 @@ impl LocalProxy {
             }
         }
 
+        Ok(())
+    }
+}
+
+impl LocalVisitor {
+    /// Validate visitor configuration
+    pub fn validate(&self) -> Result<()> {
+        if self.name.trim().is_empty() {
+            return Err(ClientError::MissingRequiredField("visitor name".into()));
+        }
+        if self.server_name.trim().is_empty() {
+            return Err(ClientError::MissingRequiredField("server_name".into()));
+        }
+        // STCP/XTCP/SUDP must have secret_key
+        if self
+            .secret_key
+            .as_ref()
+            .map_or(true, |k| k.trim().is_empty())
+        {
+            return Err(ClientError::MissingRequiredField(
+                "secret_key is required for visitor".into(),
+            ));
+        }
+        // XTCP-specific field validations
+        if matches!(self.visitor_type, VisitorType::Xtcp) {
+            if let Some(ref proto) = self.xtcp_protocol {
+                if !["quic", "kcp"].contains(&proto.as_str()) {
+                    return Err(ClientError::ConfigValidation(
+                        "xtcp_protocol must be 'quic' or 'kcp'".into(),
+                    ));
+                }
+            }
+        }
+        // Profile ID must be valid
+        if self.profile_id <= 0 {
+            return Err(ClientError::ConfigValidation(
+                "profile_id must be > 0".into(),
+            ));
+        }
         Ok(())
     }
 }

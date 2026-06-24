@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
 /// 当前最新的 schema 版本
-const LATEST_VERSION: i32 = 2;
+const LATEST_VERSION: i32 = 9;
 
 /// 运行所有待执行的迁移
 ///
@@ -79,6 +79,13 @@ fn apply_migration(conn: &Connection, version: i32) -> Result<()> {
     match version {
         1 => migrate_v1(&tx)?,
         2 => migrate_v2(&tx)?,
+        3 => migrate_v3(&tx)?,
+        4 => migrate_v4(&tx)?,
+        5 => migrate_v5(&tx)?,
+        6 => migrate_v6(&tx)?,
+        7 => migrate_v7(&tx)?,
+        8 => migrate_v8(&tx)?,
+        9 => migrate_v9(&tx)?,
         _ => {
             return Err(ClientError::DatabaseMigration(format!(
                 "Unknown migration version: {version}"
@@ -211,6 +218,362 @@ fn migrate_v2(tx: &rusqlite::Transaction) -> Result<()> {
     })?;
 
     tracing::info!("V2 Migration: Add local_proxy.plugin_config column");
+    Ok(())
+}
+
+/// V3 迁移：添加 health_check_path / health_check_http_headers / bandwidth_limit_mode 列
+fn migrate_v3(tx: &rusqlite::Transaction) -> Result<()> {
+    tx.execute(
+        "ALTER TABLE local_proxy ADD COLUMN health_check_path TEXT DEFAULT NULL",
+        [],
+    )
+    .map_err(|e| {
+        if e.to_string().contains("duplicate column") {
+            tracing::info!("health_check_path column already exists, skipping");
+        }
+        ClientError::DatabaseMigration(format!(
+            "Failed to add health_check_path column: {e}"
+        ))
+    })?;
+
+    tx.execute(
+        "ALTER TABLE local_proxy ADD COLUMN health_check_http_headers TEXT DEFAULT NULL",
+        [],
+    )
+    .map_err(|e| {
+        if e.to_string().contains("duplicate column") {
+            tracing::info!("health_check_http_headers column already exists, skipping");
+        }
+        ClientError::DatabaseMigration(format!(
+            "Failed to add health_check_http_headers column: {e}"
+        ))
+    })?;
+
+    tx.execute(
+        "ALTER TABLE local_proxy ADD COLUMN bandwidth_limit_mode TEXT DEFAULT NULL",
+        [],
+    )
+    .map_err(|e| {
+        if e.to_string().contains("duplicate column") {
+            tracing::info!("bandwidth_limit_mode column already exists, skipping");
+        }
+        ClientError::DatabaseMigration(format!(
+            "Failed to add bandwidth_limit_mode column: {e}"
+        ))
+    })?;
+
+    tracing::info!(
+        "V3 Migration: Add local_proxy health_check_path / health_check_http_headers / bandwidth_limit_mode columns"
+    );
+    Ok(())
+}
+
+/// V4 迁移：添加 secret_key 列
+fn migrate_v4(tx: &rusqlite::Transaction) -> Result<()> {
+    tx.execute(
+        "ALTER TABLE local_proxy ADD COLUMN secret_key TEXT DEFAULT NULL",
+        [],
+    )
+    .map_err(|e| {
+        if e.to_string().contains("duplicate column") {
+            tracing::info!("secret_key column already exists, skipping");
+        }
+        ClientError::DatabaseMigration(format!("Failed to add secret_key column: {e}"))
+    })?;
+
+    tracing::info!("V4 Migration: Add local_proxy.secret_key column");
+    Ok(())
+}
+
+/// V5 迁移：创建 local_visitor 表
+fn migrate_v5(tx: &rusqlite::Transaction) -> Result<()> {
+    tx.execute(
+        "CREATE TABLE IF NOT EXISTS local_visitor (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            name                TEXT NOT NULL,
+            visitor_type        TEXT NOT NULL DEFAULT 'stcp',
+            server_name         TEXT NOT NULL,
+            server_user         TEXT DEFAULT NULL,
+            bind_addr           TEXT DEFAULT NULL,
+            bind_port           INTEGER NOT NULL DEFAULT -1,
+            secret_key          TEXT DEFAULT NULL,
+            enabled             INTEGER NOT NULL DEFAULT 1,
+            use_encryption      INTEGER NOT NULL DEFAULT 1,
+            use_compression     INTEGER NOT NULL DEFAULT 1,
+            xtcp_protocol       TEXT DEFAULT NULL,
+            keep_tunnel_open    INTEGER DEFAULT NULL,
+            max_retries_an_hour INTEGER DEFAULT NULL,
+            min_retry_interval  INTEGER DEFAULT NULL,
+            fallback_to         TEXT DEFAULT NULL,
+            fallback_timeout_ms INTEGER DEFAULT NULL,
+            plugin_config       TEXT DEFAULT NULL,
+            profile_id          INTEGER NOT NULL,
+            annotations         TEXT DEFAULT NULL,
+            created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (profile_id) REFERENCES frps_profile(id) ON DELETE CASCADE
+        )",
+        [],
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to create local_visitor table: {e}"))
+    })?;
+
+    tx.execute(
+        "CREATE INDEX IF NOT EXISTS idx_local_visitor_profile ON local_visitor(profile_id)",
+        [],
+    )
+    .ok();
+    tx.execute(
+        "CREATE INDEX IF NOT EXISTS idx_local_visitor_enabled ON local_visitor(enabled)",
+        [],
+    )
+    .ok();
+
+    tracing::info!("V5 Migration: Create local_visitor table");
+    Ok(())
+}
+
+/// V6 迁移：添加 HTTP 高级特性字段
+fn migrate_v6(tx: &rusqlite::Transaction) -> Result<()> {
+    for col in &[
+        "locations",
+        "http_user",
+        "http_password",
+        "host_header_rewrite",
+        "request_headers",
+        "response_headers",
+        "route_by_http_user",
+    ] {
+        let sql = format!("ALTER TABLE local_proxy ADD COLUMN {col} TEXT DEFAULT NULL");
+        tx.execute(&sql, [])
+            .map_err(|e| {
+                if e.to_string().contains("duplicate column") {
+                    tracing::info!("{col} column already exists, skipping");
+                }
+                ClientError::DatabaseMigration(format!("Failed to add {col} column: {e}"))
+            })?;
+    }
+
+    tracing::info!("V6 Migration: Add local_proxy HTTP advanced feature columns");
+    Ok(())
+}
+
+/// V7 迁移：添加传输层高级参数和 OIDC 认证字段
+fn migrate_v7(tx: &rusqlite::Transaction) -> Result<()> {
+    // Transport layer fields (integer type columns)
+    for col in &[
+        "dial_server_timeout",
+        "dial_server_keepalive",
+        "pool_count",
+        "tcp_mux",
+        "tcp_mux_keepalive_interval",
+    ] {
+        let sql = format!("ALTER TABLE frps_profile ADD COLUMN {col} INTEGER DEFAULT NULL");
+        tx.execute(&sql, [])
+            .map_err(|e| {
+                if e.to_string().contains("duplicate column") {
+                    tracing::info!("{col} column already exists, skipping");
+                }
+                ClientError::DatabaseMigration(format!("Failed to add {col} column: {e}"))
+            })?;
+    }
+
+    // Transport layer fields (text type columns)
+    for col in &["connect_server_local_ip", "proxy_url"] {
+        let sql = format!("ALTER TABLE frps_profile ADD COLUMN {col} TEXT DEFAULT NULL");
+        tx.execute(&sql, [])
+            .map_err(|e| {
+                if e.to_string().contains("duplicate column") {
+                    tracing::info!("{col} column already exists, skipping");
+                }
+                ClientError::DatabaseMigration(format!("Failed to add {col} column: {e}"))
+            })?;
+    }
+
+    // OIDC fields (text type columns)
+    for col in &[
+        "auth_method",
+        "oidc_client_id",
+        "oidc_client_secret",
+        "oidc_token_endpoint_url",
+        "oidc_audience",
+        "oidc_scope",
+        "oidc_additional_endpoint_params",
+    ] {
+        let sql = format!("ALTER TABLE frps_profile ADD COLUMN {col} TEXT DEFAULT NULL");
+        tx.execute(&sql, [])
+            .map_err(|e| {
+                if e.to_string().contains("duplicate column") {
+                    tracing::info!("{col} column already exists, skipping");
+                }
+                ClientError::DatabaseMigration(format!("Failed to add {col} column: {e}"))
+            })?;
+    }
+
+    tracing::info!("V7 Migration: Add transport layer and OIDC auth columns to frps_profile");
+    Ok(())
+}
+
+/// V8 迁移：添加 annotations/metadatas/user 以及 ClientCommonConfig 字段
+fn migrate_v8(tx: &rusqlite::Transaction) -> Result<()> {
+    // local_proxy: annotations + metadatas
+    tx.execute(
+        "ALTER TABLE local_proxy ADD COLUMN annotations TEXT DEFAULT NULL",
+        [],
+    )
+    .map_err(|e| {
+        if e.to_string().contains("duplicate column") {
+            tracing::info!("annotations column already exists, skipping");
+        }
+        ClientError::DatabaseMigration(format!("Failed to add annotations column: {e}"))
+    })?;
+    tx.execute(
+        "ALTER TABLE local_proxy ADD COLUMN metadatas TEXT DEFAULT NULL",
+        [],
+    )
+    .map_err(|e| {
+        if e.to_string().contains("duplicate column") {
+            tracing::info!("metadatas column already exists, skipping");
+        }
+        ClientError::DatabaseMigration(format!("Failed to add metadatas column: {e}"))
+    })?;
+
+    // frps_profile: quic config fields
+    for col in &[
+        "quic_keepalive_period",
+        "quic_max_idle_timeout",
+        "quic_max_incoming_streams",
+    ] {
+        let sql = format!("ALTER TABLE frps_profile ADD COLUMN {col} INTEGER DEFAULT NULL");
+        tx.execute(&sql, [])
+            .map_err(|e| {
+                if e.to_string().contains("duplicate column") {
+                    tracing::info!("{col} column already exists, skipping");
+                }
+                ClientError::DatabaseMigration(format!("Failed to add {col} column: {e}"))
+            })?;
+    }
+
+    // frps_profile: user + metadatas
+    tx.execute(
+        "ALTER TABLE frps_profile ADD COLUMN user TEXT DEFAULT NULL",
+        [],
+    )
+    .map_err(|e| {
+        if e.to_string().contains("duplicate column") {
+            tracing::info!("user column already exists, skipping");
+        }
+        ClientError::DatabaseMigration(format!("Failed to add user column: {e}"))
+    })?;
+    tx.execute(
+        "ALTER TABLE frps_profile ADD COLUMN metadatas TEXT DEFAULT NULL",
+        [],
+    )
+    .map_err(|e| {
+        if e.to_string().contains("duplicate column") {
+            tracing::info!("metadatas column already exists, skipping");
+        }
+        ClientError::DatabaseMigration(format!("Failed to add metadatas column: {e}"))
+    })?;
+
+    // frps_profile: remaining common config fields
+    for col in &[
+        "login_fail_exit",
+        "dns_server",
+        "nat_hole_stun_server",
+        "store_path",
+    ] {
+        let sql = format!("ALTER TABLE frps_profile ADD COLUMN {col} TEXT DEFAULT NULL");
+        tx.execute(&sql, [])
+            .map_err(|e| {
+                if e.to_string().contains("duplicate column") {
+                    tracing::info!("{col} column already exists, skipping");
+                }
+                ClientError::DatabaseMigration(format!("Failed to add {col} column: {e}"))
+            })?;
+    }
+
+    // udp_packet_size is integer
+    tx.execute(
+        "ALTER TABLE frps_profile ADD COLUMN udp_packet_size INTEGER DEFAULT NULL",
+        [],
+    )
+    .map_err(|e| {
+        if e.to_string().contains("duplicate column") {
+            tracing::info!("udp_packet_size column already exists, skipping");
+        }
+        ClientError::DatabaseMigration(format!(
+            "Failed to add udp_packet_size column: {e}"
+        ))
+    })?;
+
+    // start and includes are stored as comma-separated TEXT (Vec<String>)
+    tx.execute(
+        "ALTER TABLE frps_profile ADD COLUMN start TEXT DEFAULT NULL",
+        [],
+    )
+    .map_err(|e| {
+        if e.to_string().contains("duplicate column") {
+            tracing::info!("start column already exists, skipping");
+        }
+        ClientError::DatabaseMigration(format!("Failed to add start column: {e}"))
+    })?;
+    tx.execute(
+        "ALTER TABLE frps_profile ADD COLUMN includes TEXT DEFAULT NULL",
+        [],
+    )
+    .map_err(|e| {
+        if e.to_string().contains("duplicate column") {
+            tracing::info!("includes column already exists, skipping");
+        }
+        ClientError::DatabaseMigration(format!("Failed to add includes column: {e}"))
+    })?;
+
+    tracing::info!("V8 Migration: Add annotations/metadatas/user and common config fields");
+    Ok(())
+}
+
+/// V9 迁移：添加 allowUsers / natTraversal / proxyProtocolVersion / featureGates
+fn migrate_v9(tx: &rusqlite::Transaction) -> Result<()> {
+    // local_proxy: allow_users (comma-separated TEXT)
+    tx.execute(
+        "ALTER TABLE local_proxy ADD COLUMN allow_users TEXT DEFAULT NULL",
+        [],
+    )
+    .map_err(|e| {
+        if e.to_string().contains("duplicate column") { tracing::info!("allow_users already exists, skipping"); }
+        ClientError::DatabaseMigration(format!("Failed to add allow_users column: {e}"))
+    })?;
+    // local_proxy: nat_traversal_disable_assisted_addrs (bool as INTEGER)
+    tx.execute(
+        "ALTER TABLE local_proxy ADD COLUMN nat_traversal_disable_assisted_addrs INTEGER DEFAULT NULL",
+        [],
+    )
+    .map_err(|e| {
+        if e.to_string().contains("duplicate column") { tracing::info!("nat_traversal_disable_assisted_addrs already exists, skipping"); }
+        ClientError::DatabaseMigration(format!("Failed to add nat_traversal_disable_assisted_addrs column: {e}"))
+    })?;
+    // local_proxy: proxy_protocol_version
+    tx.execute(
+        "ALTER TABLE local_proxy ADD COLUMN proxy_protocol_version TEXT DEFAULT NULL",
+        [],
+    )
+    .map_err(|e| {
+        if e.to_string().contains("duplicate column") { tracing::info!("proxy_protocol_version already exists, skipping"); }
+        ClientError::DatabaseMigration(format!("Failed to add proxy_protocol_version column: {e}"))
+    })?;
+    // frps_profile: feature_gates (JSON TEXT)
+    tx.execute(
+        "ALTER TABLE frps_profile ADD COLUMN feature_gates TEXT DEFAULT NULL",
+        [],
+    )
+    .map_err(|e| {
+        if e.to_string().contains("duplicate column") { tracing::info!("feature_gates already exists, skipping"); }
+        ClientError::DatabaseMigration(format!("Failed to add feature_gates column: {e}"))
+    })?;
+
+    tracing::info!("V9 Migration: Add allowUsers / natTraversal / proxyProtocolVersion / featureGates columns");
     Ok(())
 }
 

@@ -3,7 +3,11 @@
 //! 从 SQLite 读取配置，按 Profile 分组生成独立的 frpc TOML 文件。
 //! 原子写入：tmp → rename（PERF-003）。
 
-use crate::config::model::{FrpcConfig, HealthCheckConfig, ProxyEntry, TlsConfig, TransportConfig};
+use crate::config::model::{
+    AuthConfig, FrpcConfig, HealthCheckConfig, LoadBalancerConfig, NatTraversalConfig,
+    OidcClientConfig, ProxyEntry, QuicConfig, TlsConfig, TransportConfig, VisitorEntry,
+    VisitorTransportConfig,
+};
 use crate::db::Database;
 use crate::error::{ClientError, Result};
 use std::collections::HashMap;
@@ -100,6 +104,16 @@ async fn build_frpc_config(
     let transport = Some(TransportConfig {
         protocol: profile.transport_protocol.clone(),
         tls,
+        heartbeat_interval: Some(profile.heartbeat_interval),
+        heartbeat_timeout: Some(profile.heartbeat_timeout),
+        dial_server_timeout: profile.dial_server_timeout,
+        dial_server_keepalive: profile.dial_server_keepalive,
+        connect_server_local_ip: profile.connect_server_local_ip.clone(),
+        proxy_url: profile.proxy_url.clone(),
+        pool_count: profile.pool_count,
+        tcp_mux: profile.tcp_mux,
+        tcp_mux_keepalive_interval: profile.tcp_mux_keepalive_interval,
+        quic: build_quic_config(profile),
     });
 
     let token = if profile.token.is_empty() {
@@ -112,7 +126,16 @@ async fn build_frpc_config(
     for binding in bindings {
         match db.get_proxy(binding.proxy_id).await {
             Ok(proxy) => {
-                let entries = build_proxy_entries(&proxy);
+                let mut entries = build_proxy_entries(&proxy);
+                // Inject load balancer group info from binding
+                if let Some(ref group_name) = binding.group_name {
+                    for entry in &mut entries {
+                        entry.load_balancer = Some(LoadBalancerConfig {
+                            group: group_name.clone(),
+                            group_key: binding.group_key.clone(),
+                        });
+                    }
+                }
                 for entry in &entries {
                     validate_proxy_entry(entry)?;
                 }
@@ -129,12 +152,82 @@ async fn build_frpc_config(
         }
     }
 
+    // Load visitors for this profile
+    let profile_id = profile.id.unwrap_or(0);
+    let visitors = match db.list_visitors_for_profile(profile_id).await {
+        Ok(visitors) => visitors
+            .iter()
+            .filter(|v| v.enabled)
+            .map(build_visitor_entry)
+            .collect(),
+        Err(e) => {
+            tracing::warn!(
+                profile_id,
+                error = %e,
+                "Failed to load visitors for profile, using empty list"
+            );
+            Vec::new()
+        }
+    };
+
+    // Build auth config (OIDC or token-based).
+    //
+    // FRP TOML supports two styles:
+    //   1. Top-level `token = "..."` (legacy, simple).
+    //   2. `[auth]` block with method="token" or method="oidc" (preferred).
+    //
+    // We emit the [auth] block when OIDC is configured (all fields present),
+    // or when token auth is needed. When [auth] is present, we omit the
+    // top-level token to avoid duplication (frpc handles both equivalently).
+    let auth = if profile.auth_method.as_deref() == Some("oidc") {
+        if let (Some(ref client_id), Some(ref client_secret), Some(ref token_url)) = (
+            &profile.oidc_client_id,
+            &profile.oidc_client_secret,
+            &profile.oidc_token_endpoint_url,
+        ) {
+            Some(AuthConfig {
+                method: Some("oidc".into()),
+                token: None,
+                oidc: Some(OidcClientConfig {
+                    client_id: client_id.clone(),
+                    client_secret: client_secret.clone(),
+                    audience: profile.oidc_audience.clone(),
+                    scope: profile.oidc_scope.clone(),
+                    token_endpoint_url: token_url.clone(),
+                }),
+            })
+        } else {
+            None
+        }
+    } else if token.is_some() {
+        Some(AuthConfig {
+            method: Some("token".into()),
+            token: token.clone(),
+            oidc: None,
+        })
+    } else {
+        None
+    };
+
+    // When using auth block, token goes inside auth, not at top level
+    let top_level_token = if auth.is_some() { None } else { token };
+
     Ok(FrpcConfig {
         server_addr: profile.server_addr.clone(),
         server_port: profile.server_port,
-        token,
+        user: profile.user.clone(),
+        token: top_level_token,
         transport,
+        auth,
+        login_fail_exit: profile.login_fail_exit,
+        metadatas: parse_json_field(&profile.name, "metadatas", &profile.metadatas),
+        dns_server: profile.dns_server.clone(),
+        nat_hole_stun_server: profile.nat_hole_stun_server.clone(),
+        udp_packet_size: profile.udp_packet_size,
+        includes: profile.includes.clone(),
+        feature_gates: parse_json_field(&profile.name, "feature_gates", &profile.feature_gates),
         proxies,
+        visitors,
     })
 }
 
@@ -148,6 +241,8 @@ fn build_proxy_entries(proxy: &crate::config::model::LocalProxy) -> Vec<ProxyEnt
             timeout_s: proxy.health_check_timeout_s,
             max_failed: proxy.health_check_max_failed,
             interval_s: proxy.health_check_interval_s,
+            path: proxy.health_check_path.clone(),
+            http_headers: proxy.health_check_http_headers.clone(),
         });
 
     let entry = ProxyEntry {
@@ -161,11 +256,75 @@ fn build_proxy_entries(proxy: &crate::config::model::LocalProxy) -> Vec<ProxyEnt
         use_encryption: proxy.use_encryption,
         use_compression: proxy.use_compression,
         bandwidth_limit: proxy.bandwidth_limit.clone(),
+        bandwidth_limit_mode: proxy.bandwidth_limit_mode.clone(),
+        secret_key: proxy.secret_key.clone(),
+        locations: proxy.locations.clone(),
+        http_user: proxy.http_user.clone(),
+        http_password: proxy.http_password.clone(),
+        host_header_rewrite: proxy.host_header_rewrite.clone(),
+        request_headers: parse_json_field(&proxy.name, "request_headers", &proxy.request_headers),
+        response_headers: parse_json_field(&proxy.name, "response_headers", &proxy.response_headers),
+        route_by_http_user: proxy.route_by_http_user.clone(),
+        annotations: parse_json_field(&proxy.name, "annotations", &proxy.annotations),
+        metadatas: parse_json_field(&proxy.name, "metadatas", &proxy.metadatas),
+        allow_users: proxy.allow_users.clone(),
+        nat_traversal: proxy
+            .nat_traversal_disable_assisted_addrs
+            .map(|disable| NatTraversalConfig {
+                disable_assisted_addrs: disable,
+            }),
+        proxy_protocol_version: proxy.proxy_protocol_version.clone(),
+        load_balancer: None, // populated by caller from binding
         plugin: proxy.plugin_config.clone(),
         health_check,
     };
 
     vec![entry]
+}
+
+/// Build QuicConfig from FrpsProfile, returning None if no QUIC fields are set.
+fn build_quic_config(profile: &crate::config::model::FrpsProfile) -> Option<QuicConfig> {
+    if profile.quic_keepalive_period.is_none()
+        && profile.quic_max_idle_timeout.is_none()
+        && profile.quic_max_incoming_streams.is_none()
+    {
+        return None;
+    }
+    Some(QuicConfig {
+        keepalive_period: profile.quic_keepalive_period,
+        max_idle_timeout: profile.quic_max_idle_timeout,
+        max_incoming_streams: profile.quic_max_incoming_streams,
+    })
+}
+
+/// Convert LocalVisitor to VisitorEntry for TOML output
+fn build_visitor_entry(visitor: &crate::config::model::LocalVisitor) -> VisitorEntry {
+    let transport = if visitor.use_encryption || visitor.use_compression {
+        Some(VisitorTransportConfig {
+            use_encryption: visitor.use_encryption,
+            use_compression: visitor.use_compression,
+        })
+    } else {
+        None
+    };
+
+    VisitorEntry {
+        name: visitor.name.clone(),
+        visitor_type: visitor.visitor_type.as_frp_str().to_string(),
+        server_name: visitor.server_name.clone(),
+        server_user: visitor.server_user.clone(),
+        bind_addr: visitor.bind_addr.clone(),
+        bind_port: visitor.bind_port,
+        secret_key: visitor.secret_key.clone(),
+        transport,
+        xtcp_protocol: visitor.xtcp_protocol.clone(),
+        keep_tunnel_open: visitor.keep_tunnel_open,
+        max_retries_an_hour: visitor.max_retries_an_hour,
+        min_retry_interval: visitor.min_retry_interval,
+        fallback_to: visitor.fallback_to.clone(),
+        fallback_timeout_ms: visitor.fallback_timeout_ms,
+        plugin: visitor.plugin_config.clone(),
+    }
 }
 
 /// 校验 ProxyEntry 基本合法性
@@ -176,7 +335,9 @@ fn validate_proxy_entry(entry: &ProxyEntry) -> Result<()> {
         ));
     }
 
-    if !["tcp", "udp", "http", "https", "stcp", "xtcp"].contains(&entry.proxy_type.as_str()) {
+    if !["tcp", "udp", "http", "https", "stcp", "xtcp", "tcpmux", "sudp"]
+        .contains(&entry.proxy_type.as_str())
+    {
         return Err(ClientError::ConfigValidation(format!(
             "Unsupported proxy type: {}",
             entry.proxy_type
@@ -204,6 +365,30 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
         .map_err(|e| ClientError::TomlWrite(format!("Atomic rename failed: {e}")))?;
 
     Ok(())
+}
+
+/// Parse a JSON field from an Option<String>, logging a warning on failure.
+///
+/// Many fields are stored as JSON strings in SQLite (annotations, metadatas,
+/// request_headers, response_headers, plugin_config). This helper parses them
+/// while surfacing malformed data instead of silently dropping it.
+fn parse_json_field(
+    entity_name: &str,
+    field_name: &str,
+    raw: &Option<String>,
+) -> Option<serde_json::Value> {
+    raw.as_ref().and_then(|s| {
+        serde_json::from_str(s)
+            .map_err(|e| {
+                tracing::warn!(
+                    entity = %entity_name,
+                    field = %field_name,
+                    error = %e,
+                    "Invalid JSON in field, value will be omitted from TOML"
+                );
+            })
+            .ok()
+    })
 }
 
 /// 文件名安全处理：替换空格、去除非安全字符
