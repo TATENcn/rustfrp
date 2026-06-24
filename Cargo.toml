@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/common",
     "crates/client",
+    "crates/rustfrp-daemon",
     "crates/rustfrp-bin",
     "crates/rustfrp-sdk",
     "crates/server/control",

@@ -18,6 +18,7 @@
 | 改动范围 | 必读文档 |
 |---|---|
 | `crates/client/` | `AGENTS/01-ARCHITECTURE.md` 第二章 + `AGENTS/02-CONSTRAINTS.md` 全部 P0 + `AGENTS/03-DEVELOPMENT.md` 第二节 |
+| `crates/rustfrp-daemon/` | `AGENTS/01-ARCHITECTURE.md` 第二章 + `AGENTS/02-CONSTRAINTS.md` ARCH-001 + `AGENTS/03-DEVELOPMENT.md` 第二节 2.7 + `AGENTS/08-SECURITY.md` HTTP API 行 |
 | `crates/common/` | `AGENTS/01-ARCHITECTURE.md` 第二章插件部分 + `AGENTS/02-CONSTRAINTS.md` PLG-001~005, PLG-007 + `AGENTS/03-DEVELOPMENT.md` 第三节 |
 | `plugins/` 或 `crates/rustfrp-sdk/` | `AGENTS/01-ARCHITECTURE.md` 第二章插件部分 + `AGENTS/02-CONSTRAINTS.md` PLG-001~005 + `AGENTS/03-DEVELOPMENT.md` 第三节 + `AGENTS/08-SECURITY.md` |
 | `plugins/gui/src/`（前端） | `AGENTS/07-UI-DESIGN.md` + `AGENTS/04-DEPENDENCIES.md` 第六章 + `AGENTS/03-DEVELOPMENT.md` 第十节 |
@@ -40,6 +41,7 @@
 
 ```
 just dev             # 启动 GUI 开发模式
+just dev-daemon      # 启动 daemon 开发模式（含 HTTP API）
 just dev-client      # 启动客户端开发模式
 just dev-control     # 启动控制服务器开发模式
 just test-fast       # 单元测试（每次 push 前跑）

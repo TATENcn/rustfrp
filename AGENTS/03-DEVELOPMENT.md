@@ -37,55 +37,75 @@ rustfrp-manager/
 │   ├── 07-UI-DESIGN.md           # 界面设计
 │   └── 08-SECURITY.md            # 安全设计
 ├── crates/
-│   ├── rustfrp-core/             # 微内核 crate
-│   │   ├── Cargo.toml
-│   │   └── src/
-│   │       ├── lib.rs            # 公开 API 入口（CoreFacade trait）
-│   │       ├── error.rs          # CoreError 定义 + 错误码 + i18n 键
-│   │       ├── panic_hook.rs     # Panic 钩子（崩溃现场收集）
-│   │       ├── db/
-│   │       │   ├── mod.rs        # 连接池 + 模块入口
-│   │       │   ├── migrate.rs    # SQLite 增量迁移 + checksum 校验
-│   │       │   ├── profile.rs    # FrpsProfile CRUD
-│   │       │   ├── proxy.rs      # LocalProxy CRUD
-│   │       │   └── binding.rs    # BindingRule CRUD
-│   │       ├── config/
-│   │       │   ├── mod.rs
-│   │       │   ├── model.rs      # 数据模型（1:1 映射 FRP TOML）
-│   │       │   ├── validate.rs   # Schema 校验（手写，无 validator 依赖）
-│   │       │   └── generator.rs  # SQLite → TOML 生成器 + 原子写入
-│   │       ├── process/
-│   │       │   ├── mod.rs
-│   │       │   ├── guard.rs      # ProcessGuard（启动/热重载/优雅退出）
-│   │       │   └── signal.rs     # 跨平台信号处理
-│   │       └── plugin/
-│   │           ├── mod.rs
-│   │           ├── manager.rs    # 插件管理器（load/unload/list）
-│   │           ├── manifest.rs   # manifest.json 解析与校验
-│   │           ├── sandbox.rs    # WASM Host Functions 白名单
-│   │           └── lifecycle.rs  # 插件生命周期状态机
-│   ├── rustfrp-sdk/              # 插件 SDK（给插件开发者用）
+│   ├── common/                     # 共享基础设施（信号处理、日志、插件基础设施、panic 钩子）
 │   │   ├── Cargo.toml
 │   │   └── src/
 │   │       ├── lib.rs
-│   │       ├── context.rs        # PluginContext
-│   │       ├── permissions.rs    # 权限枚举
-│   │       └── wit/              # WIT 接口定义
-│   ├── rustfrp-monitor/          # 中央监控服务器
+│   │       ├── signal.rs           # 跨平台信号处理（SignalHandler）
+│   │       ├── logging.rs          # 日志初始化
+│   │       ├── panic_hook.rs       # Panic 钩子
+│   │       ├── error.rs            # SharedError
+│   │       └── plugin/
+│   │           ├── mod.rs
+│   │           ├── manager.rs      # 插件管理器
+│   │           └── ...             # 插件基础设施
+│   ├── client/                     # 微内核库（纯库，零网络 I/O）
 │   │   ├── Cargo.toml
-│   │   ├── Dockerfile
 │   │   └── src/
-│   │       ├── main.rs
-│   │       ├── scraper.rs        # /metrics 拉取器（超时 + 熔断）
-│   │       ├── health.rs         # 节点健康状态机
-│   │       └── web.rs            # 监控 Web API（axum）
-│   └── rustfrp-frp/              # FRP 二进制管理（从 core 拆出）
-│       ├── Cargo.toml
-│       └── src/
-│           ├── lib.rs
-│           ├── download.rs       # 从 GitHub Releases 下载
-│           ├── verify.rs         # SHA256 校验
-│           └── extract.rs        # 解压 tar.gz
+│   │       ├── lib.rs              # 公开 API 入口（ClientFacade trait + ClientState）
+│   │       ├── core.rs             # ClientCore — 配置生成 + 进程管理 + 插件管理
+│   │       ├── error.rs            # ClientError 定义 + 错误码 + i18n 键
+│   │       ├── db/
+│   │       │   ├── mod.rs          # 连接池（Database struct）+ 模块入口
+│   │       │   ├── migrate.rs      # SQLite 增量迁移 + checksum 校验
+│   │       │   ├── profile.rs      # FrpsProfile CRUD
+│   │       │   ├── proxy.rs        # LocalProxy CRUD
+│   │       │   ├── binding.rs      # BindingRule CRUD
+│   │       │   └── visitor.rs      # LocalVisitor CRUD
+│   │       ├── config/
+│   │       │   ├── mod.rs
+│   │       │   ├── model.rs        # 数据模型（1:1 映射 FRP TOML）
+│   │       │   ├── validate.rs     # Schema 校验
+│   │       │   └── generator.rs    # SQLite → TOML 生成器 + 原子写入
+│   │       └── process/
+│   │           ├── mod.rs
+│   │           ├── guard.rs        # ProcessGuard（启动/热重载/优雅退出）
+│   │           └── manager.rs      # ProcessManager（进程编排）
+│   ├── rustfrp-daemon/             # NEW: HTTP API + daemon 二进制
+│   │   ├── Cargo.toml              # 依赖: axum + tower + rustfrp-client
+│   │   └── src/
+│   │       ├── main.rs             # CLI 解析 + 启动 daemon
+│   │       ├── lib.rs              # serve() 入口
+│   │       └── api/
+│   │           ├── mod.rs          # Router 组装 + AuthMiddleware trait + serve()
+│   │           ├── state.rs        # ApiState（注入 Database + ProcessManager）
+│   │           ├── response.rs     # ApiResponse<T> + 错误码映射
+│   │           ├── profiles.rs     # Profile CRUD handlers
+│   │           ├── proxies.rs      # Proxy CRUD handlers
+│   │           ├── bindings.rs     # Binding CRUD handlers
+│   │           ├── visitors.rs     # Visitor CRUD handlers
+│   │           └── system.rs       # Status / Reload / Health 端点
+│   ├── rustfrp-sdk/                # 插件 SDK（给插件开发者用）
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── context.rs          # PluginContext
+│   │       ├── permissions.rs      # 权限枚举
+│   │       └── wit/                # WIT 接口定义
+│   ├── rustfrp-bin/                # FRP 二进制管理
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── download.rs         # 从 GitHub Releases 下载
+│   │       ├── verify.rs           # SHA256 校验
+│   │       └── extract.rs          # 解压 tar.gz
+│   └── server/                     # 服务端
+│       ├── control/                # 控制服务器
+│       │   ├── Cargo.toml
+│       │   └── src/
+│       └── agent/                  # frps-agent
+│           ├── Cargo.toml
+│           └── src/
 ├── plugins/                      # 官方插件
 │   ├── gui/                      # Tauri GUI
 │   │   ├── src-tauri/
@@ -133,11 +153,11 @@ rustfrp-manager/
 
 ### 关键设计决策
 
-1. **`crates/` 而非顶层散放**：`common`（共享基础设施）、`client`（frpc 客户端）、`rustfrp-sdk`（插件 SDK）、`rustfrp-bin`（FRP 二进制管理）、`server/control`（控制服务器）、`server/agent`（frps-agent）六个 crate 放入 `crates/`，顶层 workspace 通过 `members` 统一管理。与 `plugins/` 区分——前者是基础设施，后者是可选功能。
-2. **`db/` 子模块按表拆分**：`profile.rs` / `proxy.rs` / `binding.rs` 各管一张表的 CRUD，`mod.rs` 做连接池和迁移，`migrate.rs` 独立管理迁移逻辑。比单个 `db.rs` 更好维护。
+1. **`client/` 是纯库，`rustfrp-daemon/` 是二进制 + HTTP API**：`client/` 不含 `main.rs`、不含网络 I/O 依赖。嵌入式目标可直接依赖 `rustfrp-client` 库。HTTP API 层在独立 `rustfrp-daemon/` crate，通过 `http-api` feature flag 控制。
+2. **`db/` 子模块按表拆分**：`profile.rs` / `proxy.rs` / `binding.rs` / `visitor.rs` 各管一张表的 CRUD，`mod.rs` 做连接池和迁移，`migrate.rs` 独立管理迁移逻辑。
 3. **`tests/` 从 crate 内移出**：集成测试放在工作区顶层的 `tests/` 目录，避免与单元测试混淆，且能跨 crate 测试。
-4. **`benches/` 在根目录**：基准测试通常跨 crate（如「从 SQLite 读取 → 生成 TOML」涉及 db + config 模块），工作区根目录是 `criterion` 推荐的组织方式。
-5. **`rustfrp-bin` 独立 crate**：FRP 二进制下载/校验/解压独立管理。无头模式（路由器）不编译此 crate，实现真正零网络依赖。`common` 提供插件基础设施、信号处理、panic 钩子等真正客户端与服务端共享的能力。
+4. **`rustfrp-bin` 独立 crate**：FRP 二进制下载/校验/解压独立管理。无头模式（路由器）不编译此 crate。
+5. **HTTP API 版本化**：所有 API 端点使用 `/api/v1/` 前缀，为未来 breaking changes 留空间。v1 和 v2 可并存。
 
 ## 二、核心模块代码模板
 
@@ -349,6 +369,110 @@ impl LocalProxy {
         Ok(())
     }
 }
+```
+
+### 2.7 HTTP API Handler 模板
+
+所有 handler 遵循统一模式：`axum extractor` → `Database 调用` → `ApiResponse` 返回。
+
+```rust
+// crates/rustfrp-daemon/src/api/profiles.rs
+
+use axum::extract::{Path, State};
+use axum::Json;
+use super::response::ApiResponse;
+use super::state::ApiState;
+
+/// GET /api/v1/profiles
+pub async fn list(
+    State(state): State<ApiState>,
+) -> Result<Json<ApiResponse<Vec<FrpsProfile>>>, (StatusCode, Json<ApiResponse<()>>)> {
+    let items = state.db.list_profiles().await
+        .map_err(|e| (status_code(&e), Json(ApiResponse {
+            success: false, data: None, count: None,
+            error: Some(ApiError::from_client_error(&e)),
+        })))?;
+
+    let count = items.len();
+    Ok(Json(ApiResponse::ok_list(items, count)))
+}
+
+/// GET /api/v1/profiles/{id}
+pub async fn get(
+    State(state): State<ApiState>,
+    Path(id): Path<i64>,
+) -> Result<Json<ApiResponse<FrpsProfile>>, (StatusCode, Json<ApiResponse<()>>)> {
+    let item = state.db.get_profile(id).await
+        .map_err(|e| (status_code(&e), Json(ApiResponse {
+            success: false, data: None, count: None,
+            error: Some(ApiError::from_client_error(&e)),
+        })))?;
+
+    Ok(Json(ApiResponse::ok(item)))
+}
+
+/// POST /api/v1/profiles — 创建时，服务端管理 created_at/updated_at
+pub async fn create(
+    State(state): State<ApiState>,
+    Json(mut profile): Json<FrpsProfile>,
+) -> Result<(StatusCode, Json<ApiResponse<FrpsProfile>>), (StatusCode, Json<ApiResponse<()>>)> {
+    let now = Utc::now().to_rfc3339();
+    profile.created_at = now.clone();
+    profile.updated_at = now;
+
+    let id = state.db.insert_profile(&profile).await
+        .map_err(|e| (status_code(&e), Json(ApiResponse {
+            success: false, data: None, count: None,
+            error: Some(ApiError::from_client_error(&e)),
+        })))?;
+
+    profile.id = Some(id);
+    Ok((StatusCode::CREATED, Json(ApiResponse::ok(profile))))
+}
+
+/// PUT /api/v1/profiles/{id} — 保留原始 created_at，更新 updated_at
+pub async fn update(
+    State(state): State<ApiState>,
+    Path(id): Path<i64>,
+    Json(mut profile): Json<FrpsProfile>,
+) -> Result<Json<ApiResponse<FrpsProfile>>, (StatusCode, Json<ApiResponse<()>>)> {
+    profile.id = Some(id);
+    profile.updated_at = Utc::now().to_rfc3339();
+    if let Ok(existing) = state.db.get_profile(id).await {
+        profile.created_at = existing.created_at;
+    }
+    // ... update + return ...
+}
+```
+
+**关键约定**：
+- 所有 handler 返回 `Result<Json<ApiResponse<T>>, (StatusCode, Json<ApiResponse<()>>)>` —— 200/201 走 `Ok`，4xx/5xx 走 `Err`
+- `created_at` / `updated_at` 由服务端管理，客户端传入值被 `#[serde(skip_deserializing)]` 忽略
+- `token` 字段在 API 响应中被 `#[serde(skip_serializing)]` 隐藏
+- 数据库访问直接 `await`（`tokio::sync::Mutex` 保护），不走 `spawn_blocking`
+- DELETE profile 时先 `process_manager.stop(profile_id)` 再删 DB 记录
+
+**鉴权中间件**（MVP 不启用）：
+```rust
+/// 鉴权中间件 trait（api/mod.rs）
+pub trait AuthMiddleware: Send + Sync + 'static {
+    fn authenticate(&self, request: &Request) -> Result<(), Response>;
+}
+
+/// MVP 实现：不鉴权
+pub struct NoAuth;
+impl AuthMiddleware for NoAuth {
+    fn authenticate(&self, _request: &Request) -> Result<(), Response> {
+        Ok(())
+    }
+}
+```
+
+**开发命令**：
+```
+cargo check -p rustfrp-daemon       # 检查 daemon crate 编译
+cargo run -p rustfrp-daemon         # 启动 daemon（默认 http-api feature）
+cargo run -p rustfrp-daemon --no-default-features  # 纯信号模式
 ```
 
 ## 三、插件开发模板

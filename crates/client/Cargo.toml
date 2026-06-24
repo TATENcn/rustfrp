@@ -49,7 +49,3 @@ insta.workspace = true
 [lib]
 name = "rustfrp_client"
 path = "src/lib.rs"
-
-[[bin]]
-name = "rustfrp-client"
-path = "src/main.rs"

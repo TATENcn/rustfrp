@@ -14,6 +14,10 @@ dev:
 dev-client:
     cargo run -p rustfrp-client
 
+# 启动 daemon 开发模式（含 HTTP API）
+dev-daemon:
+    cargo run -p rustfrp-daemon
+
 # 启动控制服务器开发模式
 dev-control:
     cargo run -p rustfrp-control

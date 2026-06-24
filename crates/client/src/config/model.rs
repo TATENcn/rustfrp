@@ -18,6 +18,8 @@ pub struct FrpsProfile {
     pub name: String,
     pub server_addr: String,
     pub server_port: u16,
+    /// Authentication token (redacted in API responses).
+    #[serde(skip_serializing)]
     pub token: String,
     pub tls_enable: bool,
     pub tls_cert_file: Option<String>,
@@ -80,7 +82,9 @@ pub struct FrpsProfile {
     pub store_path: Option<String>,
     /// Feature gates, used to enable or disable experimental features (map[string]bool as JSON).
     pub feature_gates: Option<String>,
+    #[serde(skip_deserializing)]
     pub created_at: String,
+    #[serde(skip_deserializing)]
     pub updated_at: String,
 }
 
@@ -304,7 +308,9 @@ pub struct LocalVisitor {
     pub profile_id: i64,
     /// Annotations (map[string]string as JSON string).
     pub annotations: Option<String>,
+    #[serde(skip_deserializing)]
     pub created_at: String,
+    #[serde(skip_deserializing)]
     pub updated_at: String,
 }
 
@@ -396,7 +402,9 @@ pub struct LocalProxy {
     /// None 表示不使用 FRP 原生插件。
     /// 如：`{ "type": "https2http", "pluginLocalAddr": "127.0.0.1:80" }`
     pub plugin_config: Option<serde_json::Value>,
+    #[serde(skip_deserializing)]
     pub created_at: String,
+    #[serde(skip_deserializing)]
     pub updated_at: String,
 }
 
@@ -458,7 +466,9 @@ pub struct BindingRule {
     pub priority: i32,
     pub group_name: Option<String>,
     pub group_key: Option<String>,
+    #[serde(skip_deserializing)]
     pub created_at: String,
+    #[serde(skip_deserializing)]
     pub updated_at: String,
 }
 

@@ -36,7 +36,9 @@ pub fn run(conn: &Connection) -> Result<()> {
         apply_migration(conn, version)?;
     }
 
-    verify_checksum(conn)?;
+    // After successful migration, update the checksum to match the new schema.
+    // Verification is only needed when NO migration ran (schema must be unchanged).
+    update_checksum(conn)?;
 
     tracing::info!(from = current_version, to = LATEST_VERSION, "Migration completed");
     Ok(())
@@ -612,6 +614,18 @@ pub fn verify_checksum(conn: &Connection) -> Result<()> {
         }
         _ => Ok(()),
     }
+}
+
+/// 更新存储的 schema checksum（迁移成功后调用）
+fn update_checksum(conn: &Connection) -> Result<()> {
+    let schema_hash = compute_schema_hash(conn)?;
+    conn.execute(
+        "INSERT OR REPLACE INTO _schema_meta (key, value) VALUES ('checksum', ?1)",
+        [&schema_hash],
+    )
+    .map_err(|e| ClientError::DatabaseMigration(format!("Failed to update checksum: {e}")))?;
+    tracing::info!(checksum = %&schema_hash[..16], "Schema checksum updated");
+    Ok(())
 }
 
 /// 计算当前数据库 schema 的 SHA256 哈希

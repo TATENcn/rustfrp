@@ -26,6 +26,7 @@ const FRPC_BINARY: &str = "frpc";
 ///
 /// 封装 frpc 子进程，提供启动、热重载、优雅退出能力。
 /// 支持崩溃自动重启（最多 3 次，ARCH-006）。
+#[derive(Clone)]
 pub struct ProcessGuard {
     /// 子进程（Mutex 保护，因为启动/停止都是 &self 的）
     child: Arc<Mutex<Option<Child>>>,
@@ -328,6 +329,11 @@ impl ProcessGuard {
     /// 获取重启次数
     pub fn restart_count(&self) -> u32 {
         self.restart_count.load(Ordering::SeqCst)
+    }
+
+    /// 获取配置文件路径
+    pub fn config_path(&self) -> &PathBuf {
+        &self.config_path
     }
 }
 

@@ -1,0 +1,45 @@
+[package]
+name = "rustfrp-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "RustFRP daemon — HTTP API server for frpc configuration management"
+
+[features]
+default = ["http-api"]
+http-api = ["dep:axum", "dep:tower", "dep:tower-http"]
+
+[dependencies]
+rustfrp-client = { path = "../client" }
+rustfrp-common = { path = "../common" }
+tokio = { workspace = true, features = ["process", "sync", "time", "signal", "net"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber = { workspace = true }
+uuid.workspace = true
+chrono.workspace = true
+anyhow.workspace = true
+clap = { workspace = true }
+
+# HTTP API (optional via feature flag)
+axum = { version = "0.7", optional = true, features = ["macros"] }
+tower = { version = "0.4", optional = true }
+tower-http = { version = "0.5", optional = true, features = ["cors", "trace"] }
+
+[[bin]]
+name = "rustfrp-daemon"
+path = "src/main.rs"
+
+[lib]
+name = "rustfrp_daemon"
+path = "src/lib.rs"
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio-test.workspace = true
+serde_json.workspace = true
+rusqlite.workspace = true

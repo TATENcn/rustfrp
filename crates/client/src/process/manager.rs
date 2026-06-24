@@ -19,13 +19,14 @@ pub struct ProcessInfo {
     pub pid: Option<u32>,
     pub running: bool,
     pub restart_count: u32,
+    pub config_path: String,
 }
 
 /// 进程管理器
 ///
 /// 持有所有 frpc ProcessGuard 实例的映射表。
 /// 一个 FrpsProfile → 一个 ProcessGuard → 一个 frpc 子进程。
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ProcessManager {
     /// Profile ID → ProcessGuard
     guards: Arc<RwLock<HashMap<i64, ProcessGuard>>>,
@@ -125,6 +126,7 @@ impl ProcessManager {
                 pid: guard.pid(),
                 running: guard.is_running(),
                 restart_count: guard.restart_count(),
+                config_path: guard.config_path().to_string_lossy().to_string(),
             })
             .collect()
     }

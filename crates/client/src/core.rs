@@ -8,9 +8,12 @@ use crate::db::{migrate, Database};
 use crate::error::{ClientError, Result};
 use crate::process::manager::ProcessManager;
 use crate::ClientFacade;
+use crate::ClientState;
 use rustfrp_common::plugin::manager::PluginManager;
 use rustfrp_common::signal::SignalHandler;
 use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 /// Concrete client core that owns all subsystems.
 pub struct ClientCore {
@@ -19,6 +22,7 @@ pub struct ClientCore {
     process_manager: ProcessManager,
     signal_handler: SignalHandler,
     config_dir: PathBuf,
+    state: Arc<RwLock<ClientState>>,
 }
 
 impl ClientCore {
@@ -44,6 +48,7 @@ impl ClientCore {
         let plugin_manager = PluginManager::with_default_dir();
         let signal_handler = SignalHandler::new();
         let process_manager = ProcessManager::new(config_dir.clone(), signal_handler.clone());
+        let state = Arc::new(RwLock::new(ClientState::Uninitialized));
 
         tracing::info!(
             db = %db_path,
@@ -57,7 +62,28 @@ impl ClientCore {
             process_manager,
             signal_handler,
             config_dir,
+            state,
         })
+    }
+
+    /// Access the database (for daemon crate / API handlers).
+    pub fn db(&self) -> &Database {
+        &self.db
+    }
+
+    /// Access the process manager (for daemon crate / API handlers).
+    pub fn process_manager(&self) -> &ProcessManager {
+        &self.process_manager
+    }
+
+    /// Access the configuration directory.
+    pub fn config_dir(&self) -> &PathBuf {
+        &self.config_dir
+    }
+
+    /// Access the current daemon state (for ApiState consumption).
+    pub fn state(&self) -> &Arc<RwLock<ClientState>> {
+        &self.state
     }
 
     /// Run the full client lifecycle:
@@ -68,6 +94,8 @@ impl ClientCore {
     /// 4. Wait for shutdown signal (SIGTERM / SIGINT / Ctrl+C)
     /// 5. Graceful shutdown (stop all frpc instances)
     pub async fn run(&self) -> Result<()> {
+        *self.state.write().await = ClientState::Ready;
+
         // 1. Load plugins
         let plugins = self.plugin_manager.load_all().await?;
         tracing::info!(count = plugins.len(), "plugins loaded");
@@ -104,6 +132,8 @@ impl ClientCore {
             tracing::info!(count = started, "frpc instances started");
         }
 
+        *self.state.write().await = ClientState::Running;
+
         // 4. Wait for shutdown signal
         tracing::info!("client running — press Ctrl+C to stop");
         while !self.signal_handler.is_shutdown_requested() {
@@ -112,7 +142,9 @@ impl ClientCore {
 
         // 5. Graceful shutdown
         tracing::info!("shutting down...");
+        *self.state.write().await = ClientState::Stopping;
         self.shutdown().await?;
+        *self.state.write().await = ClientState::Stopped;
         tracing::info!("client stopped");
 
         Ok(())

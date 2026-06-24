@@ -1,24 +1,15 @@
-//! RustFRP client binary entry point
+//! RustFRP daemon binary entry point
 //!
-//! The client wraps frpc with configuration management,
-//! TOML generation, and process supervision.
+//! The daemon wraps frpc with configuration management,
+//! TOML generation, process supervision, and (optionally) an HTTP API server.
 
 use clap::Parser;
 use rustfrp_client::core::ClientCore;
 use rustfrp_client::db::default_db_path;
 
-// PERF-001: use mimalloc on ARM (routers), jemalloc on x86_64 (servers).
-#[cfg(feature = "jemalloc")]
-#[global_allocator]
-static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
-
-#[cfg(feature = "mimalloc-dep")]
-#[global_allocator]
-static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
-/// RustFRP client — frpc wrapper
+/// RustFRP daemon — frpc wrapper with optional HTTP API
 #[derive(Parser, Debug)]
-#[command(name = "rustfrp-client", version, about)]
+#[command(name = "rustfrp-daemon", version, about)]
 struct Cli {
     /// Database path (default: ~/.rustfrp/config.db)
     #[arg(long)]
@@ -27,6 +18,11 @@ struct Cli {
     /// Config output directory for generated frpc TOML files
     #[arg(long, default_value = "~/.rustfrp/runtime")]
     config_dir: String,
+
+    /// HTTP API listen address (default: 127.0.0.1:10443)
+    #[cfg(feature = "http-api")]
+    #[arg(long, default_value = "127.0.0.1:10443")]
+    api_listen: String,
 }
 
 #[tokio::main]
@@ -48,11 +44,20 @@ async fn main() -> anyhow::Result<()> {
         version = env!("CARGO_PKG_VERSION"),
         db_path = %db_path,
         config_dir = %cli.config_dir,
-        "RustFRP client starting"
+        "RustFRP daemon starting"
     );
 
     let core = ClientCore::new(&db_path, &cli.config_dir).await?;
-    core.run().await?;
+
+    #[cfg(feature = "http-api")]
+    {
+        rustfrp_daemon::serve(core, &cli.api_listen).await?;
+    }
+
+    #[cfg(not(feature = "http-api"))]
+    {
+        core.run().await?;
+    }
 
     Ok(())
 }

@@ -75,7 +75,7 @@ mimalloc-dep = ["mimalloc"]
 
 ---
 
-## 二、核心层 `rustfrp-core` 依赖
+## 二、核心层 `rustfrp-client` 依赖
 
 **定位**：微内核。只含 SQLite CRUD + TOML 生成 + 进程管理 + 插件管理器。**不含网络 I/O、不含 UI、不含文件下载。**
 
@@ -97,11 +97,43 @@ dirs = "5"                    # 获取系统标准目录
 sha2 = "0.10"                 # SHA256（迁移 checksum 校验）
 ```
 
-**核心层绝不引入**：`reqwest`、`flate2`、`tar`、`anyhow`。FRP 二进制下载/解压由独立的 `rustfrp-frp` crate 负责。
+**核心层绝不引入**：`reqwest`、`flate2`、`tar`、`anyhow`、`axum`。HTTP API 由独立的 `rustfrp-daemon` crate 负责，FRP 二进制下载/解压由独立的 `rustfrp-bin` crate 负责。
 
 ---
 
-## 三、FRP 二进制管理层 `rustfrp-frp` 依赖
+## 三、Daemon 层 `rustfrp-daemon` 依赖
+
+**定位**：HTTP API 服务器 + daemon 二进制。依赖 `rustfrp-client` 库，添加 axum HTTP 层。
+仅当启用 `http-api` feature 时包含 HTTP 依赖；嵌入式目标不编译此 crate。
+
+```toml
+# crates/rustfrp-daemon/Cargo.toml
+[dependencies]
+rustfrp-client = { path = "../client" }
+rustfrp-common = { path = "../common" }
+tokio = { workspace = true, features = ["process", "sync", "time", "signal", "net"] }
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber = { workspace = true }
+uuid.workspace = true
+chrono.workspace = true
+clap = { workspace = true }
+
+# HTTP API (optional via feature flag)
+axum = { version = "0.7", optional = true }
+tower = { version = "0.4", optional = true }
+tower-http = { version = "0.5", optional = true, features = ["cors", "trace"] }
+```
+
+**安全限制**：
+- `tower-http` Trace 层明确禁用 body logging（避免 token 泄露到日志）
+- API 默认绑定 `127.0.0.1`，MVP 阶段不鉴权（`NoAuth`）
+- 鉴权中间件预留 `AuthMiddleware` trait 接口，未来可替换为 `BearerToken`
+
+---
+
+## 四、FRP 二进制管理层 `rustfrp-bin` 依赖
 
 **定位**：FRP 二进制文件的下载、校验、解压、版本检测。从核心层拆分出来，无头模式（路由器）不编译此 crate，实现真正零网络依赖。
 
@@ -122,7 +154,7 @@ reqwest = { version = "0.12", features = ["rustls-tls"], default-features = fals
 
 ---
 
-## 四、插件 SDK `rustfrp-sdk` 依赖
+## 五、插件 SDK `rustfrp-sdk` 依赖
 
 **定位**：提供给插件开发者使用的 SDK。包含 PluginContext、权限枚举、WIT 接口定义。
 
@@ -139,7 +171,7 @@ thiserror.workspace = true
 
 ---
 
-## 五、监控服务器 `rustfrp-monitor` 依赖
+## 六、监控服务器 `rustfrp-monitor` 依赖
 
 **定位**：Pull 模式指标采集 + Web 大盘。
 
@@ -162,7 +194,7 @@ prometheus = "0.13"           # Prometheus 客户端库
 
 ---
 
-## 六、GUI 插件 `plugins/gui` 依赖
+## 七、GUI 插件 `plugins/gui` 依赖
 
 ### 6.1 Rust 侧（Tauri）
 
@@ -211,7 +243,7 @@ ts-rs = "8"                   # Rust → TypeScript 类型导出
 
 ---
 
-## 七、开发/测试/构建依赖
+## 八、开发/测试/构建依赖
 
 ```toml
 [workspace.dev-dependencies]
@@ -230,7 +262,7 @@ loom = "0.7"                  # 并发 bug 检测（可选，编译慢）
 
 ---
 
-## 八、选型理由
+## 九、选型理由
 
 | 依赖 | 为什么选它 | 为什么没选替代品 |
 |---|---|---|
@@ -246,7 +278,7 @@ loom = "0.7"                  # 并发 bug 检测（可选，编译慢）
 
 ---
 
-## 九、版本锁定策略
+## 十、版本锁定策略
 
 | 策略项 | 决定 |
 |---|---|
@@ -261,7 +293,7 @@ loom = "0.7"                  # 并发 bug 检测（可选，编译慢）
 
 ---
 
-## 十、API 版本演进策略（WIT 接口）
+## 十一、API 版本演进策略（WIT 接口）
 
 插件 API（WIT 定义）发布后遵循语义化版本：
 

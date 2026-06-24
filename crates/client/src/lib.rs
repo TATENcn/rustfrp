@@ -45,7 +45,8 @@ pub trait ClientFacade: Send + Sync {
 }
 
 /// Client state
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ClientState {
     /// Not initialized
     Uninitialized,
