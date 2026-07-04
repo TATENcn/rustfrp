@@ -19,7 +19,7 @@ pub struct FrpsProfile {
     pub server_addr: String,
     pub server_port: u16,
     /// Authentication token (redacted in API responses).
-    #[serde(skip_serializing)]
+    #[serde(skip_serializing, default)]
     pub token: String,
     pub tls_enable: bool,
     pub tls_cert_file: Option<String>,
@@ -462,7 +462,8 @@ pub struct BindingRule {
     pub id: Option<i64>,
     pub profile_id: i64,
     pub proxy_id: i64,
-    pub enabled: bool,
+    pub enabled: bool,       // 配置是否已完成、允许被启动（资格）
+    pub running: bool,       // 代理是否正在 frpc 进程中运行（事实）
     pub priority: i32,
     pub group_name: Option<String>,
     pub group_key: Option<String>,
@@ -483,6 +484,29 @@ pub struct VisitorTransportConfig {
     pub use_encryption: bool,
     #[serde(rename = "useCompression")]
     pub use_compression: bool,
+}
+
+/// Proxy transport configuration.
+///
+/// Maps to `transport.*` dotted keys under each `[[proxies]]` entry.
+/// In FRP TOML format (v0.52+), useEncryption, useCompression,
+/// bandwidthLimit, bandwidthLimitMode, and proxyProtocolVersion
+/// are nested under the transport section rather than at proxy level.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProxyTransportConfig {
+    #[serde(rename = "useEncryption")]
+    pub use_encryption: bool,
+    #[serde(rename = "useCompression")]
+    pub use_compression: bool,
+    #[serde(rename = "bandwidthLimit", skip_serializing_if = "Option::is_none")]
+    pub bandwidth_limit: Option<String>,
+    #[serde(rename = "bandwidthLimitMode", skip_serializing_if = "Option::is_none")]
+    pub bandwidth_limit_mode: Option<String>,
+    #[serde(
+        rename = "proxyProtocolVersion",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub proxy_protocol_version: Option<String>,
 }
 
 /// Single visitor entry in TOML (maps to `[[visitors]]`).
@@ -670,14 +694,10 @@ pub struct ProxyEntry {
     pub custom_domains: Option<Vec<String>>,
     #[serde(rename = "subdomain", skip_serializing_if = "Option::is_none")]
     pub subdomain: Option<String>,
-    #[serde(rename = "useEncryption")]
-    pub use_encryption: bool,
-    #[serde(rename = "useCompression")]
-    pub use_compression: bool,
-    #[serde(rename = "bandwidthLimit", skip_serializing_if = "Option::is_none")]
-    pub bandwidth_limit: Option<String>,
-    #[serde(rename = "bandwidthLimitMode", skip_serializing_if = "Option::is_none")]
-    pub bandwidth_limit_mode: Option<String>,
+    /// Transport-level configuration (useEncryption, useCompression, bandwidth, etc.).
+    /// In FRP TOML format v0.52+, these fields are nested under `transport.*` keys.
+    #[serde(rename = "transport", skip_serializing_if = "Option::is_none")]
+    pub transport: Option<ProxyTransportConfig>,
     #[serde(rename = "secretKey", skip_serializing_if = "Option::is_none")]
     pub secret_key: Option<String>,
     #[serde(rename = "locations", skip_serializing_if = "Option::is_none")]
@@ -702,11 +722,6 @@ pub struct ProxyEntry {
     pub allow_users: Option<Vec<String>>,
     #[serde(rename = "natTraversal", skip_serializing_if = "Option::is_none")]
     pub nat_traversal: Option<NatTraversalConfig>,
-    #[serde(
-        rename = "proxyProtocolVersion",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub proxy_protocol_version: Option<String>,
     /// Load balancer config. Group proxies with same group name for round-robin.
     #[serde(rename = "loadBalancer", skip_serializing_if = "Option::is_none")]
     pub load_balancer: Option<LoadBalancerConfig>,

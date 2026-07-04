@@ -27,12 +27,13 @@ impl Database {
         let conn = self.lock().await;
         conn.execute(
             "INSERT INTO binding_rule
-                (profile_id, proxy_id, enabled, priority, group_name, group_key)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                (profile_id, proxy_id, enabled, running, priority, group_name, group_key)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 binding.profile_id,
                 binding.proxy_id,
                 binding.enabled as i32,
+                binding.running as i32,
                 binding.priority,
                 binding.group_name,
                 binding.group_key,
@@ -48,7 +49,7 @@ impl Database {
         let conn = self.lock().await;
         let mut stmt = conn
             .prepare(
-                "SELECT id, profile_id, proxy_id, enabled, priority,
+                "SELECT id, profile_id, proxy_id, enabled, running, priority,
                         group_name, group_key, created_at, updated_at
                  FROM binding_rule
                  ORDER BY priority",
@@ -67,7 +68,7 @@ impl Database {
     pub async fn get_binding(&self, id: i64) -> Result<BindingRule> {
         let conn = self.lock().await;
         conn.query_row(
-            "SELECT id, profile_id, proxy_id, enabled, priority,
+            "SELECT id, profile_id, proxy_id, enabled, running, priority,
                     group_name, group_key, created_at, updated_at
              FROM binding_rule WHERE id = ?1",
             params![id],
@@ -87,7 +88,7 @@ impl Database {
         let conn = self.lock().await;
         let mut stmt = conn
             .prepare(
-                "SELECT id, profile_id, proxy_id, enabled, priority,
+                "SELECT id, profile_id, proxy_id, enabled, running, priority,
                         group_name, group_key, created_at, updated_at
                  FROM binding_rule WHERE profile_id = ?1
                  ORDER BY priority",
@@ -107,7 +108,7 @@ impl Database {
         let conn = self.lock().await;
         let mut stmt = conn
             .prepare(
-                "SELECT id, profile_id, proxy_id, enabled, priority,
+                "SELECT id, profile_id, proxy_id, enabled, running, priority,
                         group_name, group_key, created_at, updated_at
                  FROM binding_rule WHERE proxy_id = ?1
                  ORDER BY priority",
@@ -122,14 +123,14 @@ impl Database {
         Ok(bindings)
     }
 
-    /// 获取所有启用的绑定（用于 TOML 生成）
+    /// 获取所有活跃的绑定（enabled=1 AND running=1，用于 TOML 生成）
     pub async fn list_active_bindings(&self) -> Result<Vec<BindingRule>> {
         let conn = self.lock().await;
         let mut stmt = conn
             .prepare(
-                "SELECT id, profile_id, proxy_id, enabled, priority,
+                "SELECT id, profile_id, proxy_id, enabled, running, priority,
                         group_name, group_key, created_at, updated_at
-                 FROM binding_rule WHERE enabled = 1
+                 FROM binding_rule WHERE enabled = 1 AND running = 1
                  ORDER BY priority",
             )
             .map_err(ClientError::DatabaseQuery)?;
@@ -142,6 +143,65 @@ impl Database {
         Ok(bindings)
     }
 
+    /// 获取所有标记为 running 的绑定（用于 daemon 重启恢复）
+    pub async fn list_running_bindings(&self) -> Result<Vec<BindingRule>> {
+        let conn = self.lock().await;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, profile_id, proxy_id, enabled, running, priority,
+                        group_name, group_key, created_at, updated_at
+                 FROM binding_rule WHERE running = 1
+                 ORDER BY priority",
+            )
+            .map_err(ClientError::DatabaseQuery)?;
+
+        let bindings: Vec<BindingRule> = stmt
+            .query_map([], row_to_binding)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(ClientError::DatabaseQuery)?;
+
+        Ok(bindings)
+    }
+
+    /// 获取某个 Profile 下所有 running 的绑定
+    pub async fn list_running_bindings_for_profile(&self, profile_id: i64) -> Result<Vec<BindingRule>> {
+        let conn = self.lock().await;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, profile_id, proxy_id, enabled, running, priority,
+                        group_name, group_key, created_at, updated_at
+                 FROM binding_rule WHERE profile_id = ?1 AND running = 1
+                 ORDER BY priority",
+            )
+            .map_err(ClientError::DatabaseQuery)?;
+
+        let bindings: Vec<BindingRule> = stmt
+            .query_map(params![profile_id], row_to_binding)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(ClientError::DatabaseQuery)?;
+
+        Ok(bindings)
+    }
+
+    /// 设置绑定的 running 状态
+    pub async fn set_running(&self, id: i64, running: bool) -> Result<()> {
+        let conn = self.lock().await;
+        let affected = conn
+            .execute(
+                "UPDATE binding_rule SET running = ?1, updated_at = datetime('now') WHERE id = ?2",
+                params![running as i32, id],
+            )
+            .map_err(ClientError::DatabaseQuery)?;
+
+        if affected == 0 {
+            return Err(ClientError::RecordNotFound {
+                table: "binding_rule".into(),
+                id,
+            });
+        }
+        Ok(())
+    }
+
     /// 更新绑定规则
     pub async fn update_binding(&self, binding: &BindingRule) -> Result<()> {
         let id = binding.id.ok_or_else(|| {
@@ -152,13 +212,14 @@ impl Database {
         let affected = conn
             .execute(
                 "UPDATE binding_rule SET
-                    profile_id = ?1, proxy_id = ?2, enabled = ?3, priority = ?4,
-                    group_name = ?5, group_key = ?6, updated_at = datetime('now')
-                 WHERE id = ?7",
+                    profile_id = ?1, proxy_id = ?2, enabled = ?3, running = ?4, priority = ?5,
+                    group_name = ?6, group_key = ?7, updated_at = datetime('now')
+                 WHERE id = ?8",
                 params![
                     binding.profile_id,
                     binding.proxy_id,
                     binding.enabled as i32,
+                    binding.running as i32,
                     binding.priority,
                     binding.group_name,
                     binding.group_key,
@@ -220,11 +281,12 @@ fn row_to_binding(row: &rusqlite::Row<'_>) -> rusqlite::Result<BindingRule> {
         profile_id: row.get(1)?,
         proxy_id: row.get(2)?,
         enabled: row.get::<_, i32>(3)? != 0,
-        priority: row.get(4)?,
-        group_name: row.get(5)?,
-        group_key: row.get(6)?,
-        created_at: row.get(7)?,
-        updated_at: row.get(8)?,
+        running: row.get::<_, i32>(4)? != 0,
+        priority: row.get(5)?,
+        group_name: row.get(6)?,
+        group_key: row.get(7)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
     })
 }
 
@@ -247,6 +309,7 @@ mod tests {
             profile_id,
             proxy_id,
             enabled: true,
+            running: false,
             priority: 0,
             group_name: None,
             group_key: None,

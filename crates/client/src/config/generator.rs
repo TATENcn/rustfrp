@@ -5,8 +5,8 @@
 
 use crate::config::model::{
     AuthConfig, FrpcConfig, HealthCheckConfig, LoadBalancerConfig, NatTraversalConfig,
-    OidcClientConfig, ProxyEntry, QuicConfig, TlsConfig, TransportConfig, VisitorEntry,
-    VisitorTransportConfig,
+    OidcClientConfig, ProxyEntry, ProxyTransportConfig, QuicConfig, TlsConfig, TransportConfig,
+    VisitorEntry, VisitorTransportConfig,
 };
 use crate::db::Database;
 use crate::error::{ClientError, Result};
@@ -82,6 +82,56 @@ pub async fn generate_all_frpc_tomls(db: &Database, output_dir: &Path) -> Result
     }
 
     Ok(generated)
+}
+
+/// 为单个 Profile 重新生成 frpc TOML 文件
+///
+/// 用于 Start/Stop 操作后的按需重生成，避免全量重建所有 profile 的 TOML。
+///
+/// # Returns
+///
+/// 生成的 TOML 文件路径。若该 profile 下无 running 的 binding，则删除已有的 TOML 文件并返回 None。
+pub async fn generate_frpc_toml_for_profile(
+    db: &Database,
+    profile_id: i64,
+    output_dir: &Path,
+) -> Result<Option<PathBuf>> {
+    let profile = db.get_profile(profile_id).await?;
+    let safe_name = sanitize_filename(&profile.name);
+    let output_path = output_dir.join(format!("{safe_name}.toml"));
+
+    let bindings = db.list_running_bindings_for_profile(profile_id).await?;
+
+    if bindings.is_empty() {
+        // 没有 running 的 binding → 删除 TOML 文件
+        if output_path.exists() {
+            std::fs::remove_file(&output_path)
+                .map_err(|e| ClientError::TomlWrite(format!("Failed to remove TOML: {e}")))?;
+            tracing::info!(
+                path = %output_path.display(),
+                profile = %profile.name,
+                "TOML removed (no running bindings)"
+            );
+        }
+        return Ok(None);
+    }
+
+    let binding_refs: Vec<&crate::config::model::BindingRule> = bindings.iter().collect();
+    let config = build_frpc_config(&profile, &binding_refs, db).await?;
+
+    let toml_str = toml::to_string_pretty(&config)
+        .map_err(|e| ClientError::TomlSerialization(e.to_string()))?;
+
+    atomic_write(&output_path, &toml_str)?;
+
+    tracing::info!(
+        path = %output_path.display(),
+        profile = %profile.name,
+        proxies = config.proxies.len(),
+        "frpc TOML regenerated for profile"
+    );
+
+    Ok(Some(output_path))
 }
 
 /// 为单个 Profile 构建 FrpcConfig
@@ -245,6 +295,24 @@ fn build_proxy_entries(proxy: &crate::config::model::LocalProxy) -> Vec<ProxyEnt
             http_headers: proxy.health_check_http_headers.clone(),
         });
 
+    // Build transport sub-config (FRP TOML v0.52+ uses `transport.*` dotted keys)
+    let transport = if proxy.use_encryption
+        || proxy.use_compression
+        || proxy.bandwidth_limit.is_some()
+        || proxy.bandwidth_limit_mode.is_some()
+        || proxy.proxy_protocol_version.is_some()
+    {
+        Some(ProxyTransportConfig {
+            use_encryption: proxy.use_encryption,
+            use_compression: proxy.use_compression,
+            bandwidth_limit: proxy.bandwidth_limit.clone(),
+            bandwidth_limit_mode: proxy.bandwidth_limit_mode.clone(),
+            proxy_protocol_version: proxy.proxy_protocol_version.clone(),
+        })
+    } else {
+        None
+    };
+
     let entry = ProxyEntry {
         name: proxy.name.clone(),
         proxy_type: proxy.proxy_type.to_string(),
@@ -253,10 +321,7 @@ fn build_proxy_entries(proxy: &crate::config::model::LocalProxy) -> Vec<ProxyEnt
         remote_port: proxy.remote_port,
         custom_domains: proxy.custom_domains.clone(),
         subdomain: proxy.subdomain.clone(),
-        use_encryption: proxy.use_encryption,
-        use_compression: proxy.use_compression,
-        bandwidth_limit: proxy.bandwidth_limit.clone(),
-        bandwidth_limit_mode: proxy.bandwidth_limit_mode.clone(),
+        transport,
         secret_key: proxy.secret_key.clone(),
         locations: proxy.locations.clone(),
         http_user: proxy.http_user.clone(),
@@ -273,7 +338,6 @@ fn build_proxy_entries(proxy: &crate::config::model::LocalProxy) -> Vec<ProxyEnt
             .map(|disable| NatTraversalConfig {
                 disable_assisted_addrs: disable,
             }),
-        proxy_protocol_version: proxy.proxy_protocol_version.clone(),
         load_balancer: None, // populated by caller from binding
         plugin: proxy.plugin_config.clone(),
         health_check,
@@ -454,6 +518,7 @@ mod tests {
             profile_id,
             proxy_id,
             enabled: true,
+            running: true,
             priority: 0,
             group_name: None,
             group_key: None,
@@ -519,6 +584,7 @@ mod tests {
                 profile_id: pid,
                 proxy_id,
                 enabled: true,
+                running: true,
                 priority: 0,
                 group_name: None,
                 group_key: None,

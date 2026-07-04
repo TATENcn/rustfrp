@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
 /// 当前最新的 schema 版本
-const LATEST_VERSION: i32 = 9;
+const LATEST_VERSION: i32 = 10;
 
 /// 运行所有待执行的迁移
 ///
@@ -88,6 +88,7 @@ fn apply_migration(conn: &Connection, version: i32) -> Result<()> {
         7 => migrate_v7(&tx)?,
         8 => migrate_v8(&tx)?,
         9 => migrate_v9(&tx)?,
+        10 => migrate_v10(&tx)?,
         _ => {
             return Err(ClientError::DatabaseMigration(format!(
                 "Unknown migration version: {version}"
@@ -576,6 +577,29 @@ fn migrate_v9(tx: &rusqlite::Transaction) -> Result<()> {
     })?;
 
     tracing::info!("V9 Migration: Add allowUsers / natTraversal / proxyProtocolVersion / featureGates columns");
+    Ok(())
+}
+
+/// V10 迁移：为 binding_rule 添加 running 列
+///
+/// `running` 与 `enabled` 正交：
+/// - `enabled` = 配置已完成，允许被启动（资格）
+/// - `running` = 代理正在 frpc 进程中运行（事实）
+///
+/// 存量数据：已有 binding 默认 running=0（Standby 状态），需用户手动启动。
+fn migrate_v10(tx: &rusqlite::Transaction) -> Result<()> {
+    tx.execute(
+        "ALTER TABLE binding_rule ADD COLUMN running INTEGER NOT NULL DEFAULT 0",
+        [],
+    )
+    .map_err(|e| {
+        if e.to_string().contains("duplicate column") {
+            tracing::info!("running column already exists, skipping");
+        }
+        ClientError::DatabaseMigration(format!("Failed to add running column: {e}"))
+    })?;
+
+    tracing::info!("V10 Migration: Add binding_rule.running column");
     Ok(())
 }
 

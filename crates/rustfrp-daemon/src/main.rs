@@ -19,10 +19,15 @@ struct Cli {
     #[arg(long, default_value = "~/.rustfrp/runtime")]
     config_dir: String,
 
-    /// HTTP API listen address (default: 127.0.0.1:10443)
+    /// HTTP API listen address (default: 127.0.0.1:7900)
     #[cfg(feature = "http-api")]
-    #[arg(long, default_value = "127.0.0.1:10443")]
+    #[arg(long, default_value = "127.0.0.1:7900")]
     api_listen: String,
+
+    /// API token for bearer authentication (optional; without it, auth is disabled)
+    #[cfg(feature = "http-api")]
+    #[arg(long)]
+    api_token: Option<String>,
 }
 
 #[tokio::main]
@@ -51,7 +56,14 @@ async fn main() -> anyhow::Result<()> {
 
     #[cfg(feature = "http-api")]
     {
-        rustfrp_daemon::serve(core, &cli.api_listen).await?;
+        match cli.api_token {
+            Some(token) => {
+                rustfrp_daemon::serve_with_auth(core, &cli.api_listen, &token).await?;
+            }
+            None => {
+                rustfrp_daemon::serve(core, &cli.api_listen).await?;
+            }
+        }
     }
 
     #[cfg(not(feature = "http-api"))]

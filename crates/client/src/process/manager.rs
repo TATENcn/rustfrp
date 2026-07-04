@@ -11,6 +11,34 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+/// 进程操作结果（start/stop/reload 等动作的结果）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcessAction {
+    /// 启动了新的 frpc 进程
+    Started,
+    /// 对已运行的 frpc 发送了 SIGHUP 热重载
+    Reloaded,
+    /// frpc 进程已停止
+    Stopped,
+    /// 幂等：已经在运行
+    AlreadyRunning,
+    /// 幂等：本来就没在运行
+    NotRunning,
+}
+
+impl ProcessAction {
+    /// 返回 API 响应中 `process_status` 字段的字符串值
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ProcessAction::Started => "started",
+            ProcessAction::Reloaded => "reloaded",
+            ProcessAction::Stopped => "stopped",
+            ProcessAction::AlreadyRunning => "already_running",
+            ProcessAction::NotRunning => "not_running",
+        }
+    }
+}
+
 /// 进程运行信息（外部查询用）
 #[derive(Debug, Clone)]
 pub struct ProcessInfo {
@@ -69,7 +97,7 @@ impl ProcessManager {
         // 若已存在，先停止
         self.stop(profile_id).await?;
 
-        let guard = ProcessGuard::new(toml_path.clone(), self.signal_handler.clone());
+        let guard = ProcessGuard::new(toml_path.clone(), self.signal_handler.clone(), profile_name.to_string());
         guard.start().await?;
 
         let pid = guard.pid();
@@ -86,6 +114,35 @@ impl ProcessManager {
             tracing::info!(profile_id, "frpc instance stopped");
         }
         Ok(())
+    }
+
+    /// 确保指定 Profile 的 frpc 在运行。
+    ///
+    /// - 未运行 → 启动新进程，返回 `ProcessAction::Started`
+    /// - 已运行 → 热重载（SIGHUP），返回 `ProcessAction::Reloaded`
+    pub async fn ensure_running(&self, profile_id: i64, profile_name: &str) -> Result<ProcessAction> {
+        if self.is_running(profile_id).await {
+            self.reload(profile_id).await?;
+            Ok(ProcessAction::Reloaded)
+        } else {
+            self.start(profile_id, profile_name).await?;
+            Ok(ProcessAction::Started)
+        }
+    }
+
+    /// 根据是否有其他运行中的 binding 来决定停止还是热重载。
+    ///
+    /// - `has_other_running`: 该 profile 下是否还有其它 `running=true` 的 binding
+    ///   - `true`  → 热重载（TOML 排除已停止的 proxy），返回 `ProcessAction::Reloaded`
+    ///   - `false` → 停止 frpc 进程，返回 `ProcessAction::Stopped`
+    pub async fn stop_if_idle(&self, profile_id: i64, has_other_running: bool) -> Result<ProcessAction> {
+        if has_other_running {
+            self.reload(profile_id).await?;
+            Ok(ProcessAction::Reloaded)
+        } else {
+            self.stop(profile_id).await?;
+            Ok(ProcessAction::Stopped)
+        }
     }
 
     /// 热重载指定 Profile 的 frpc 实例
@@ -158,6 +215,32 @@ impl ProcessManager {
             .values()
             .filter(|g| g.is_running())
             .count()
+    }
+
+    /// 获取指定 Profile 的 stdout 日志文件路径
+    pub async fn get_stdout_log_path(&self, profile_id: i64) -> Option<PathBuf> {
+        self.guards
+            .read()
+            .await
+            .get(&profile_id)
+            .map(|g| g.stdout_log_path())
+    }
+
+    /// 获取指定 Profile 的 stderr 日志文件路径
+    pub async fn get_stderr_log_path(&self, profile_id: i64) -> Option<PathBuf> {
+        self.guards
+            .read()
+            .await
+            .get(&profile_id)
+            .map(|g| g.stderr_log_path())
+    }
+
+    /// 获取日志目录路径
+    pub fn log_dir(&self) -> PathBuf {
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".rustfrp")
+            .join("logs")
     }
 }
 

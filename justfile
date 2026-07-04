@@ -56,6 +56,27 @@ audit:
     cargo audit
     cargo deny check
 
+# === WebUI 前端 ===
+
+# Install WebUI frontend dependencies (Bun native TypeScript, 3-5x faster than npm)
+setup-webui:
+    cd plugins/webui && bun install
+
+# Start WebUI dev mode (requires dev-daemon in another terminal)
+dev-webui:
+    cd plugins/webui && bun run dev
+
+# Build WebUI + daemon binary (type-check + build + verify)
+build-release-webui:
+    cd plugins/webui && bun install --frozen-lockfile && bun x tsc --noEmit && bun run build
+    @test -f plugins/webui/dist/index.html || (echo "ERROR: webui/dist/index.html not found!" && exit 1)
+    cargo build -p rustfrp-daemon --release
+    @echo "Binary: target/release/rustfrp-daemon"
+
+# i18n translation key consistency check (Bun native TS execution, no pre-compilation)
+check-i18n:
+    cd plugins/webui && bun scripts/check-i18n-keys.ts
+
 # === 构建 ===
 
 # 发布构建

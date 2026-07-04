@@ -8,4 +8,7 @@
 pub mod api;
 
 #[cfg(feature = "http-api")]
-pub use api::serve;
+pub mod web;
+
+#[cfg(feature = "http-api")]
+pub use api::{serve, serve_with_auth};
