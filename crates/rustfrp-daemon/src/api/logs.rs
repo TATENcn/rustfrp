@@ -130,7 +130,10 @@ pub async fn get_logs(
             } else if stderr_content.is_empty() {
                 stdout_content
             } else {
-                format!("--- STDOUT ---\n{}\n--- STDERR ---\n{}", stdout_content, stderr_content)
+                format!(
+                    "--- STDOUT ---\n{}\n--- STDERR ---\n{}",
+                    stdout_content, stderr_content
+                )
             }
         }
         _ => String::new(),
@@ -140,14 +143,10 @@ pub async fn get_logs(
     let exists = match log_type.as_str() {
         "stdout" => stdout_path.as_ref().map(|p| p.exists()).unwrap_or(false),
         "stderr" => stderr_path.as_ref().map(|p| p.exists()).unwrap_or(false),
-        "combined" => stdout_path
-            .as_ref()
-            .map(|p| p.exists())
-            .unwrap_or(false)
-            || stderr_path
-                .as_ref()
-                .map(|p| p.exists())
-                .unwrap_or(false),
+        "combined" => {
+            stdout_path.as_ref().map(|p| p.exists()).unwrap_or(false)
+                || stderr_path.as_ref().map(|p| p.exists()).unwrap_or(false)
+        }
         _ => false,
     };
 
@@ -179,10 +178,7 @@ fn read_log_tail(path: &std::path::Path, lines: u32) -> String {
     let reader = BufReader::new(file);
 
     // Read all lines and take the last N
-    let all_lines: Vec<String> = reader
-        .lines()
-        .map_while(Result::ok)
-        .collect();
+    let all_lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
 
     let start = if all_lines.len() > lines as usize {
         all_lines.len() - lines as usize

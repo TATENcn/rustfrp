@@ -19,8 +19,8 @@ pub mod visitors;
 use axum::extract::Request;
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::Router;
 use axum::Json;
+use axum::Router;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
@@ -185,8 +185,7 @@ pub fn create_router(state: ApiState, _auth: impl AuthMiddleware) -> Router {
         .with_state(state);
 
     // Group 2: Static assets (`/assets/*`)
-    let static_routes = Router::new()
-        .route("/assets/*path", axum::routing::get(web::serve_asset));
+    let static_routes = Router::new().route("/assets/*path", axum::routing::get(web::serve_asset));
 
     // Group 3: Combine API + static + SPA fallback
     //
@@ -198,15 +197,11 @@ pub fn create_router(state: ApiState, _auth: impl AuthMiddleware) -> Router {
         .fallback(web::serve_index)
         .layer(
             TraceLayer::new_for_http()
-                .on_request(
-                    |_request: &axum::http::Request<_>, _span: &tracing::Span| {
-                        tracing::debug!("HTTP request");
-                    },
-                )
+                .on_request(|_request: &axum::http::Request<_>, _span: &tracing::Span| {
+                    tracing::debug!("HTTP request");
+                })
                 .on_response(
-                    |response: &axum::http::Response<_>,
-                     _latency: _,
-                     _span: &tracing::Span| {
+                    |response: &axum::http::Response<_>, _latency: _, _span: &tracing::Span| {
                         tracing::debug!(status = %response.status(), "HTTP response");
                     },
                 ),

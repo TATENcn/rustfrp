@@ -462,8 +462,8 @@ pub struct BindingRule {
     pub id: Option<i64>,
     pub profile_id: i64,
     pub proxy_id: i64,
-    pub enabled: bool,       // 配置是否已完成、允许被启动（资格）
-    pub running: bool,       // 代理是否正在 frpc 进程中运行（事实）
+    pub enabled: bool, // 配置是否已完成、允许被启动（资格）
+    pub running: bool, // 代理是否正在 frpc 进程中运行（事实）
     pub priority: i32,
     pub group_name: Option<String>,
     pub group_key: Option<String>,
@@ -622,10 +622,7 @@ pub struct TransportConfig {
     pub heartbeat_interval: Option<i64>,
     #[serde(rename = "heartbeatTimeout", skip_serializing_if = "Option::is_none")]
     pub heartbeat_timeout: Option<i64>,
-    #[serde(
-        rename = "dialServerTimeout",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "dialServerTimeout", skip_serializing_if = "Option::is_none")]
     pub dial_server_timeout: Option<i64>,
     #[serde(
         rename = "dialServerKeepalive",

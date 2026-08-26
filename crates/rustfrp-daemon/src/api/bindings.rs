@@ -39,12 +39,17 @@ pub async fn list(
     } else {
         state.db.list_bindings().await
     }
-    .map_err(|e| (super::response::status_code(&e), Json(ApiResponse::<()> {
-        success: false,
-        data: None,
-        count: None,
-        error: Some(super::response::ApiError::from_client_error(&e)),
-    })))?;
+    .map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse::<()> {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     let count = bindings.len();
     Ok(Json(ApiResponse::ok_list(bindings, count)))
@@ -55,13 +60,17 @@ pub async fn get(
     State(state): State<ApiState>,
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse<BindingRule>>, (axum::http::StatusCode, Json<ApiResponse<()>>)> {
-    let binding = state.db.get_binding(id).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    let binding = state.db.get_binding(id).await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     Ok(Json(ApiResponse::ok(binding)))
 }
@@ -70,21 +79,31 @@ pub async fn get(
 pub async fn create(
     State(state): State<ApiState>,
     Json(mut binding): Json<BindingRule>,
-) -> Result<(axum::http::StatusCode, Json<ApiResponse<BindingRule>>), (axum::http::StatusCode, Json<ApiResponse<()>>)> {
+) -> Result<
+    (axum::http::StatusCode, Json<ApiResponse<BindingRule>>),
+    (axum::http::StatusCode, Json<ApiResponse<()>>),
+> {
     let now = Utc::now().to_rfc3339();
     binding.created_at = now.clone();
     binding.updated_at = now;
 
-    let id = state.db.insert_binding(&binding).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    let id = state.db.insert_binding(&binding).await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     binding.id = Some(id);
-    Ok((axum::http::StatusCode::CREATED, Json(ApiResponse::ok(binding))))
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(ApiResponse::ok(binding)),
+    ))
 }
 
 /// Update an existing binding (full replacement)
@@ -102,21 +121,29 @@ pub async fn update(
         binding.running = existing.running;
     }
 
-    state.db.update_binding(&binding).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    state.db.update_binding(&binding).await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
-    let updated = state.db.get_binding(id).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    let updated = state.db.get_binding(id).await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     Ok(Json(ApiResponse::ok(updated)))
 }
@@ -126,13 +153,17 @@ pub async fn delete(
     State(state): State<ApiState>,
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse<()>>, (axum::http::StatusCode, Json<ApiResponse<()>>)> {
-    state.db.delete_binding(id).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    state.db.delete_binding(id).await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     Ok(Json(ApiResponse {
         success: true,
@@ -166,21 +197,33 @@ pub async fn toggle(
         }
     }
 
-    state.db.toggle_binding(id, body.enabled).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    state
+        .db
+        .toggle_binding(id, body.enabled)
+        .await
+        .map_err(|e| {
+            (
+                super::response::status_code(&e),
+                Json(ApiResponse {
+                    success: false,
+                    data: None,
+                    count: None,
+                    error: Some(super::response::ApiError::from_client_error(&e)),
+                }),
+            )
+        })?;
 
-    let binding = state.db.get_binding(id).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    let binding = state.db.get_binding(id).await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     Ok(Json(ApiResponse::ok(binding)))
 }
@@ -202,11 +245,17 @@ pub async fn start_binding(
     State(state): State<ApiState>,
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse<BindingControlResponse>>, (StatusCode, Json<ApiResponse<()>>)> {
-    let binding = state.db.get_binding(id).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false, data: None, count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    let binding = state.db.get_binding(id).await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     // Precondition: enabled must be true
     if !binding.enabled {
@@ -214,19 +263,34 @@ pub async fn start_binding(
             "BINDING_DISABLED",
             "Binding is disabled. Enable it first before starting.".into(),
         );
-        return Err((StatusCode::BAD_REQUEST, Json(ApiResponse {
-            success: false, data: None, count: None,
-            error: Some(err),
-        })));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(err),
+            }),
+        ));
     }
 
     // Idempotent: already running
     if binding.running {
-        let profile = state.db.get_profile(binding.profile_id).await
-            .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-                success: false, data: None, count: None,
-                error: Some(super::response::ApiError::from_client_error(&e)),
-            })))?;
+        let profile = state
+            .db
+            .get_profile(binding.profile_id)
+            .await
+            .map_err(|e| {
+                (
+                    super::response::status_code(&e),
+                    Json(ApiResponse {
+                        success: false,
+                        data: None,
+                        count: None,
+                        error: Some(super::response::ApiError::from_client_error(&e)),
+                    }),
+                )
+            })?;
 
         return Ok(Json(ApiResponse::ok(BindingControlResponse {
             binding_id: id,
@@ -238,24 +302,41 @@ pub async fn start_binding(
     }
 
     // Set running = true
-    state.db.set_running(id, true).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false, data: None, count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    state.db.set_running(id, true).await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     // Regenerate TOML for this profile
     let toml_result = rustfrp_client::config::generator::generate_frpc_toml_for_profile(
         &state.db,
         binding.profile_id,
         &state.config_dir,
-    ).await;
+    )
+    .await;
 
-    let profile = state.db.get_profile(binding.profile_id).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false, data: None, count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    let profile = state
+        .db
+        .get_profile(binding.profile_id)
+        .await
+        .map_err(|e| {
+            (
+                super::response::status_code(&e),
+                Json(ApiResponse {
+                    success: false,
+                    data: None,
+                    count: None,
+                    error: Some(super::response::ApiError::from_client_error(&e)),
+                }),
+            )
+        })?;
 
     // If TOML generation failed, roll back running state
     if let Err(e) = &toml_result {
@@ -264,22 +345,36 @@ pub async fn start_binding(
             "TOML_GENERATION_FAILED",
             format!("Failed to generate TOML: {e}"),
         );
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse {
-            success: false, data: None, count: None,
-            error: Some(err),
-        })));
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(err),
+            }),
+        ));
     }
 
     // Ensure frpc is running (start or reload)
-    let action = match state.process_manager.ensure_running(binding.profile_id, &profile.name).await {
+    let action = match state
+        .process_manager
+        .ensure_running(binding.profile_id, &profile.name)
+        .await
+    {
         Ok(action) => action,
         Err(e) => {
             // Roll back running state on process error
             let _ = state.db.set_running(id, false).await;
-            return Err((super::response::status_code(&e), Json(ApiResponse {
-                success: false, data: None, count: None,
-                error: Some(super::response::ApiError::from_client_error(&e)),
-            })));
+            return Err((
+                super::response::status_code(&e),
+                Json(ApiResponse {
+                    success: false,
+                    data: None,
+                    count: None,
+                    error: Some(super::response::ApiError::from_client_error(&e)),
+                }),
+            ));
         }
     };
 
@@ -298,19 +393,35 @@ pub async fn stop_binding(
     State(state): State<ApiState>,
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse<BindingControlResponse>>, (StatusCode, Json<ApiResponse<()>>)> {
-    let binding = state.db.get_binding(id).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false, data: None, count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    let binding = state.db.get_binding(id).await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     // Idempotent: already not running
     if !binding.running {
-        let profile = state.db.get_profile(binding.profile_id).await
-            .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-                success: false, data: None, count: None,
-                error: Some(super::response::ApiError::from_client_error(&e)),
-            })))?;
+        let profile = state
+            .db
+            .get_profile(binding.profile_id)
+            .await
+            .map_err(|e| {
+                (
+                    super::response::status_code(&e),
+                    Json(ApiResponse {
+                        success: false,
+                        data: None,
+                        count: None,
+                        error: Some(super::response::ApiError::from_client_error(&e)),
+                    }),
+                )
+            })?;
 
         return Ok(Json(ApiResponse::ok(BindingControlResponse {
             binding_id: id,
@@ -321,11 +432,19 @@ pub async fn stop_binding(
         })));
     }
 
-    let result = stop_binding_inner(&state, id, &binding).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false, data: None, count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    let result = stop_binding_inner(&state, id, &binding)
+        .await
+        .map_err(|e| {
+            (
+                super::response::status_code(&e),
+                Json(ApiResponse {
+                    success: false,
+                    data: None,
+                    count: None,
+                    error: Some(super::response::ApiError::from_client_error(&e)),
+                }),
+            )
+        })?;
 
     Ok(Json(ApiResponse::ok(result)))
 }
@@ -342,7 +461,10 @@ async fn stop_binding_inner(
     state.db.set_running(id, false).await?;
 
     // Check if there are other running bindings for this profile
-    let other_running = state.db.list_running_bindings_for_profile(binding.profile_id).await?;
+    let other_running = state
+        .db
+        .list_running_bindings_for_profile(binding.profile_id)
+        .await?;
 
     let profile_name = profile.name.clone();
 
@@ -352,9 +474,13 @@ async fn stop_binding_inner(
             &state.db,
             binding.profile_id,
             &state.config_dir,
-        ).await?;
+        )
+        .await?;
 
-        let action = state.process_manager.stop_if_idle(binding.profile_id, true).await?;
+        let action = state
+            .process_manager
+            .stop_if_idle(binding.profile_id, true)
+            .await?;
 
         Ok(BindingControlResponse {
             binding_id: id,
@@ -369,9 +495,13 @@ async fn stop_binding_inner(
             &state.db,
             binding.profile_id,
             &state.config_dir,
-        ).await?;
+        )
+        .await?;
 
-        let action = state.process_manager.stop_if_idle(binding.profile_id, false).await?;
+        let action = state
+            .process_manager
+            .stop_if_idle(binding.profile_id, false)
+            .await?;
 
         Ok(BindingControlResponse {
             binding_id: id,

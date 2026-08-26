@@ -82,6 +82,11 @@ const transportOptions = [
   { label: 'QUIC', value: 'quic' },
 ]
 
+const authOptions = [
+  { label: 'Token', value: 'token' },
+  { label: 'OIDC', value: 'oidc' },
+]
+
 const rules: FormRules = {
   name: [{ required: true, message: 'Name is required' }],
   server_addr: [{ required: true, message: 'Server address is required' }],
@@ -134,6 +139,28 @@ onMounted(async () => {
       </NFormItem>
       <NFormItem label="Transport Protocol">
         <NSelect v-model:value="form.transport_protocol" :options="transportOptions" />
+      </NFormItem>
+
+      <!-- Auth -->
+      <NFormItem label="Auth Method">
+        <NSelect
+          v-model:value="form.auth_method"
+          :options="authOptions"
+          clearable
+          :placeholder="t('profile.authPlaceholder')"
+        />
+      </NFormItem>
+      <NFormItem
+        v-if="!form.auth_method || form.auth_method === 'token'"
+        :label="t('profile.token')"
+        path="token"
+      >
+        <NInput
+          v-model:value="form.token"
+          type="password"
+          show-password-on="click"
+          :placeholder="isEdit ? t('profile.tokenKeep') : ''"
+        />
       </NFormItem>
 
       <!-- TLS -->

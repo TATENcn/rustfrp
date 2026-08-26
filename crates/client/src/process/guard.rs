@@ -2,6 +2,7 @@
 //!
 //! 管理 frpc 子进程的完整生命周期：
 //! 启动 → 运行（监控 stderr）→ 热重载（SIGHUP）→ 优雅退出（SIGTERM → SIGKILL）
+#![allow(clippy::lines_filter_map_ok)]
 
 use crate::error::{ClientError, Result};
 use rustfrp_common::signal::SignalHandler;
@@ -19,9 +20,6 @@ const MAX_RESTART_COUNT: u32 = 3;
 /// 优雅退出等待时间
 const GRACEFUL_SHUTDOWN_SECS: u64 = 3;
 
-/// FRP 二进制名称
-const FRPC_BINARY: &str = "frpc";
-
 /// 进程守护
 ///
 /// 封装 frpc 子进程，提供启动、热重载、优雅退出能力。
@@ -32,6 +30,8 @@ pub struct ProcessGuard {
     child: Arc<Mutex<Option<Child>>>,
     /// 配置文件路径
     config_path: PathBuf,
+    /// frpc 二进制绝对路径（由 rustfrp 管理，非 PATH）
+    frpc_path: PathBuf,
     /// 是否正在运行
     running: Arc<AtomicBool>,
     /// 重启次数
@@ -46,13 +46,18 @@ pub struct ProcessGuard {
     /// Profile 名称（用于生成独立日志文件）
     profile_name: String,
 }
-
 impl ProcessGuard {
     /// 创建新的 ProcessGuard
     ///
     /// 注意：此时尚未启动子进程，需调用 `start()`。
     /// `profile_name` 用于生成独立的日志文件名。
-    pub fn new(config_path: PathBuf, signal_handler: SignalHandler, profile_name: String) -> Self {
+    /// `frpc_path` 为 rustfrp 托管的 frpc 二进制绝对路径（非 PATH 查找）。
+    pub fn new(
+        config_path: PathBuf,
+        frpc_path: PathBuf,
+        signal_handler: SignalHandler,
+        profile_name: String,
+    ) -> Self {
         let log_dir = dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join(".rustfrp")
@@ -61,6 +66,7 @@ impl ProcessGuard {
         Self {
             child: Arc::new(Mutex::new(None)),
             config_path,
+            frpc_path,
             running: Arc::new(AtomicBool::new(false)),
             restart_count: Arc::new(AtomicU32::new(0)),
             pid: Arc::new(AtomicU32::new(0)),
@@ -103,15 +109,19 @@ impl ProcessGuard {
             .append(true)
             .create(true)
             .open(log_dir.join(&stdout_log))
-            .map_err(|e| ClientError::ProcessStart(format!("Failed to open {}: {e}", stdout_log)))?;
+            .map_err(|e| {
+                ClientError::ProcessStart(format!("Failed to open {}: {e}", stdout_log))
+            })?;
 
         let stderr_file = OpenOptions::new()
             .append(true)
             .create(true)
             .open(log_dir.join(&stderr_log))
-            .map_err(|e| ClientError::ProcessStart(format!("Failed to open {}: {e}", stderr_log)))?;
+            .map_err(|e| {
+                ClientError::ProcessStart(format!("Failed to open {}: {e}", stderr_log))
+            })?;
 
-        let child = Command::new(FRPC_BINARY)
+        let child = Command::new(&self.frpc_path)
             .arg("-c")
             .arg(&config_path)
             .stdout(std::process::Stdio::from(stdout_file))
@@ -200,9 +210,9 @@ impl ProcessGuard {
         let restart_count = self.restart_count.clone();
         let pid = self.pid.clone();
         let config_path = self.config_path.clone();
+        let frpc_path = self.frpc_path.clone();
         let log_dir = self.log_dir.clone();
         let profile_name = self.profile_name.clone();
-
         tokio::spawn(async move {
             // 等待启动确认（消除 spawn_child 和 wait() 之间的竞态窗口）
             let _ = ready_rx.await;
@@ -267,7 +277,7 @@ impl ProcessGuard {
                     }
                 };
 
-                match Command::new(FRPC_BINARY)
+                match Command::new(&frpc_path)
                     .arg("-c")
                     .arg(&config_path)
                     .stdout(std::process::Stdio::from(stdout_file))
@@ -387,7 +397,11 @@ impl ProcessGuard {
     /// 获取子进程 PID（仅当进程存在时返回非零值）
     pub fn pid(&self) -> Option<u32> {
         let p = self.pid.load(Ordering::SeqCst);
-        if p == 0 { None } else { Some(p) }
+        if p == 0 {
+            None
+        } else {
+            Some(p)
+        }
     }
 
     /// 子进程是否在运行
@@ -460,7 +474,12 @@ fn read_log_tail(path: &std::path::Path, max_lines: usize) -> String {
         Ok(file) => {
             use std::io::BufRead;
             let reader = std::io::BufReader::new(file);
-            let lines: Vec<String> = reader.lines().filter_map(|l| l.ok()).collect();
+            let lines: Vec<String> = reader
+                .lines()
+                // io::Lines is unbounded on Err; map_while(Result::ok) triggers
+                // inference issues with collect, so keep filter_map + allow.
+                .filter_map(|l| l.ok())
+                .collect();
             let start = if lines.len() > max_lines {
                 lines.len() - max_lines
             } else {
@@ -486,6 +505,7 @@ mod tests {
         let handler = SignalHandler::new();
         let guard = ProcessGuard::new(
             PathBuf::from("/nonexistent/frpc.toml"),
+            PathBuf::from("/nonexistent/frpc"),
             handler,
             "test_profile".to_string(),
         );

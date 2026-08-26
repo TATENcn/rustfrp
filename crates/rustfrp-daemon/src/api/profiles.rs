@@ -16,14 +16,20 @@ use super::response::ApiResponse;
 use super::state::ApiState;
 
 /// List all profiles
-pub async fn list(State(state): State<ApiState>) -> Result<Json<ApiResponse<Vec<FrpsProfile>>>, (axum::http::StatusCode, Json<ApiResponse<()>>)> {
-    let profiles = state.db.list_profiles().await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse::<()> {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+pub async fn list(
+    State(state): State<ApiState>,
+) -> Result<Json<ApiResponse<Vec<FrpsProfile>>>, (axum::http::StatusCode, Json<ApiResponse<()>>)> {
+    let profiles = state.db.list_profiles().await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse::<()> {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     let count = profiles.len();
     Ok(Json(ApiResponse::ok_list(profiles, count)))
@@ -34,13 +40,17 @@ pub async fn get(
     State(state): State<ApiState>,
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse<FrpsProfile>>, (axum::http::StatusCode, Json<ApiResponse<()>>)> {
-    let profile = state.db.get_profile(id).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    let profile = state.db.get_profile(id).await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     Ok(Json(ApiResponse::ok(profile)))
 }
@@ -49,22 +59,32 @@ pub async fn get(
 pub async fn create(
     State(state): State<ApiState>,
     Json(mut profile): Json<FrpsProfile>,
-) -> Result<(axum::http::StatusCode, Json<ApiResponse<FrpsProfile>>), (axum::http::StatusCode, Json<ApiResponse<()>>)> {
+) -> Result<
+    (axum::http::StatusCode, Json<ApiResponse<FrpsProfile>>),
+    (axum::http::StatusCode, Json<ApiResponse<()>>),
+> {
     // Server-managed timestamps
     let now = Utc::now().to_rfc3339();
     profile.created_at = now.clone();
     profile.updated_at = now;
 
-    let id = state.db.insert_profile(&profile).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    let id = state.db.insert_profile(&profile).await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     profile.id = Some(id);
-    Ok((axum::http::StatusCode::CREATED, Json(ApiResponse::ok(profile))))
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(ApiResponse::ok(profile)),
+    ))
 }
 
 /// Update an existing profile (full replacement)
@@ -82,21 +102,29 @@ pub async fn update(
         profile.created_at = existing.created_at;
     }
 
-    state.db.update_profile(&profile).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    state.db.update_profile(&profile).await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
-    let updated = state.db.get_profile(id).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    let updated = state.db.get_profile(id).await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     Ok(Json(ApiResponse::ok(updated)))
 }
@@ -107,25 +135,33 @@ pub async fn delete(
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse<()>>, (axum::http::StatusCode, Json<ApiResponse<()>>)> {
     // Verify profile exists
-    state.db.get_profile(id).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    state.db.get_profile(id).await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     // Stop frpc for this profile first (best-effort, don't fail if not running)
     let _ = state.process_manager.stop(id).await;
 
     // Delete from database
-    state.db.delete_profile(id).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    state.db.delete_profile(id).await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     Ok(Json(ApiResponse {
         success: true,
@@ -156,8 +192,11 @@ mod tests {
         let tmp_dir = TempDir::new().unwrap();
         let config_dir = tmp_dir.path().to_path_buf();
         let signal = SignalHandler::new();
-        let process_manager =
-            rustfrp_client::process::manager::ProcessManager::new(config_dir.clone(), signal);
+        let process_manager = rustfrp_client::process::manager::ProcessManager::new(
+            config_dir.clone(),
+            std::path::PathBuf::from("/nonexistent/frpc"),
+            signal,
+        );
         let app_state = Arc::new(RwLock::new(ClientState::Ready));
 
         ApiState::new(db, process_manager, config_dir, app_state)
@@ -198,7 +237,10 @@ mod tests {
         assert_eq!(created.name, "Test Server");
         // token field should NOT appear in API response (but oidc_token_endpoint_url is fine)
         let json = serde_json::to_string(&created).unwrap();
-        assert!(!json.contains("\"token\":"), "token field should be redacted, but found in: {json}");
+        assert!(
+            !json.contains("\"token\":"),
+            "token field should be redacted, but found in: {json}"
+        );
 
         // Now GET the profile
         let result = get(State(state), Path(id)).await;

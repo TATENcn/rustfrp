@@ -60,16 +60,19 @@ pub struct ProcessManager {
     guards: Arc<RwLock<HashMap<i64, ProcessGuard>>>,
     /// TOML 配置文件输出目录
     config_dir: PathBuf,
+    /// rustfrp 托管的 frpc 二进制绝对路径
+    frpc_path: PathBuf,
     /// 共享的信号处理器
     signal_handler: SignalHandler,
 }
 
 impl ProcessManager {
     /// 创建新的进程管理器
-    pub fn new(config_dir: PathBuf, signal_handler: SignalHandler) -> Self {
+    pub fn new(config_dir: PathBuf, frpc_path: PathBuf, signal_handler: SignalHandler) -> Self {
         Self {
             guards: Arc::new(RwLock::new(HashMap::new())),
             config_dir,
+            frpc_path,
             signal_handler,
         }
     }
@@ -97,7 +100,12 @@ impl ProcessManager {
         // 若已存在，先停止
         self.stop(profile_id).await?;
 
-        let guard = ProcessGuard::new(toml_path.clone(), self.signal_handler.clone(), profile_name.to_string());
+        let guard = ProcessGuard::new(
+            toml_path.clone(),
+            self.frpc_path.clone(),
+            self.signal_handler.clone(),
+            profile_name.to_string(),
+        );
         guard.start().await?;
 
         let pid = guard.pid();
@@ -120,7 +128,11 @@ impl ProcessManager {
     ///
     /// - 未运行 → 启动新进程，返回 `ProcessAction::Started`
     /// - 已运行 → 热重载（SIGHUP），返回 `ProcessAction::Reloaded`
-    pub async fn ensure_running(&self, profile_id: i64, profile_name: &str) -> Result<ProcessAction> {
+    pub async fn ensure_running(
+        &self,
+        profile_id: i64,
+        profile_name: &str,
+    ) -> Result<ProcessAction> {
         if self.is_running(profile_id).await {
             self.reload(profile_id).await?;
             Ok(ProcessAction::Reloaded)
@@ -135,7 +147,11 @@ impl ProcessManager {
     /// - `has_other_running`: 该 profile 下是否还有其它 `running=true` 的 binding
     ///   - `true`  → 热重载（TOML 排除已停止的 proxy），返回 `ProcessAction::Reloaded`
     ///   - `false` → 停止 frpc 进程，返回 `ProcessAction::Stopped`
-    pub async fn stop_if_idle(&self, profile_id: i64, has_other_running: bool) -> Result<ProcessAction> {
+    pub async fn stop_if_idle(
+        &self,
+        profile_id: i64,
+        has_other_running: bool,
+    ) -> Result<ProcessAction> {
         if has_other_running {
             self.reload(profile_id).await?;
             Ok(ProcessAction::Reloaded)
@@ -255,7 +271,11 @@ mod tests {
     async fn test_process_manager_new() {
         let tmp = TempDir::new().unwrap();
         let handler = SignalHandler::new();
-        let manager = ProcessManager::new(tmp.path().to_path_buf(), handler);
+        let manager = ProcessManager::new(
+            tmp.path().to_path_buf(),
+            std::path::PathBuf::from("/nonexistent/frpc"),
+            handler,
+        );
         assert_eq!(manager.active_count().await, 0);
     }
 }

@@ -45,29 +45,53 @@ pub async fn status(
     let app_state = state.app_state.read().await;
     let state_str = app_state.to_string();
 
-    let profiles = state.db.list_profiles().await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false, data: None, count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    let profiles = state.db.list_profiles().await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
-    let proxies = state.db.list_proxies().await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false, data: None, count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    let proxies = state.db.list_proxies().await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
-    let bindings = state.db.list_bindings().await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false, data: None, count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    let bindings = state.db.list_bindings().await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
-    let visitors = state.db.list_visitors().await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false, data: None, count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    let visitors = state.db.list_visitors().await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     let mut process_infos = state.process_manager.list_running().await;
 
@@ -115,13 +139,16 @@ pub async fn reload(
     // Store initial task status
     {
         let mut tasks = state.reload_tasks.write().await;
-        tasks.insert(task_id.clone(), ReloadTaskStatus {
-            status: ReloadPhase::Running,
-            profiles_affected: 0,
-            errors: Vec::new(),
-            started_at: chrono::Utc::now(),
-            completed_at: None,
-        });
+        tasks.insert(
+            task_id.clone(),
+            ReloadTaskStatus {
+                status: ReloadPhase::Running,
+                profiles_affected: 0,
+                errors: Vec::new(),
+                started_at: chrono::Utc::now(),
+                completed_at: None,
+            },
+        );
     }
 
     // Spawn async reload task
@@ -170,7 +197,10 @@ pub async fn reload(
         }
     });
 
-    (StatusCode::ACCEPTED, Json(ApiResponse::accepted(ReloadResponse { task_id })))
+    (
+        StatusCode::ACCEPTED,
+        Json(ApiResponse::accepted(ReloadResponse { task_id })),
+    )
 }
 
 #[derive(Debug, Serialize)]
@@ -193,12 +223,15 @@ pub async fn reload_status(
                 "SYS_001",
                 format!("Reload task not found: {task_id}"),
             );
-            Err((StatusCode::NOT_FOUND, Json(ApiResponse {
-                success: false,
-                data: None,
-                count: None,
-                error: Some(err),
-            })))
+            Err((
+                StatusCode::NOT_FOUND,
+                Json(ApiResponse {
+                    success: false,
+                    data: None,
+                    count: None,
+                    error: Some(err),
+                }),
+            ))
         }
     }
 }

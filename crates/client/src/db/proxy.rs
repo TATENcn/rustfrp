@@ -171,7 +171,14 @@ impl Database {
                     proxy.health_check_max_failed,
                     proxy.health_check_interval_s,
                     proxy.health_check_path,
-                    proxy.health_check_http_headers.as_ref().map(|v| serialize_json_or_warn(&proxy.name, "health_check_http_headers", v)),
+                    proxy
+                        .health_check_http_headers
+                        .as_ref()
+                        .map(|v| serialize_json_or_warn(
+                            &proxy.name,
+                            "health_check_http_headers",
+                            v
+                        )),
                     proxy.plugin_config.as_ref().map(|v| v.to_string()),
                     proxy.secret_key,
                     proxy.locations.as_ref().map(|v| v.join(",")),

@@ -32,7 +32,9 @@ export interface FrpsProfile {
   name: string
   server_addr: string
   server_port: number
-  // `token` is #[serde(skip_serializing)] — not in API responses
+    // `token` is #[serde(skip_serializing)] — not in API responses;
+  // send-only on create/update. Empty string on update = keep existing.
+  token?: string
   tls_enable: boolean
   tls_cert_file?: string | null
   tls_key_file?: string | null

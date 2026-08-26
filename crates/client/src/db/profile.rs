@@ -149,7 +149,8 @@ impl Database {
         let affected = conn
             .execute(
                 "UPDATE frps_profile SET
-                    name = ?1, server_addr = ?2, server_port = ?3, token = ?4,
+                    name = ?1, server_addr = ?2, server_port = ?3,
+                    token = COALESCE(NULLIF(?4, ''), token),
                     tls_enable = ?5, tls_cert_file = ?6, tls_key_file = ?7,
                     tls_trusted_ca_file = ?8, transport_protocol = ?9,
                     heartbeat_interval = ?10, heartbeat_timeout = ?11,

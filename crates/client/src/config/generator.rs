@@ -328,16 +328,20 @@ fn build_proxy_entries(proxy: &crate::config::model::LocalProxy) -> Vec<ProxyEnt
         http_password: proxy.http_password.clone(),
         host_header_rewrite: proxy.host_header_rewrite.clone(),
         request_headers: parse_json_field(&proxy.name, "request_headers", &proxy.request_headers),
-        response_headers: parse_json_field(&proxy.name, "response_headers", &proxy.response_headers),
+        response_headers: parse_json_field(
+            &proxy.name,
+            "response_headers",
+            &proxy.response_headers,
+        ),
         route_by_http_user: proxy.route_by_http_user.clone(),
         annotations: parse_json_field(&proxy.name, "annotations", &proxy.annotations),
         metadatas: parse_json_field(&proxy.name, "metadatas", &proxy.metadatas),
         allow_users: proxy.allow_users.clone(),
-        nat_traversal: proxy
-            .nat_traversal_disable_assisted_addrs
-            .map(|disable| NatTraversalConfig {
+        nat_traversal: proxy.nat_traversal_disable_assisted_addrs.map(|disable| {
+            NatTraversalConfig {
                 disable_assisted_addrs: disable,
-            }),
+            }
+        }),
         load_balancer: None, // populated by caller from binding
         plugin: proxy.plugin_config.clone(),
         health_check,
@@ -399,8 +403,10 @@ fn validate_proxy_entry(entry: &ProxyEntry) -> Result<()> {
         ));
     }
 
-    if !["tcp", "udp", "http", "https", "stcp", "xtcp", "tcpmux", "sudp"]
-        .contains(&entry.proxy_type.as_str())
+    if ![
+        "tcp", "udp", "http", "https", "stcp", "xtcp", "tcpmux", "sudp",
+    ]
+    .contains(&entry.proxy_type.as_str())
     {
         return Err(ClientError::ConfigValidation(format!(
             "Unsupported proxy type: {}",

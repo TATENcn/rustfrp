@@ -22,6 +22,7 @@ pub struct ClientCore {
     process_manager: ProcessManager,
     signal_handler: SignalHandler,
     config_dir: PathBuf,
+    frpc_path: PathBuf,
     state: Arc<RwLock<ClientState>>,
 }
 
@@ -29,7 +30,6 @@ impl ClientCore {
     /// Create a new ClientCore.
     ///
     /// Opens (or creates) the SQLite database, runs migrations,
-    /// initializes the plugin manager and process manager.
     pub async fn new(db_path: &str, config_dir: &str) -> Result<Self> {
         let config_dir = expand_tilde(config_dir);
 
@@ -45,14 +45,25 @@ impl ClientCore {
             migrate::run(&conn)?;
         }
 
+        // Ensure rustfrp-managed frpc binary is present (download/verify/extract
+        // on first run; idempotent thereafter). Fails loudly if unavailable.
+        let frpc_path = rustfrp_bin::ensure::ensure_binary("frpc", None, None, None)
+            .await
+            .map_err(|e| ClientError::ProcessStart(format!("frpc unavailable: {e}")))?;
+
         let plugin_manager = PluginManager::with_default_dir();
         let signal_handler = SignalHandler::new();
-        let process_manager = ProcessManager::new(config_dir.clone(), signal_handler.clone());
+        let process_manager = ProcessManager::new(
+            config_dir.clone(),
+            frpc_path.clone(),
+            signal_handler.clone(),
+        );
         let state = Arc::new(RwLock::new(ClientState::Uninitialized));
 
         tracing::info!(
             db = %db_path,
             config_dir = %config_dir.display(),
+            frpc = %frpc_path.display(),
             "ClientCore initialized"
         );
 
@@ -62,6 +73,7 @@ impl ClientCore {
             process_manager,
             signal_handler,
             config_dir,
+            frpc_path,
             state,
         })
     }
@@ -71,7 +83,10 @@ impl ClientCore {
         &self.db
     }
 
-    /// Access the process manager (for daemon crate / API handlers).
+    /// Access the rustfrp-managed frpc binary path.
+    pub fn frpc_path(&self) -> &PathBuf {
+        &self.frpc_path
+    }
     pub fn process_manager(&self) -> &ProcessManager {
         &self.process_manager
     }

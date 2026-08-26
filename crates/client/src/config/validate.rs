@@ -8,7 +8,9 @@
 //!
 //! 手写实现，不引入 validator/garde 等第三方校验框架（04-DEPENDENCIES.md）。
 
-use crate::config::model::{BindingRule, FrpsProfile, LocalProxy, LocalVisitor, ProxyType, VisitorType};
+use crate::config::model::{
+    BindingRule, FrpsProfile, LocalProxy, LocalVisitor, ProxyType, VisitorType,
+};
 use crate::error::{ClientError, Result};
 use std::net::IpAddr;
 

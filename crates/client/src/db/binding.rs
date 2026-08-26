@@ -164,7 +164,10 @@ impl Database {
     }
 
     /// 获取某个 Profile 下所有 running 的绑定
-    pub async fn list_running_bindings_for_profile(&self, profile_id: i64) -> Result<Vec<BindingRule>> {
+    pub async fn list_running_bindings_for_profile(
+        &self,
+        profile_id: i64,
+    ) -> Result<Vec<BindingRule>> {
         let conn = self.lock().await;
         let mut stmt = conn
             .prepare(

@@ -16,14 +16,20 @@ use super::response::ApiResponse;
 use super::state::ApiState;
 
 /// List all proxies
-pub async fn list(State(state): State<ApiState>) -> Result<Json<ApiResponse<Vec<LocalProxy>>>, (axum::http::StatusCode, Json<ApiResponse<()>>)> {
-    let proxies = state.db.list_proxies().await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse::<()> {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+pub async fn list(
+    State(state): State<ApiState>,
+) -> Result<Json<ApiResponse<Vec<LocalProxy>>>, (axum::http::StatusCode, Json<ApiResponse<()>>)> {
+    let proxies = state.db.list_proxies().await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse::<()> {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     let count = proxies.len();
     Ok(Json(ApiResponse::ok_list(proxies, count)))
@@ -34,13 +40,17 @@ pub async fn get(
     State(state): State<ApiState>,
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse<LocalProxy>>, (axum::http::StatusCode, Json<ApiResponse<()>>)> {
-    let proxy = state.db.get_proxy(id).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    let proxy = state.db.get_proxy(id).await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     Ok(Json(ApiResponse::ok(proxy)))
 }
@@ -49,21 +59,31 @@ pub async fn get(
 pub async fn create(
     State(state): State<ApiState>,
     Json(mut proxy): Json<LocalProxy>,
-) -> Result<(axum::http::StatusCode, Json<ApiResponse<LocalProxy>>), (axum::http::StatusCode, Json<ApiResponse<()>>)> {
+) -> Result<
+    (axum::http::StatusCode, Json<ApiResponse<LocalProxy>>),
+    (axum::http::StatusCode, Json<ApiResponse<()>>),
+> {
     let now = Utc::now().to_rfc3339();
     proxy.created_at = now.clone();
     proxy.updated_at = now;
 
-    let id = state.db.insert_proxy(&proxy).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    let id = state.db.insert_proxy(&proxy).await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     proxy.id = Some(id);
-    Ok((axum::http::StatusCode::CREATED, Json(ApiResponse::ok(proxy))))
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(ApiResponse::ok(proxy)),
+    ))
 }
 
 /// Update an existing proxy (full replacement)
@@ -78,21 +98,29 @@ pub async fn update(
         proxy.created_at = existing.created_at;
     }
 
-    state.db.update_proxy(&proxy).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    state.db.update_proxy(&proxy).await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
-    let updated = state.db.get_proxy(id).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    let updated = state.db.get_proxy(id).await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     Ok(Json(ApiResponse::ok(updated)))
 }
@@ -102,13 +130,17 @@ pub async fn delete(
     State(state): State<ApiState>,
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse<()>>, (axum::http::StatusCode, Json<ApiResponse<()>>)> {
-    state.db.delete_proxy(id).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    state.db.delete_proxy(id).await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     Ok(Json(ApiResponse {
         success: true,

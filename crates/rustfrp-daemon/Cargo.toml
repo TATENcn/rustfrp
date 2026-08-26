@@ -9,6 +9,7 @@ description = "RustFRP daemon — HTTP API server for frpc configuration managem
 
 [dependencies]
 rustfrp-client = { path = "../client" }
+rustfrp-bin = { path = "../rustfrp-bin" }
 rustfrp-common = { path = "../common" }
 tokio = { workspace = true, features = ["process", "sync", "time", "signal", "net"] }
 serde.workspace = true

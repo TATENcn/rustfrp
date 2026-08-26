@@ -16,14 +16,20 @@ use super::response::ApiResponse;
 use super::state::ApiState;
 
 /// List all visitors
-pub async fn list(State(state): State<ApiState>) -> Result<Json<ApiResponse<Vec<LocalVisitor>>>, (axum::http::StatusCode, Json<ApiResponse<()>>)> {
-    let visitors = state.db.list_visitors().await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse::<()> {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+pub async fn list(
+    State(state): State<ApiState>,
+) -> Result<Json<ApiResponse<Vec<LocalVisitor>>>, (axum::http::StatusCode, Json<ApiResponse<()>>)> {
+    let visitors = state.db.list_visitors().await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse::<()> {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     let count = visitors.len();
     Ok(Json(ApiResponse::ok_list(visitors, count)))
@@ -34,13 +40,17 @@ pub async fn get(
     State(state): State<ApiState>,
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse<LocalVisitor>>, (axum::http::StatusCode, Json<ApiResponse<()>>)> {
-    let visitor = state.db.get_visitor(id).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    let visitor = state.db.get_visitor(id).await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     Ok(Json(ApiResponse::ok(visitor)))
 }
@@ -49,21 +59,31 @@ pub async fn get(
 pub async fn create(
     State(state): State<ApiState>,
     Json(mut visitor): Json<LocalVisitor>,
-) -> Result<(axum::http::StatusCode, Json<ApiResponse<LocalVisitor>>), (axum::http::StatusCode, Json<ApiResponse<()>>)> {
+) -> Result<
+    (axum::http::StatusCode, Json<ApiResponse<LocalVisitor>>),
+    (axum::http::StatusCode, Json<ApiResponse<()>>),
+> {
     let now = Utc::now().to_rfc3339();
     visitor.created_at = now.clone();
     visitor.updated_at = now;
 
-    let id = state.db.insert_visitor(&visitor).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    let id = state.db.insert_visitor(&visitor).await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     visitor.id = Some(id);
-    Ok((axum::http::StatusCode::CREATED, Json(ApiResponse::ok(visitor))))
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(ApiResponse::ok(visitor)),
+    ))
 }
 
 /// Update an existing visitor (full replacement)
@@ -78,21 +98,29 @@ pub async fn update(
         visitor.created_at = existing.created_at;
     }
 
-    state.db.update_visitor(&visitor).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    state.db.update_visitor(&visitor).await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
-    let updated = state.db.get_visitor(id).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    let updated = state.db.get_visitor(id).await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     Ok(Json(ApiResponse::ok(updated)))
 }
@@ -102,13 +130,17 @@ pub async fn delete(
     State(state): State<ApiState>,
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse<()>>, (axum::http::StatusCode, Json<ApiResponse<()>>)> {
-    state.db.delete_visitor(id).await
-        .map_err(|e| (super::response::status_code(&e), Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&e)),
-        })))?;
+    state.db.delete_visitor(id).await.map_err(|e| {
+        (
+            super::response::status_code(&e),
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::from_client_error(&e)),
+            }),
+        )
+    })?;
 
     Ok(Json(ApiResponse {
         success: true,

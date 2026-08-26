@@ -87,7 +87,11 @@ mod tests {
         let tmp_dir = TempDir::new().unwrap();
         let config_dir = tmp_dir.path().to_path_buf();
         let signal = SignalHandler::new();
-        let process_manager = ProcessManager::new(config_dir.clone(), signal);
+        let process_manager = ProcessManager::new(
+            config_dir.clone(),
+            std::path::PathBuf::from("/nonexistent/frpc"),
+            signal,
+        );
         let app_state = Arc::new(RwLock::new(ClientState::Uninitialized));
 
         let state = ApiState::new(
@@ -117,7 +121,11 @@ mod tests {
         let tmp_dir = TempDir::new().unwrap();
         let config_dir = tmp_dir.path().to_path_buf();
         let signal = SignalHandler::new();
-        let process_manager = ProcessManager::new(config_dir.clone(), signal);
+        let process_manager = ProcessManager::new(
+            config_dir.clone(),
+            std::path::PathBuf::from("/nonexistent/frpc"),
+            signal,
+        );
         let app_state = Arc::new(RwLock::new(ClientState::Ready));
 
         let state = ApiState::new(db, process_manager, config_dir, app_state);

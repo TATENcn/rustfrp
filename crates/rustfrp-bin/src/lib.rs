@@ -60,13 +60,14 @@ pub struct FrpVersion {
 }
 
 impl FrpVersion {
-    /// 从 GitHub release tag 解析版本
+    /// 从版本字符串解析（如 "0.70.1" 或 "v0.70.1"）。
+    ///
+    /// 内部统一规整：`version` 为去 `v` 的纯版本号（用于文件名），
+    /// `tag_name` 为 GitHub release tag（始终带 `v` 前缀，用于下载 URL）。
     pub fn from_tag(tag: &str) -> Self {
         let version = tag.trim_start_matches('v').to_string();
-        Self {
-            version,
-            tag_name: tag.to_string(),
-        }
+        let tag_name = format!("v{version}");
+        Self { version, tag_name }
     }
 }
 
@@ -77,3 +78,6 @@ pub fn default_frp_dir() -> std::path::PathBuf {
         .join(".rustfrp")
         .join("frp")
 }
+
+pub mod ensure;
+pub mod platform;
