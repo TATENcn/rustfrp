@@ -12,6 +12,11 @@
 - Rootless daemon container, Compose deployment, health checks, and multi-architecture
   GHCR publishing.
 
+### Changed
+
+- API configuration payloads now apply model defaults to omitted fields, keeping
+  older clients compatible when new fields are introduced.
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

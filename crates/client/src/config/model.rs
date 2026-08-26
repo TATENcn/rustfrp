@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// 对应 FRP TOML 中的 `[common]` 段。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct FrpsProfile {
     pub id: Option<i64>,
     pub name: String,
@@ -270,6 +271,7 @@ impl rusqlite::types::FromSql for VisitorType {
 
 /// Local visitor configuration (maps to FRP TOML `[[visitors]]`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct LocalVisitor {
     pub id: Option<i64>,
     pub name: String,
@@ -347,6 +349,7 @@ impl Default for LocalVisitor {
 ///
 /// 对应 FRP TOML 中的每个 `[[proxies]]` 条目。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct LocalProxy {
     pub id: Option<i64>,
     pub name: String,
@@ -458,6 +461,7 @@ impl Default for LocalProxy {
 /// 将 Profile 和 Proxy 关联在一起，支持多对多。
 /// 设备 A 的 Proxy X 可以绑定到多个 Profile，实现多服务器同时穿透。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct BindingRule {
     pub id: Option<i64>,
     pub profile_id: i64,
@@ -471,6 +475,23 @@ pub struct BindingRule {
     pub created_at: String,
     #[serde(skip_deserializing)]
     pub updated_at: String,
+}
+
+impl Default for BindingRule {
+    fn default() -> Self {
+        Self {
+            id: None,
+            profile_id: 0,
+            proxy_id: 0,
+            enabled: true,
+            running: false,
+            priority: 0,
+            group_name: None,
+            group_key: None,
+            created_at: String::new(),
+            updated_at: String::new(),
+        }
+    }
 }
 
 // ============================================================================
@@ -760,4 +781,46 @@ pub struct HealthCheckConfig {
     pub path: Option<String>,
     #[serde(rename = "httpHeaders", skip_serializing_if = "Option::is_none")]
     pub http_headers: Option<Vec<HttpHeader>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn api_models_accept_older_partial_payloads() {
+        let profile: FrpsProfile = serde_json::from_value(serde_json::json!({
+            "name": "home",
+            "server_addr": "frp.example.com"
+        }))
+        .unwrap();
+        assert_eq!(profile.server_port, 7000);
+        assert_eq!(profile.transport_protocol, "tcp");
+
+        let proxy: LocalProxy = serde_json::from_value(serde_json::json!({
+            "name": "ssh",
+            "proxy_type": "tcp",
+            "local_port": 22
+        }))
+        .unwrap();
+        assert_eq!(proxy.local_ip, "127.0.0.1");
+        assert!(proxy.use_encryption);
+
+        let visitor: LocalVisitor = serde_json::from_value(serde_json::json!({
+            "name": "private-ssh",
+            "visitor_type": "stcp",
+            "server_name": "ssh"
+        }))
+        .unwrap();
+        assert_eq!(visitor.bind_port, -1);
+        assert!(visitor.enabled);
+
+        let binding: BindingRule = serde_json::from_value(serde_json::json!({
+            "profile_id": 1,
+            "proxy_id": 2
+        }))
+        .unwrap();
+        assert!(binding.enabled);
+        assert!(!binding.running);
+    }
 }
