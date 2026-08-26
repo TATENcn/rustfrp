@@ -1,0 +1,22 @@
+services:
+  daemon:
+    build:
+      context: .
+    image: ghcr.io/tatencn/rustfrp:${RUSTFRP_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${RUSTFRP_PORT:-7900}:7900"
+    volumes:
+      - rustfrp-data:/data
+    environment:
+      RUSTFRP_API_TOKEN: ${RUSTFRP_API_TOKEN:?Set RUSTFRP_API_TOKEN before starting the daemon}
+      RUST_LOG: ${RUST_LOG:-rustfrp=info}
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:7900/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  rustfrp-data:

@@ -1,7 +1,7 @@
 # RustFRP
 
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.81%2B-orange.svg)](rust-toolchain.toml)
+[![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](rust-toolchain.toml)
 [![CI](https://github.com/TATENcn/rustfrp/actions/workflows/webui-ci.yml/badge.svg)](https://github.com/TATENcn/rustfrp/actions/workflows/webui-ci.yml)
 
 > 一个轻量的 FRP 配置管理中心与进程守护：把「SQLite 配置 → frpc.toml 生成 → 多 frpc 实例托管」做成开箱即用的一体化工具。
@@ -46,7 +46,7 @@ RustFRP 是一个 **frpc 智能包装器**（微内核 + 插件化单体），�
 
 ### 前置要求
 
-- Rust 1.81+（`rust-toolchain.toml` 指定）
+- Rust 1.88+（当前锁定依赖所需；`rust-toolchain.toml` 使用 stable）
 - 网络可达 GitHub Releases（首次启动自动下载 frpc）
 - 一个 frps 服务端（原生 frp，本项目不打包服务端）
 
@@ -69,6 +69,18 @@ cargo run -p rustfrp-daemon -- --config-dir ~/.rustfrp/runtime \
 ```
 
 打开 <http://127.0.0.1:7900/> 即可使用 Web 管理界面。
+
+### Docker Compose
+
+```bash
+# Strongly recommended when port 7900 is reachable by other hosts.
+export RUSTFRP_API_TOKEN='replace-with-a-long-random-token'
+docker compose up -d
+```
+
+The image embeds the WebUI, listens on port `7900`, stores its SQLite database,
+generated configuration, downloaded FRP binaries, and logs in the `rustfrp-data`
+volume, and exposes a container health check at `/api/v1/health`.
 
 ### 使用流程
 
@@ -117,6 +129,10 @@ plugins/
 - [08-SECURITY](AGENTS/08-SECURITY.md) — 安全
 
 ## 开发
+
+贡献代码请从默认分支 `dev` 创建短期分支，并向 `dev` 提交 PR。只有发布 PR
+可以从 `dev` 合入 `main`，随后在 `main` 提交上创建版本 tag。完整规则见
+[CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ```bash
 just test-fast        # 单元测试
