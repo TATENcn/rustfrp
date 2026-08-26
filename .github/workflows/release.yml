@@ -12,10 +12,8 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             artifact: rustfrp-daemon_linux_amd64
-          - target: aarch64-unknown-linux-musl
-            os: ubuntu-latest
-            artifact: rustfrp-daemon_linux_arm64
-        # Windows/macOS 矩阵后续补充（需 Tauri/交叉编译链落地后）
+        # arm64 / Windows / macOS 后续补充：ring 等 C 依赖交叉编译
+        # 需 zig/cross 工具链，v0.1.0 先发布 amd64
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -36,12 +34,6 @@ jobs:
           targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
-
-      - name: Install musl tools (aarch64-musl only)
-        if: contains(matrix.target, 'musl')
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools
 
       - name: Build release binary
         run: cargo build -p rustfrp-daemon --release --target ${{ matrix.target }}
