@@ -10,6 +10,7 @@ pub mod state;
 
 // Sub-modules for each resource type
 pub mod bindings;
+pub mod config_transfer;
 pub mod logs;
 pub mod profiles;
 pub mod proxies;
@@ -181,6 +182,15 @@ pub fn create_router(state: ApiState, _auth: impl AuthMiddleware) -> Router {
             axum::routing::get(system::reload_status),
         )
         .route("/api/v1/health", axum::routing::get(system::health))
+        // Explicit migration import and consistent SQLite backup
+        .route(
+            "/api/v1/config/import",
+            axum::routing::post(config_transfer::import),
+        )
+        .route(
+            "/api/v1/config/export",
+            axum::routing::get(config_transfer::export),
+        )
         // Shared state
         .with_state(state);
 
