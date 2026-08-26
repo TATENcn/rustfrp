@@ -14,6 +14,25 @@ use tokio::io::AsyncReadExt;
 /// * `file_path` - 待校验的文件路径
 /// * `expected_hash` - 期望的 SHA256 哈希（hex 字符串）
 pub async fn verify_sha256(file_path: &Path, expected_hash: &str) -> Result<(), FrpError> {
+    if expected_hash.len() != 64 || !expected_hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(FrpError::Verify(
+            "Invalid SHA256 value; expected 64 hexadecimal characters".into(),
+        ));
+    }
+    let actual_hash = sha256_file(file_path).await?;
+
+    if actual_hash.eq_ignore_ascii_case(expected_hash) {
+        tracing::info!(hash = %&actual_hash[..16], "SHA256 verification passed");
+        Ok(())
+    } else {
+        Err(FrpError::Verify(format!(
+            "SHA256 mismatch. Expected: {}, Actual: {}",
+            expected_hash, actual_hash
+        )))
+    }
+}
+
+pub async fn sha256_file(file_path: &Path) -> Result<String, FrpError> {
     let mut file = tokio::fs::File::open(file_path)
         .await
         .map_err(FrpError::Io)?;
@@ -29,19 +48,23 @@ pub async fn verify_sha256(file_path: &Path, expected_hash: &str) -> Result<(), 
         hasher.update(&buffer[..n]);
     }
 
-    let result = hasher.finalize();
-    let actual_hash = format!("{:x}", result);
+    Ok(format!("{:x}", hasher.finalize()))
+}
 
-    if actual_hash.eq_ignore_ascii_case(expected_hash) {
-        tracing::info!(
-            hash = %&actual_hash[..16],
-            "SHA256 verification passed"
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn verifies_known_content_and_rejects_malformed_hash() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        tokio::fs::write(file.path(), b"rustfrp").await.unwrap();
+        let hash = sha256_file(file.path()).await.unwrap();
+        assert_eq!(
+            hash,
+            "d90fdb6a50bc804bf305b305eb93d7e43aca6c81a9935e998fba29026cb8f842"
         );
-        Ok(())
-    } else {
-        Err(FrpError::Verify(format!(
-            "SHA256 mismatch. Expected: {}, Actual: {}",
-            expected_hash, actual_hash
-        )))
+        verify_sha256(file.path(), &hash).await.unwrap();
+        assert!(verify_sha256(file.path(), "not-a-hash").await.is_err());
     }
 }

@@ -17,6 +17,7 @@ dirs = "5"
 sha2 = "0.10"
 flate2 = "1"
 tar = "0.4"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 reqwest = { workspace = true, features = ["stream"] }
 
 [dev-dependencies]
