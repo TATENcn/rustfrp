@@ -4,13 +4,16 @@
 
 ### Added
 
+- Supply-chain policy enforcement with cargo-deny, grouped Dependabot updates,
+  scheduled all-feature, ignored, and documentation test coverage, plus a
+  security-patched Wasmtime 36 LTS runtime and canonical SPDX metadata.
 - Deployment environments with transactional profile assignment, a global WebUI
   switcher, and automatic migration of existing profiles into Default.
 - Bounded local CPU, memory, frpc-process, and environment-scoped traffic time
   series with SVG dashboard charts and Prometheus exposition.
 - Full daemon + official frps + control + Prometheus + Alertmanager + provisioned
   Grafana Compose topology, including node-label-safe aggregation and offline alerts.
-- Wasmtime 37 plugin runtime with per-call permission checks, deterministic fuel
+- Wasmtime 36 LTS plugin runtime with per-call permission checks, deterministic fuel
   exhaustion, epoch deadlines, 50 MiB guest-memory limits, lifecycle isolation,
   event/config/traffic host channels, and runnable Failover, traffic-statistics,
   and webhook-notification reference plugins.

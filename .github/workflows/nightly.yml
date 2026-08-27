@@ -1,0 +1,39 @@
+name: Nightly deep tests
+
+on:
+  schedule:
+    - cron: '43 18 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-deep-tests
+  cancel-in-progress: true
+
+jobs:
+  workspace:
+    name: Workspace all-feature and ignored tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3'
+      - name: Build embedded WebUI prerequisite
+        working-directory: plugins/webui
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: nightly-deep-tests
+      - name: Run all workspace tests
+        run: cargo test --workspace --all-targets --all-features --locked
+      - name: Run ignored workspace tests
+        run: cargo test --workspace --all-features --locked -- --ignored
+      - name: Run documentation tests
+        run: cargo test --workspace --doc --all-features --locked

@@ -1,0 +1,40 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "02:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    target-branch: dev
+    groups:
+      rust-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /plugins/webui
+    schedule:
+      interval: weekly
+      day: monday
+      time: "02:15"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    target-branch: dev
+    groups:
+      webui-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "02:30"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    target-branch: dev
+    groups:
+      github-actions:
+        patterns: ["*"]

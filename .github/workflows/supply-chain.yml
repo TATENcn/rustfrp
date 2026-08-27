@@ -1,0 +1,40 @@
+name: Supply chain
+
+on:
+  push:
+    branches: [dev, main]
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - deny.toml
+      - 'crates/**/Cargo.toml'
+      - '.github/workflows/supply-chain.yml'
+  pull_request:
+    branches: [dev, main]
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - deny.toml
+      - 'crates/**/Cargo.toml'
+      - '.github/workflows/supply-chain.yml'
+  schedule:
+    - cron: '17 18 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supply-chain-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cargo-deny:
+    name: Advisories, licenses, bans, and sources
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check

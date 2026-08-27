@@ -8,7 +8,7 @@ rust-version.workspace = true
 description = "Control server — frps management, metrics collection, config template API"
 
 [dependencies]
-rustfrp-common = { path = "../../common" }
+rustfrp-common = { version = "0.1.0", path = "../../common" }
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -23,7 +23,7 @@ chrono.workspace = true
 axum = "0.7"
 tower = { version = "0.4", features = ["util"] }
 tower-http = { version = "0.5", features = ["cors", "trace"] }
-prometheus = "0.13"
+prometheus = "0.14"
 sha2 = "0.10"
 
 [dev-dependencies]
