@@ -8,7 +8,7 @@ rust-version.workspace = true
 description = "Control server — frps management, metrics collection, config template API"
 
 [dependencies]
-rustfrp-common = { version = "0.1.0", path = "../../common" }
+rustfrp-common = { version = "0.2.0", path = "../../common" }
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true

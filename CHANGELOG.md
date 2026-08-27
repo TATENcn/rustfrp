@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-27
+
 ### Added
 
 - Zero-trust API policy files with digest-only bearer credentials, tenant-bound
