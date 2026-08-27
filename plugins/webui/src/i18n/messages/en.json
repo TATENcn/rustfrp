@@ -65,6 +65,15 @@
   "status.configValid": "Config valid",
   "status.configInvalid": "Config invalid",
 
+  "configTransfer.title": "Configuration migration and backup",
+  "configTransfer.description": "Import a modern frpc.toml once into SQLite, or download a consistent SQLite backup. Imported bindings stay stopped until you start them.",
+  "configTransfer.profileName": "Imported profile name",
+  "configTransfer.selectFile": "Enter a profile name and select a TOML file",
+  "configTransfer.import": "Import frpc.toml",
+  "configTransfer.export": "Download backup",
+  "configTransfer.importSuccess": "Imported {profile}: {proxies} proxies, {visitors} visitors",
+  "configTransfer.exportSuccess": "Backup downloaded",
+
   "error.unauthorized": "Invalid or expired token. Please log in again.",
   "error.network": "Network error. Please check your connection.",
   "error.serverError": "Server error. Please try again later.",

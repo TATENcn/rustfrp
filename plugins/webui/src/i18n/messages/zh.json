@@ -65,6 +65,15 @@
   "status.configValid": "配置有效",
   "status.configInvalid": "配置无效",
 
+  "configTransfer.title": "配置迁移与备份",
+  "configTransfer.description": "将现代版 frpc.toml 一次性导入 SQLite，或下载一致性 SQLite 备份。导入的绑定默认不会自动启动。",
+  "configTransfer.profileName": "导入后的配置名称",
+  "configTransfer.selectFile": "请输入配置名称并选择 TOML 文件",
+  "configTransfer.import": "导入 frpc.toml",
+  "configTransfer.export": "下载备份",
+  "configTransfer.importSuccess": "已导入 {profile}：{proxies} 个代理，{visitors} 个访问者",
+  "configTransfer.exportSuccess": "备份已下载",
+
   "error.unauthorized": "Token 无效或已过期，请重新登录",
   "error.network": "网络错误，请检查连接",
   "error.serverError": "服务器错误，请稍后重试",

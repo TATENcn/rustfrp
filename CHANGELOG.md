@@ -4,6 +4,9 @@
 
 ### Added
 
+- One-shot modern `frpc.toml` migration into SQLite with atomic rollback,
+  conflict-safe profile naming, Proxy/Visitor support, and WebUI controls.
+- Transactionally consistent SQLite backup download from the daemon and WebUI.
 - Rootless daemon container, Compose deployment, health checks, and multi-architecture
   GHCR publishing.
 

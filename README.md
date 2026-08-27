@@ -89,6 +89,23 @@ volume, and exposes a container health check at `/api/v1/health`.
 3. **绑定关系** — 把服务器配置和代理规则关联，启用并启动
 4. 访问穿透出的地址验证
 
+### 配置迁移与备份
+
+系统状态页可以将现代格式的 `frpc.toml` 一次性导入 SQLite，包含 Profile、
+Proxy、Binding 和 Visitor。导入使用单个数据库事务，同名 Profile 会自动添加
+数字后缀；Proxy/Visitor 名称保持不变，以免改变 FRP 对外名称。导入的绑定默认
+处于待启动状态。
+
+同一页面可以下载一致性的 `.sqlite` 备份。备份包含认证 token 等敏感配置，
+应按密钥文件保管，不要提交到 Git 或通过公开渠道传输。
+
+对应 API：
+
+```text
+POST /api/v1/config/import
+GET  /api/v1/config/export
+```
+
 frpc 二进制会在首次启动时自动就绪，无需手动安装。
 
 ## 二进制自托管

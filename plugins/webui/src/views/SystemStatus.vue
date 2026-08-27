@@ -15,6 +15,8 @@ import {
 } from 'naive-ui'
 import { useI18n } from '@/i18n'
 import { useSystemStore } from '@/stores/system'
+import { downloadBackup, importFrpcToml } from '@/api/config'
+import { extractApiError, resolveErrorMessage } from '@/api/errors'
 import type { StatusResponse } from '@/api/types'
 
 const { t } = useI18n()
@@ -25,6 +27,10 @@ const reloadTaskId = ref<string | null>(null)
 const reloadPolling = ref(false)
 const reloadTaskStatus = ref<string | null>(null)
 const configStatus = ref<'idle' | 'checking' | 'valid' | 'invalid'>('idle')
+const importProfileName = ref('imported')
+const importFile = ref<File | null>(null)
+const importing = ref(false)
+const exporting = ref(false)
 
 let timer: ReturnType<typeof setInterval> | null = null
 let reloadTimer: ReturnType<typeof setInterval> | null = null
@@ -92,6 +98,46 @@ function formatUptime(secs: number): string {
   const s = secs % 60
   return `${h}h ${m}m ${s}s`
 }
+
+function selectImportFile(event: Event) {
+  importFile.value = (event.target as HTMLInputElement).files?.[0] ?? null
+}
+
+async function handleImport() {
+  if (!importFile.value || !importProfileName.value.trim()) {
+    message.warning(t('configTransfer.selectFile'))
+    return
+  }
+  importing.value = true
+  try {
+    const result = await importFrpcToml(importProfileName.value.trim(), await importFile.value.text())
+    const summary = result.data
+    if (summary) {
+      message.success(t('configTransfer.importSuccess', {
+        profile: summary.profile_name,
+        proxies: summary.proxies_imported,
+        visitors: summary.visitors_imported,
+      }))
+      await systemStore.fetchStatus()
+    }
+  } catch (error) {
+    message.error(t(resolveErrorMessage(extractApiError(error).code)))
+  } finally {
+    importing.value = false
+  }
+}
+
+async function handleExport() {
+  exporting.value = true
+  try {
+    await downloadBackup()
+    message.success(t('configTransfer.exportSuccess'))
+  } catch {
+    message.error(t('error.serverError'))
+  } finally {
+    exporting.value = false
+  }
+}
 </script>
 
 <template>
@@ -117,6 +163,28 @@ function formatUptime(secs: number): string {
         <NTag v-if="configStatus !== 'idle'" :type="configStatus === 'valid' ? 'success' : 'error'" style="margin-top: 8px">
           {{ configStatus === 'valid' ? t('status.configValid') : configStatus === 'invalid' ? t('status.configInvalid') : 'Checking...' }}
         </NTag>
+      </NCard>
+
+      <NCard size="small" :title="t('configTransfer.title')">
+        <NSpace vertical>
+          <p style="margin: 0; color: var(--n-text-color-2)">
+            {{ t('configTransfer.description') }}
+          </p>
+          <NSpace align="center">
+            <NInput
+              v-model:value="importProfileName"
+              :placeholder="t('configTransfer.profileName')"
+              style="width: 220px"
+            />
+            <input type="file" accept=".toml,text/plain" @change="selectImportFile" />
+            <NButton type="primary" :loading="importing" @click="handleImport">
+              {{ t('configTransfer.import') }}
+            </NButton>
+            <NButton :loading="exporting" @click="handleExport">
+              {{ t('configTransfer.export') }}
+            </NButton>
+          </NSpace>
+        </NSpace>
       </NCard>
 
       <NGrid cols="1 s:2 m:4" :x-gap="12" :y-gap="12" v-if="systemStore.status">
