@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
 /// 当前最新的 schema 版本
-const LATEST_VERSION: i32 = 10;
+const LATEST_VERSION: i32 = 11;
 
 /// 运行所有待执行的迁移
 ///
@@ -93,6 +93,7 @@ fn apply_migration(conn: &Connection, version: i32) -> Result<()> {
         8 => migrate_v8(&tx)?,
         9 => migrate_v9(&tx)?,
         10 => migrate_v10(&tx)?,
+        11 => migrate_v11(&tx)?,
         _ => {
             return Err(ClientError::DatabaseMigration(format!(
                 "Unknown migration version: {version}"
@@ -602,6 +603,53 @@ fn migrate_v10(tx: &rusqlite::Transaction) -> Result<()> {
     })?;
 
     tracing::info!("V10 Migration: Add binding_rule.running column");
+    Ok(())
+}
+
+/// V11: deployment environments remain separate from the FRP TOML model.
+fn migrate_v11(tx: &rusqlite::Transaction) -> Result<()> {
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS environment (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL UNIQUE,
+            description TEXT,
+            color       TEXT NOT NULL DEFAULT '#18a058',
+            is_default  INTEGER NOT NULL DEFAULT 0,
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_environment_single_default
+            ON environment(is_default) WHERE is_default = 1;
+        CREATE TABLE IF NOT EXISTS profile_environment (
+            profile_id    INTEGER PRIMARY KEY,
+            environment_id INTEGER NOT NULL,
+            FOREIGN KEY (profile_id) REFERENCES frps_profile(id) ON DELETE CASCADE,
+            FOREIGN KEY (environment_id) REFERENCES environment(id) ON DELETE RESTRICT
+        );
+        CREATE INDEX IF NOT EXISTS idx_profile_environment_environment
+            ON profile_environment(environment_id);",
+    )
+    .map_err(|e| ClientError::DatabaseMigration(format!("Failed to create environments: {e}")))?;
+
+    let now = chrono::Utc::now().to_rfc3339();
+    tx.execute(
+        "INSERT OR IGNORE INTO environment
+            (id, name, description, color, is_default, created_at, updated_at)
+         VALUES (1, 'Default', 'Default deployment environment', '#18a058', 1, ?1, ?1)",
+        [&now],
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to seed default environment: {e}"))
+    })?;
+    tx.execute(
+        "INSERT OR IGNORE INTO profile_environment (profile_id, environment_id)
+         SELECT id, 1 FROM frps_profile",
+        [],
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to assign existing profiles: {e}"))
+    })?;
+    tracing::info!("V11 Migration: Add deployment environments");
     Ok(())
 }
 

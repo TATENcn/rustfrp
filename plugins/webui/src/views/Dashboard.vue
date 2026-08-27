@@ -1,18 +1,37 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NCard, NGrid, NGi, NSpace, NStatistic, NSpin, NTag } from 'naive-ui'
 import { useI18n } from '@/i18n'
 import { useSystemStore } from '@/stores/system'
+import { useEnvironmentStore } from '@/stores/environments'
+import { getMetricsHistory } from '@/api/metrics'
+import type { MetricsHistory } from '@/api/types'
+import MetricChart from '@/components/MetricChart.vue'
 
 const { t } = useI18n()
 const systemStore = useSystemStore()
+const environmentStore = useEnvironmentStore()
+const history = ref<MetricsHistory>({ resources: [], traffic: [] })
+
+const cpuValues = computed(() => history.value.resources.map((sample) => sample.system_cpu_percent))
+const memoryValues = computed(() => history.value.resources.map((sample) => sample.system_memory_used_bytes / 1024 / 1024))
+const receivedValues = computed(() => history.value.traffic.map((sample) => sample.received_bytes))
+const sentValues = computed(() => history.value.traffic.map((sample) => sample.sent_bytes))
+
+async function fetchHistory() {
+  const response = await getMetricsHistory(environmentStore.activeId ?? undefined)
+  history.value = response.data ?? { resources: [], traffic: [] }
+}
 
 let timer: ReturnType<typeof setInterval> | null = null
 
 onMounted(() => {
   systemStore.fetchStatus()
-  timer = setInterval(() => systemStore.fetchStatus(), 10_000)
+  environmentStore.fetchAll().then(fetchHistory)
+  timer = setInterval(() => { systemStore.fetchStatus(); fetchHistory() }, 10_000)
 })
+
+watch(() => environmentStore.activeId, () => fetchHistory())
 
 onUnmounted(() => {
   if (timer) clearInterval(timer)
@@ -81,6 +100,13 @@ function formatUptime(secs: number): string {
           <NStatistic label="Visitors" :value="systemStore.status?.total_visitors ?? 0" />
         </NCard>
       </NGi>
+    </NGrid>
+
+    <NGrid cols="1 m:2" :x-gap="16" :y-gap="16" style="margin-top: 16px">
+      <NGi><NCard title="System CPU" size="small"><MetricChart :values="cpuValues" unit="%" /></NCard></NGi>
+      <NGi><NCard title="System memory" size="small"><MetricChart :values="memoryValues" color="#2080f0" unit=" MiB" /></NCard></NGi>
+      <NGi><NCard title="Traffic received" size="small"><MetricChart :values="receivedValues" color="#18a058" unit=" B" empty-text="No traffic samples yet" /></NCard></NGi>
+      <NGi><NCard title="Traffic sent" size="small"><MetricChart :values="sentValues" color="#f0a020" unit=" B" empty-text="No traffic samples yet" /></NCard></NGi>
     </NGrid>
 
     <!-- Process List -->

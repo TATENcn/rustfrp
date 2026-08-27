@@ -212,6 +212,41 @@ export interface StatusResponse {
   processes: ProcessInfo[]
 }
 
+export interface Environment {
+  id?: number
+  name: string
+  description?: string | null
+  color: string
+  is_default: boolean
+  created_at: string
+  updated_at: string
+  profile_ids: number[]
+}
+
+export interface ResourceSample {
+  timestamp: string
+  daemon_cpu_percent: number
+  daemon_memory_bytes: number
+  system_cpu_percent: number
+  system_memory_used_bytes: number
+  system_memory_total_bytes: number
+  processes: Array<{ profile_id: number; pid: number; cpu_percent: number; memory_bytes: number }>
+}
+
+export interface TrafficSample {
+  timestamp: string
+  environment_id: number
+  profile_id: number
+  received_bytes: number
+  sent_bytes: number
+  active_connections: number
+}
+
+export interface MetricsHistory {
+  resources: ResourceSample[]
+  traffic: TrafficSample[]
+}
+
 export interface ReloadResponse {
   task_id: string
 }

@@ -1,0 +1,18 @@
+groups:
+  - name: rustfrp
+    rules:
+      - alert: RustFRPNodeOffline
+        expr: rustfrp_node_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "RustFRP node {{ $labels.node_name }} is offline"
+          description: "The control plane has failed to scrape {{ $labels.node_id }} for at least two minutes."
+      - alert: RustFRPControlUnavailable
+        expr: up{job="rustfrp-control"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "RustFRP control is unavailable"

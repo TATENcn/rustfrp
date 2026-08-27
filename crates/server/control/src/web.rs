@@ -40,6 +40,7 @@ pub fn create_router(
     Router::new()
         .route("/", get(index))
         .route("/health", get(health))
+        .route("/metrics", get(metrics))
         .route("/api/v1/nodes", get(list_nodes))
         .route("/api/v1/status", get(status))
         .route("/api/v1/agent/config/:node_id", get(agent_config))
@@ -130,6 +131,74 @@ async fn index() -> impl IntoResponse {
 /// 健康检查
 async fn health() -> StatusCode {
     StatusCode::OK
+}
+
+/// Aggregate the last successful scrape and attach stable node labels.
+async fn metrics(State(state): State<AppState>) -> Response<Body> {
+    let mut output = String::new();
+    for node in state.targets.list_nodes().await {
+        let up = matches!(node.state, crate::health::NodeState::Healthy { .. });
+        output.push_str(&format!(
+            "rustfrp_node_up{{node_id=\"{}\",node_name=\"{}\"}} {}\n",
+            escape_label(&node.node.id),
+            escape_label(&node.node.name),
+            u8::from(up)
+        ));
+        if let crate::health::NodeState::Healthy { metrics_body, .. } = node.state {
+            for line in metrics_body.lines() {
+                if line.is_empty() || line.starts_with('#') {
+                    output.push_str(line);
+                } else {
+                    output.push_str(&inject_node_labels(line, &node.node.id, &node.node.name));
+                }
+                output.push('\n');
+            }
+        }
+    }
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(
+            header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )
+        .body(Body::from(output))
+        .expect("static metrics response")
+}
+
+fn inject_node_labels(line: &str, id: &str, name: &str) -> String {
+    let Some(space) = line.find(char::is_whitespace) else {
+        return line.to_owned();
+    };
+    let (metric, value) = line.split_at(space);
+    let labels = format!(
+        "node_id=\"{}\",node_name=\"{}\"",
+        escape_label(id),
+        escape_label(name)
+    );
+    if let Some(close) = metric.rfind('}') {
+        let separator = if metric[..close].ends_with('{') {
+            ""
+        } else {
+            ","
+        };
+        format!(
+            "{}{}{}{}{}",
+            &metric[..close],
+            separator,
+            labels,
+            &metric[close..],
+            value
+        )
+    } else {
+        format!("{metric}{{{labels}}}{value}")
+    }
+}
+
+fn escape_label(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('\n', "\\n")
+        .replace('"', "\\\"")
 }
 
 /// 列出所有节点及其当前状态
@@ -229,6 +298,18 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn injects_node_labels_into_plain_and_labelled_samples() {
+        assert_eq!(
+            inject_node_labels("metric 1", "a", "A"),
+            "metric{node_id=\"a\",node_name=\"A\"} 1"
+        );
+        assert_eq!(
+            inject_node_labels("metric{kind=\"x\"} 2", "a", "A"),
+            "metric{kind=\"x\",node_id=\"a\",node_name=\"A\"} 2"
+        );
     }
 
     #[tokio::test]
