@@ -9,6 +9,7 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
+use rustfrp_client::process::diagnostic::ProcessFailure;
 use serde::Serialize;
 
 use super::response::ApiResponse;
@@ -35,6 +36,7 @@ pub struct ProcessInfoResponse {
     pub pid: Option<u32>,
     pub running: bool,
     pub restart_count: u32,
+    pub last_failure: Option<ProcessFailure>,
     pub config_path: String,
 }
 
@@ -112,6 +114,7 @@ pub async fn status(
             pid: p.pid,
             running: p.running,
             restart_count: p.restart_count,
+            last_failure: p.last_failure,
             config_path: p.config_path,
         })
         .collect();

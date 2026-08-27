@@ -1,11 +1,61 @@
 # Changelog
 
+## [Unreleased]
+
+## [0.2.0] - 2026-08-27
+
+### Added
+
+- Zero-trust API policy files with digest-only bearer credentials, tenant-bound
+  identities, read/write/telemetry scopes, and a whoami audit endpoint; plus
+  privilege-free eBPF readiness and pinned-object observability on Linux.
+- Tenant-isolated Environment and Profile administration with independent
+  defaults, non-enumerating ownership failures, and verified FRP user/serverUser
+  generation for namespaced server-side proxy identities.
+- Supply-chain policy enforcement with cargo-deny, grouped Dependabot updates,
+  scheduled all-feature, ignored, and documentation test coverage, plus a
+  security-patched Wasmtime 36 LTS runtime and canonical SPDX metadata.
+- Deployment environments with transactional profile assignment, a global WebUI
+  switcher, and automatic migration of existing profiles into Default.
+- Bounded local CPU, memory, frpc-process, and environment-scoped traffic time
+  series with SVG dashboard charts and Prometheus exposition.
+- Full daemon + official frps + control + Prometheus + Alertmanager + provisioned
+  Grafana Compose topology, including node-label-safe aggregation and offline alerts.
+- Wasmtime 36 LTS plugin runtime with per-call permission checks, deterministic fuel
+  exhaustion, epoch deadlines, 50 MiB guest-memory limits, lifecycle isolation,
+  event/config/traffic host channels, and runnable Failover, traffic-statistics,
+  and webhook-notification reference plugins.
+- Native release bundles for Linux, Windows, and macOS on amd64 and arm64,
+  including daemon, agent, and control binaries with SHA256 sidecars, plus a
+  six-platform pull-request build gate.
+- FRP multi-version registry with version/platform-isolated installs, official
+  release discovery, HTTPS mirror selection anchored to official checksums, and
+  transactional WebUI switching/deletion with process rollback.
+- Functional `rustfrp-agent` with authenticated Pull configuration, ETag support,
+  TOML plus native `frps verify` validation, atomic last-known-good caching, PID
+  adoption, crash restart, and an frps lifecycle independent from agent crashes.
+- WebUI controls to copy server-side mapped addresses and create up to 100 TCP
+  or UDP port mappings from lists and ranges with conflict validation.
+- Mandatory SHA256 verification against the official FRP release manifest,
+  version-aware binary integrity markers, and Windows ZIP archive support.
+- One-shot modern `frpc.toml` migration into SQLite with atomic rollback,
+  conflict-safe profile naming, Proxy/Visitor support, and WebUI controls.
+- Transactionally consistent SQLite backup download from the daemon and WebUI.
+- Rootless daemon container, Compose deployment, health checks, and multi-architecture
+  GHCR publishing.
+
+### Changed
+
+- frpc crash recovery now uses bounded exponential backoff, replenishes its retry
+  budget after a stable run, groups repeated failures, and exposes structured
+  authentication/network/configuration/port/TLS diagnostics in the status API.
+- API configuration payloads now apply model defaults to omitted fields, keeping
+  older clients compatible when new fields are introduced.
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [Unreleased]
 
 ## [0.1.0] - 2026-08-26
 

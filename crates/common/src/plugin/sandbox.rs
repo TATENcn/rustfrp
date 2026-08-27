@@ -61,6 +61,10 @@ pub enum HostFunction {
     GetLogLevel,
     /// 记录日志（写入核心的 tracing 系统）
     Log,
+    /// 请求核心启动、停止或切换 FRP 进程
+    ControlProcess,
+    /// 请求宿主发送 HTTP 通知（WASM 本身不持有 socket）
+    HttpPost,
 }
 
 impl HostFunction {
@@ -73,6 +77,8 @@ impl HostFunction {
             HostFunction::PublishEvent => Permission::SubscribeEvents,
             HostFunction::GetLogLevel => Permission::ReadConfig,
             HostFunction::Log => Permission::ReadConfig,
+            HostFunction::ControlProcess => Permission::ControlProcess,
+            HostFunction::HttpPost => Permission::NetworkAccess,
         }
     }
 
@@ -90,6 +96,8 @@ impl HostFunction {
             HostFunction::PublishEvent => "publish_event",
             HostFunction::GetLogLevel => "get_log_level",
             HostFunction::Log => "log",
+            HostFunction::ControlProcess => "control_process",
+            HostFunction::HttpPost => "http_post",
         }
     }
 }

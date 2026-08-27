@@ -4,6 +4,7 @@
 //! 负责进程的启动、停止、热重载和生命周期编排（ARCH-009）。
 
 use crate::error::{ClientError, Result};
+use crate::process::diagnostic::ProcessFailure;
 use crate::process::guard::ProcessGuard;
 use rustfrp_common::signal::SignalHandler;
 use std::collections::HashMap;
@@ -47,6 +48,7 @@ pub struct ProcessInfo {
     pub pid: Option<u32>,
     pub running: bool,
     pub restart_count: u32,
+    pub last_failure: Option<ProcessFailure>,
     pub config_path: String,
 }
 
@@ -61,7 +63,7 @@ pub struct ProcessManager {
     /// TOML 配置文件输出目录
     config_dir: PathBuf,
     /// rustfrp 托管的 frpc 二进制绝对路径
-    frpc_path: PathBuf,
+    frpc_path: Arc<RwLock<PathBuf>>,
     /// 共享的信号处理器
     signal_handler: SignalHandler,
 }
@@ -72,7 +74,7 @@ impl ProcessManager {
         Self {
             guards: Arc::new(RwLock::new(HashMap::new())),
             config_dir,
-            frpc_path,
+            frpc_path: Arc::new(RwLock::new(frpc_path)),
             signal_handler,
         }
     }
@@ -102,7 +104,7 @@ impl ProcessManager {
 
         let guard = ProcessGuard::new(
             toml_path.clone(),
-            self.frpc_path.clone(),
+            self.frpc_path.read().await.clone(),
             self.signal_handler.clone(),
             profile_name.to_string(),
         );
@@ -199,6 +201,7 @@ impl ProcessManager {
                 pid: guard.pid(),
                 running: guard.is_running(),
                 restart_count: guard.restart_count(),
+                last_failure: guard.last_failure(),
                 config_path: guard.config_path().to_string_lossy().to_string(),
             })
             .collect()
@@ -231,6 +234,16 @@ impl ProcessManager {
             .values()
             .filter(|g| g.is_running())
             .count()
+    }
+
+    /// Update the binary used for subsequently started processes.
+    /// Callers must coordinate stopping/restarting existing guards.
+    pub async fn set_frpc_path(&self, path: PathBuf) {
+        *self.frpc_path.write().await = path;
+    }
+
+    pub async fn frpc_path(&self) -> PathBuf {
+        self.frpc_path.read().await.clone()
     }
 
     /// 获取指定 Profile 的 stdout 日志文件路径

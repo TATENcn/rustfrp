@@ -5,6 +5,7 @@
 #![allow(clippy::lines_filter_map_ok)]
 
 use crate::error::{ClientError, Result};
+use crate::process::diagnostic::{classify_failure, ProcessFailure};
 use rustfrp_common::signal::SignalHandler;
 use std::fs::OpenOptions;
 use std::path::PathBuf;
@@ -12,10 +13,13 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
-use tokio::time::{sleep, Duration};
+use tokio::time::{sleep, Duration, Instant};
 
 /// 最大自动重启次数
 const MAX_RESTART_COUNT: u32 = 3;
+
+/// A process surviving this long is considered stable and gets a fresh retry budget.
+const STABLE_RUN_SECS: u64 = 60;
 
 /// 优雅退出等待时间
 const GRACEFUL_SHUTDOWN_SECS: u64 = 3;
@@ -36,6 +40,8 @@ pub struct ProcessGuard {
     running: Arc<AtomicBool>,
     /// 重启次数
     restart_count: Arc<AtomicU32>,
+    /// Latest grouped failure, exposed through the status API.
+    last_failure: Arc<std::sync::RwLock<Option<ProcessFailure>>>,
     /// 子进程 PID（0 = 未启动），缓存以避免在 async 上下文中调用 blocking_lock()
     pid: Arc<AtomicU32>,
     /// 信号处理器（Phase 2 协调关闭用）
@@ -69,6 +75,7 @@ impl ProcessGuard {
             frpc_path,
             running: Arc::new(AtomicBool::new(false)),
             restart_count: Arc::new(AtomicU32::new(0)),
+            last_failure: Arc::new(std::sync::RwLock::new(None)),
             pid: Arc::new(AtomicU32::new(0)),
             signal_handler,
             log_dir,
@@ -145,6 +152,7 @@ impl ProcessGuard {
         *self.child.lock().await = Some(child);
         self.running.store(true, Ordering::SeqCst);
         self.restart_count.store(0, Ordering::SeqCst);
+        *self.last_failure.write().expect("failure lock poisoned") = None;
 
         // Wait briefly and check if frpc exited immediately (e.g., bad config).
         // This catches startup failures that would otherwise go unnoticed because
@@ -213,70 +221,111 @@ impl ProcessGuard {
         let frpc_path = self.frpc_path.clone();
         let log_dir = self.log_dir.clone();
         let profile_name = self.profile_name.clone();
+        let last_failure = self.last_failure.clone();
         tokio::spawn(async move {
             // 等待启动确认（消除 spawn_child 和 wait() 之间的竞态窗口）
             let _ = ready_rx.await;
 
-            // 等待子进程退出
-            let exit_status = {
-                let mut guard = child_arc.lock().await;
-                if let Some(ref mut child) = *guard {
-                    child.wait().await.ok()
-                } else {
+            let safe_name = sanitize_log_filename(&profile_name);
+            let stdout_log = format!("frpc_{safe_name}.log");
+            let stderr_log = format!("frpc_{safe_name}_err.log");
+            let stderr_path = log_dir.join(&stderr_log);
+            let mut started_at = Instant::now();
+
+            loop {
+                // Poll without holding the child mutex across an await. This lets
+                // shutdown take ownership and signal the process immediately.
+                let exit_status = loop {
+                    let status = {
+                        let mut guard = child_arc.lock().await;
+                        let Some(child) = guard.as_mut() else {
+                            return;
+                        };
+                        match child.try_wait() {
+                            Ok(Some(status)) => {
+                                guard.take();
+                                Some(status)
+                            }
+                            Ok(None) => None,
+                            Err(error) => {
+                                tracing::error!(%error, "Failed to poll frpc process");
+                                running.store(false, Ordering::SeqCst);
+                                return;
+                            }
+                        }
+                    };
+                    if let Some(status) = status {
+                        break status;
+                    }
+                    sleep(Duration::from_millis(250)).await;
+                };
+
+                if !running.load(Ordering::SeqCst) {
                     return;
                 }
-            };
 
-            // 检查是否是主动停止
-            if !running.load(Ordering::SeqCst) {
-                return; // 主动停止，不重启
-            }
+                pid.store(0, Ordering::SeqCst);
+                if started_at.elapsed() >= Duration::from_secs(STABLE_RUN_SECS) {
+                    restart_count.store(0, Ordering::SeqCst);
+                    *last_failure.write().expect("failure lock poisoned") = None;
+                }
+                let code = exit_status.code().unwrap_or(-1);
+                let stderr = read_log_tail(&stderr_path, 80);
+                let failure = classify_failure(&stderr, code);
+                let occurrences = record_failure(&last_failure, failure.clone());
+                if occurrences == 1 {
+                    tracing::warn!(
+                        exit_code = code,
+                        reason = ?failure.reason,
+                        summary = %failure.summary,
+                        "frpc exited unexpectedly"
+                    );
+                } else {
+                    tracing::debug!(reason = ?failure.reason, occurrences, "Grouped repeated frpc failure");
+                }
 
-            // 子进程意外退出
-            let code = exit_status.and_then(|s| s.code()).unwrap_or(-1);
-            tracing::warn!(exit_code = code, "frpc exited unexpectedly");
+                let completed_restarts = restart_count.load(Ordering::SeqCst);
+                if completed_restarts >= MAX_RESTART_COUNT {
+                    tracing::error!(
+                        attempts = MAX_RESTART_COUNT,
+                        reason = ?failure.reason,
+                        occurrences,
+                        "frpc restart budget exhausted"
+                    );
+                    running.store(false, Ordering::SeqCst);
+                    return;
+                }
+                let attempt = completed_restarts + 1;
+                restart_count.store(attempt, Ordering::SeqCst);
 
-            let count = restart_count.load(Ordering::SeqCst);
-            if count < MAX_RESTART_COUNT {
-                restart_count.store(count + 1, Ordering::SeqCst);
+                let delay_secs = 1_u64 << (attempt - 1);
                 tracing::info!(
-                    attempt = count + 1,
+                    attempt,
                     max = MAX_RESTART_COUNT,
-                    "Automatically restart frpc"
+                    delay_secs,
+                    "Scheduling frpc restart"
                 );
+                sleep(Duration::from_secs(delay_secs)).await;
+                if !running.load(Ordering::SeqCst) {
+                    return;
+                }
 
-                // 等待 1 秒后重启
-                sleep(Duration::from_secs(1)).await;
-
-                // 使用 profile_name 生成日志文件名
-                let safe_name = sanitize_log_filename(&profile_name);
-                let stdout_log = format!("frpc_{}.log", safe_name);
-                let stderr_log = format!("frpc_{}_err.log", safe_name);
-
-                // 重新启动
-                let stdout_file = match OpenOptions::new()
-                    .append(true)
-                    .create(true)
-                    .open(log_dir.join(&stdout_log))
-                {
-                    Ok(f) => f,
-                    Err(e) => {
-                        tracing::error!(error = %e, log = %stdout_log, "Failed to open log file");
+                let stdout_file = match open_log_file(&log_dir.join(&stdout_log)) {
+                    Ok(file) => file,
+                    Err(error) => {
+                        tracing::error!(%error, "Failed to open frpc stdout log");
+                        running.store(false, Ordering::SeqCst);
                         return;
                     }
                 };
-                let stderr_file = match OpenOptions::new()
-                    .append(true)
-                    .create(true)
-                    .open(log_dir.join(&stderr_log))
-                {
-                    Ok(f) => f,
-                    Err(e) => {
-                        tracing::error!(error = %e, log = %stderr_log, "Failed to open log file");
+                let stderr_file = match open_log_file(&stderr_path) {
+                    Ok(file) => file,
+                    Err(error) => {
+                        tracing::error!(%error, "Failed to open frpc stderr log");
+                        running.store(false, Ordering::SeqCst);
                         return;
                     }
                 };
-
                 match Command::new(&frpc_path)
                     .arg("-c")
                     .arg(&config_path)
@@ -287,18 +336,17 @@ impl ProcessGuard {
                 {
                     Ok(new_child) => {
                         let new_pid = new_child.id().unwrap_or(0);
-                        tracing::info!(pid = new_pid, "frpc restarted");
                         pid.store(new_pid, Ordering::SeqCst);
                         *child_arc.lock().await = Some(new_child);
+                        started_at = Instant::now();
+                        tracing::info!(pid = new_pid, attempt, "frpc restarted");
                     }
-                    Err(e) => {
-                        tracing::error!(error = %e, "frpc restart failed");
+                    Err(error) => {
+                        tracing::error!(%error, "frpc restart failed");
                         running.store(false, Ordering::SeqCst);
+                        return;
                     }
                 }
-            } else {
-                tracing::error!(count, "frpc reached max restart count, stopping restart");
-                running.store(false, Ordering::SeqCst);
             }
         });
     }
@@ -414,6 +462,13 @@ impl ProcessGuard {
         self.restart_count.load(Ordering::SeqCst)
     }
 
+    pub fn last_failure(&self) -> Option<ProcessFailure> {
+        self.last_failure
+            .read()
+            .expect("failure lock poisoned")
+            .clone()
+    }
+
     /// 获取配置文件路径
     pub fn config_path(&self) -> &PathBuf {
         &self.config_path
@@ -430,6 +485,26 @@ impl ProcessGuard {
         let safe_name = sanitize_log_filename(&self.profile_name);
         self.log_dir.join(format!("frpc_{}_err.log", safe_name))
     }
+}
+
+fn open_log_file(path: &PathBuf) -> std::io::Result<std::fs::File> {
+    OpenOptions::new().append(true).create(true).open(path)
+}
+
+fn record_failure(
+    state: &std::sync::RwLock<Option<ProcessFailure>>,
+    failure: ProcessFailure,
+) -> u32 {
+    let mut current = state.write().expect("failure lock poisoned");
+    if let Some(previous) = current.as_mut() {
+        if previous.reason == failure.reason && previous.summary == failure.summary {
+            previous.exit_code = failure.exit_code;
+            previous.occurrences = previous.occurrences.saturating_add(1);
+            return previous.occurrences;
+        }
+    }
+    *current = Some(failure);
+    1
 }
 
 impl Drop for ProcessGuard {
@@ -499,6 +574,7 @@ fn read_log_tail(path: &std::path::Path, max_lines: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::process::diagnostic::{FailureReason, ProcessFailure};
 
     #[tokio::test]
     async fn test_process_guard_debug() {
@@ -512,5 +588,32 @@ mod tests {
         assert!(!guard.is_running());
         assert_eq!(guard.restart_count(), 0);
         assert_eq!(guard.pid(), None);
+    }
+
+    #[test]
+    fn repeated_failures_are_grouped_by_reason() {
+        let state = std::sync::RwLock::new(None);
+        let failure = ProcessFailure {
+            reason: FailureReason::NetworkUnreachable,
+            summary: "FRP server is unreachable".into(),
+            exit_code: 1,
+            occurrences: 1,
+        };
+        assert_eq!(record_failure(&state, failure.clone()), 1);
+        assert_eq!(record_failure(&state, failure), 2);
+        assert_eq!(state.read().unwrap().as_ref().unwrap().occurrences, 2);
+
+        assert_eq!(
+            record_failure(
+                &state,
+                ProcessFailure {
+                    reason: FailureReason::AuthenticationFailed,
+                    summary: "FRP authentication failed".into(),
+                    exit_code: 1,
+                    occurrences: 1,
+                },
+            ),
+            1
+        );
     }
 }

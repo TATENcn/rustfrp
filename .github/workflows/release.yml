@@ -5,53 +5,177 @@ on:
     tags: ['v*']
 
 jobs:
+  verify-tag:
+    name: Verify tag is on main
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require the tagged commit to be reachable from main
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "Release tags must point to a commit on main."
+            exit 1
+          }
+
+  webui:
+    name: Build embedded WebUI
+    needs: verify-tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3'
+      - name: Build frontend
+        working-directory: plugins/webui
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: embedded-webui
+          path: plugins/webui/dist/
+          retention-days: 1
+
   build:
+    needs: [verify-tag, webui]
     strategy:
+      fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            artifact: rustfrp-daemon_linux_amd64
-        # arm64 / Windows / macOS 后续补充：ring 等 C 依赖交叉编译
-        # 需 zig/cross 工具链，v0.1.0 先发布 amd64
+            artifact: rustfrp_linux_amd64
+            archive: tar
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+            artifact: rustfrp_linux_arm64
+            archive: tar
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            artifact: rustfrp_windows_amd64
+            archive: zip
+          - target: aarch64-pc-windows-msvc
+            os: windows-11-vs2026-arm
+            artifact: rustfrp_windows_arm64
+            archive: zip
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
+            artifact: rustfrp_darwin_amd64
+            archive: tar
+          - target: aarch64-apple-darwin
+            os: macos-15
+            artifact: rustfrp_darwin_arm64
+            archive: tar
 
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/download-artifact@v4
         with:
-          bun-version: '1.3'
-
-      - name: Build frontend (required for rust-embed)
-        working-directory: plugins/webui
-        run: |
-          bun install --frozen-lockfile
-          bun run build
+          name: embedded-webui
+          path: plugins/webui/dist
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
 
-      - name: Build release binary
-        run: cargo build -p rustfrp-daemon --release --target ${{ matrix.target }}
+      - name: Build release binaries
+        run: cargo build --workspace --bins --release --target ${{ matrix.target }}
 
-      - name: Package and checksum
+      - name: Package Unix bundle
+        if: matrix.archive == 'tar'
+        shell: bash
         run: |
-          mkdir -p dist
-          BIN=$(find target/${{ matrix.target }}/release -maxdepth 1 -name rustfrp-daemon -type f)
-          cp "$BIN" dist/${{ matrix.artifact }}
-          cd dist
-          tar -czf ${{ matrix.artifact }}.tar.gz ${{ matrix.artifact }}
-          sha256sum ${{ matrix.artifact }}.tar.gz > ${{ matrix.artifact }}.tar.gz.sha256
-          rm ${{ matrix.artifact }}
+          set -euo pipefail
+          bundle="dist/${{ matrix.artifact }}"
+          mkdir -p "$bundle"
+          for binary in rustfrp-daemon rustfrp-agent rustfrp-control; do
+            cp "target/${{ matrix.target }}/release/$binary" "$bundle/"
+          done
+          cp README.md CHANGELOG.md LICENSE "$bundle/"
+          tar -C dist -czf "dist/${{ matrix.artifact }}.tar.gz" "${{ matrix.artifact }}"
+          if command -v sha256sum >/dev/null 2>&1; then
+            (cd dist && sha256sum "${{ matrix.artifact }}.tar.gz" > "${{ matrix.artifact }}.tar.gz.sha256")
+          else
+            (cd dist && shasum -a 256 "${{ matrix.artifact }}.tar.gz" > "${{ matrix.artifact }}.tar.gz.sha256")
+          fi
+
+      - name: Package Windows bundle
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundle = "dist/${{ matrix.artifact }}"
+          New-Item -ItemType Directory -Force -Path $bundle | Out-Null
+          foreach ($binary in @('rustfrp-daemon', 'rustfrp-agent', 'rustfrp-control')) {
+            Copy-Item "target/${{ matrix.target }}/release/$binary.exe" $bundle
+          }
+          Copy-Item README.md, CHANGELOG.md, LICENSE $bundle
+          Compress-Archive -Path "$bundle/*" -DestinationPath "dist/${{ matrix.artifact }}.zip"
+          $file = "${{ matrix.artifact }}.zip"
+          $hash = (Get-FileHash "dist/$file" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $file" | Set-Content -NoNewline "dist/$file.sha256"
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: dist/
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha256
+
+  container:
+    name: Publish multi-architecture container
+    needs: verify-tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/tatencn/rustfrp
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Build and push linux/amd64 and linux/arm64
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   release:
     needs: build
@@ -64,11 +188,13 @@ jobs:
           path: artifacts
       - name: Flatten artifacts
         run: |
-          find artifacts -type f \( -name '*.tar.gz' -o -name '*.sha256' \) -exec cp {} . \;
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.sha256' \) -exec cp {} . \;
           ls -la
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             *.tar.gz
             *.tar.gz.sha256
+            *.zip
+            *.zip.sha256
           generate_release_notes: true

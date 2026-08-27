@@ -68,6 +68,7 @@ impl Scraper {
                 for node in nodes {
                     let node_id = node.node.id.clone();
                     let url = node.node.metrics_url.clone();
+                    let bearer_token_file = node.node.bearer_token_file.clone();
 
                     // Circuit breaker: reduce frequency after consecutive failures
                     if node.consecutive_failures >= threshold
@@ -76,7 +77,7 @@ impl Scraper {
                         continue;
                     }
 
-                    let result = fetch_metrics(&client, &url).await;
+                    let result = fetch_metrics(&client, &url, bearer_token_file.as_deref()).await;
 
                     match result {
                         Ok(body) => {
@@ -115,8 +116,17 @@ impl Scraper {
 }
 
 /// Fetch /metrics from a node using the shared client
-async fn fetch_metrics(client: &reqwest::Client, url: &str) -> Result<String, anyhow::Error> {
-    let response = client.get(url).send().await?;
+async fn fetch_metrics(
+    client: &reqwest::Client,
+    url: &str,
+    bearer_token_file: Option<&str>,
+) -> Result<String, anyhow::Error> {
+    let mut request = client.get(url);
+    if let Some(path) = bearer_token_file {
+        let token = tokio::fs::read_to_string(path).await?;
+        request = request.bearer_auth(token.trim());
+    }
+    let response = request.send().await?;
 
     if !response.status().is_success() {
         anyhow::bail!("HTTP {}", response.status());

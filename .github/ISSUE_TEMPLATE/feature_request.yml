@@ -1,0 +1,30 @@
+name: Feature request
+description: Propose a scoped improvement
+title: "feat: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Roadmap priority
+      options: [P0, P1, P2, Unscheduled]
+    validations:
+      required: true
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and migration impact
+      description: Mention API, database, FRP version, deployment, and rollback implications.

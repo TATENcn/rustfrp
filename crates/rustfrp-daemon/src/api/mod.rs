@@ -9,24 +9,31 @@ pub mod response;
 pub mod state;
 
 // Sub-modules for each resource type
+pub mod auth;
 pub mod bindings;
+pub mod config_transfer;
+pub mod environments;
+pub mod frp_versions;
 pub mod logs;
+pub mod metrics;
 pub mod profiles;
 pub mod proxies;
 pub mod system;
 pub mod visitors;
 
-use axum::extract::Request;
+use axum::extract::{Extension, Request};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use axum::Router;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 
 use rustfrp_client::core::ClientCore;
 
+use self::auth::{AuthIdentity, AuthPolicy};
 use self::response::{ApiError, ApiResponse};
 use self::state::ApiState;
 
@@ -37,14 +44,19 @@ use self::state::ApiState;
 pub trait AuthMiddleware: Send + Sync + 'static {
     /// Authenticate the request. Returns `Ok(())` if allowed,
     /// or `Err(response)` with a 401/403 response body.
-    fn authenticate(&self, request: &Request) -> Result<(), Response>;
+    fn authenticate(&self, request: &mut Request) -> Result<(), Response>;
 }
 
 /// MVP implementation: allow all requests through.
 pub struct NoAuth;
 
 impl AuthMiddleware for NoAuth {
-    fn authenticate(&self, _request: &Request) -> Result<(), Response> {
+    fn authenticate(&self, request: &mut Request) -> Result<(), Response> {
+        request.extensions_mut().insert(AuthIdentity {
+            name: "local".into(),
+            tenant: "default".into(),
+            scopes: vec!["*".into()],
+        });
         Ok(())
     }
 }
@@ -65,7 +77,7 @@ impl BearerToken {
 }
 
 impl AuthMiddleware for BearerToken {
-    fn authenticate(&self, request: &Request) -> Result<(), Response> {
+    fn authenticate(&self, request: &mut Request) -> Result<(), Response> {
         // Health check endpoint is always public
         if request.uri().path() == "/api/v1/health" {
             return Ok(());
@@ -84,7 +96,14 @@ impl AuthMiddleware for BearerToken {
             .and_then(|v| v.strip_prefix("Bearer "));
 
         match auth_header {
-            Some(t) if t == self.token => Ok(()),
+            Some(t) if t == self.token => {
+                request.extensions_mut().insert(AuthIdentity {
+                    name: "legacy".into(),
+                    tenant: "default".into(),
+                    scopes: vec!["*".into()],
+                });
+                Ok(())
+            }
             _ => {
                 let body = ApiResponse::<()> {
                     success: false,
@@ -101,13 +120,64 @@ impl AuthMiddleware for BearerToken {
     }
 }
 
+#[derive(Clone)]
+pub struct ScopedBearerToken {
+    policy: AuthPolicy,
+}
+
+impl ScopedBearerToken {
+    pub fn new(policy: AuthPolicy) -> Self {
+        Self { policy }
+    }
+}
+
+impl AuthMiddleware for ScopedBearerToken {
+    fn authenticate(&self, request: &mut Request) -> Result<(), Response> {
+        if request.uri().path() == "/api/v1/health" {
+            return Ok(());
+        }
+        let path = request.uri().path();
+        if path.starts_with("/assets/") || !path.starts_with("/api/") {
+            return Ok(());
+        }
+        let bearer = request
+            .headers()
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.strip_prefix("Bearer "));
+        match bearer.and_then(|token| self.policy.authenticate(token, request)) {
+            Some(identity) => {
+                request.extensions_mut().insert(identity);
+                Ok(())
+            }
+            None => Err(auth_error(
+                "Token is invalid, outside its tenant, or lacks the required scope",
+            )),
+        }
+    }
+}
+
+fn auth_error(message: &str) -> Response {
+    let body = ApiResponse::<()> {
+        success: false,
+        data: None,
+        count: None,
+        error: Some(ApiError::generic("AUTH_001", message.into())),
+    };
+    (StatusCode::UNAUTHORIZED, Json(body)).into_response()
+}
+
+async fn whoami(Extension(identity): Extension<AuthIdentity>) -> Json<ApiResponse<AuthIdentity>> {
+    Json(ApiResponse::ok(identity))
+}
+
 /// Build the axum Router with all API endpoints, static assets, and SPA fallback.
 ///
 /// Route priority order:
 /// 1. API routes (`/api/v1/*`)
 /// 2. Static assets (`/assets/*`)
 /// 3. SPA fallback (everything else → `index.html`)
-pub fn create_router(state: ApiState, _auth: impl AuthMiddleware) -> Router {
+pub fn create_router(state: ApiState, auth: impl AuthMiddleware) -> Router {
     use crate::web;
 
     // Group 1: API routes (matched first)
@@ -122,6 +192,18 @@ pub fn create_router(state: ApiState, _auth: impl AuthMiddleware) -> Router {
             axum::routing::get(profiles::get)
                 .put(profiles::update)
                 .delete(profiles::delete),
+        )
+        .route(
+            "/api/v1/profiles/:id/environment",
+            axum::routing::put(environments::assign_profile),
+        )
+        .route(
+            "/api/v1/environments",
+            axum::routing::get(environments::list).post(environments::create),
+        )
+        .route(
+            "/api/v1/environments/:id",
+            axum::routing::put(environments::update).delete(environments::delete),
         )
         // Proxy CRUD
         .route(
@@ -181,6 +263,45 @@ pub fn create_router(state: ApiState, _auth: impl AuthMiddleware) -> Router {
             axum::routing::get(system::reload_status),
         )
         .route("/api/v1/health", axum::routing::get(system::health))
+        .route("/api/v1/auth/whoami", axum::routing::get(whoami))
+        .route(
+            "/api/v1/metrics/history",
+            axum::routing::get(metrics::history),
+        )
+        .route(
+            "/api/v1/metrics/traffic",
+            axum::routing::post(metrics::ingest_traffic),
+        )
+        .route(
+            "/api/v1/metrics/prometheus",
+            axum::routing::get(metrics::prometheus),
+        )
+        // Explicit migration import and consistent SQLite backup
+        .route(
+            "/api/v1/config/import",
+            axum::routing::post(config_transfer::import),
+        )
+        .route(
+            "/api/v1/config/export",
+            axum::routing::get(config_transfer::export),
+        )
+        // FRP binary multi-version management
+        .route(
+            "/api/v1/frp/versions",
+            axum::routing::get(frp_versions::list).post(frp_versions::install),
+        )
+        .route(
+            "/api/v1/frp/releases",
+            axum::routing::get(frp_versions::available),
+        )
+        .route(
+            "/api/v1/frp/versions/:version/activate",
+            axum::routing::post(frp_versions::activate),
+        )
+        .route(
+            "/api/v1/frp/versions/:version",
+            axum::routing::delete(frp_versions::remove),
+        )
         // Shared state
         .with_state(state);
 
@@ -191,6 +312,7 @@ pub fn create_router(state: ApiState, _auth: impl AuthMiddleware) -> Router {
     //
     // Order matters: API first, then static assets, then fallback.
     // axum Router::merge keeps registration order; earlier routes match first.
+    let auth = Arc::new(auth);
     Router::new()
         .merge(api_routes)
         .merge(static_routes)
@@ -206,6 +328,15 @@ pub fn create_router(state: ApiState, _auth: impl AuthMiddleware) -> Router {
                     },
                 ),
         )
+        .layer(axum::middleware::from_fn(
+            move |mut request: Request, next: axum::middleware::Next| {
+                let auth = auth.clone();
+                async move {
+                    auth.authenticate(&mut request)?;
+                    Ok::<_, Response>(next.run(request).await)
+                }
+            },
+        ))
 }
 
 /// Start the HTTP API server.
@@ -220,6 +351,7 @@ pub async fn serve(core: ClientCore, listen_addr: &str) -> anyhow::Result<()> {
         core.config_dir().clone(),
         core.state().clone(),
     );
+    state.metrics.spawn_sampler(core.process_manager().clone());
 
     let router = create_router(state, NoAuth);
 
@@ -261,6 +393,7 @@ pub async fn serve_with_auth(
         core.config_dir().clone(),
         core.state().clone(),
     );
+    state.metrics.spawn_sampler(core.process_manager().clone());
 
     let router = create_router(state, BearerToken::new(api_token.to_string()));
 
@@ -286,4 +419,89 @@ pub async fn serve_with_auth(
 
     tracing::info!("Daemon shut down");
     Ok(())
+}
+
+pub async fn serve_with_policy(
+    core: ClientCore,
+    listen_addr: &str,
+    policy: AuthPolicy,
+) -> anyhow::Result<()> {
+    let state = ApiState::new(
+        core.db().clone(),
+        core.process_manager().clone(),
+        core.config_dir().clone(),
+        core.state().clone(),
+    );
+    state.metrics.spawn_sampler(core.process_manager().clone());
+    let router = create_router(state, ScopedBearerToken::new(policy));
+    let addr: SocketAddr = listen_addr.parse()?;
+    tracing::info!(%addr, "HTTP API server starting (auth: scoped bearer policy)");
+    let listener = TcpListener::bind(addr).await?;
+    let api_server = axum::serve(listener, router.into_make_service());
+    tokio::select! {
+        result = api_server => if let Err(error) = result { tracing::error!(%error, "HTTP API server error"); },
+        result = core.run() => if let Err(error) = result { tracing::error!(%error, "Client core error"); },
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request as HttpRequest;
+    use rustfrp_client::db::{migrate, Database};
+    use rustfrp_client::process::manager::ProcessManager;
+    use rustfrp_client::ClientState;
+    use rustfrp_common::signal::SignalHandler;
+    use tokio::sync::RwLock;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn bearer_auth_is_applied_to_api_routes_but_not_health() {
+        let database_file = tempfile::NamedTempFile::new().unwrap();
+        let db = Database::open(database_file.path().to_str().unwrap())
+            .await
+            .unwrap();
+        {
+            let connection = db.lock().await;
+            migrate::run(&connection).unwrap();
+        }
+        let runtime = tempfile::tempdir().unwrap();
+        let manager = ProcessManager::new(
+            runtime.path().into(),
+            "/nonexistent/frpc".into(),
+            SignalHandler::new(),
+        );
+        let state = ApiState::new(
+            db,
+            manager,
+            runtime.path().into(),
+            Arc::new(RwLock::new(ClientState::Ready)),
+        );
+        let app = create_router(state, BearerToken::new("secret".into()));
+
+        let unauthorized = app
+            .clone()
+            .oneshot(
+                HttpRequest::builder()
+                    .uri("/api/v1/status")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+        let health = app
+            .oneshot(
+                HttpRequest::builder()
+                    .uri("/api/v1/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(health.status(), StatusCode::OK);
+    }
 }

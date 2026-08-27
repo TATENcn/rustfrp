@@ -9,6 +9,8 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
 
+use crate::metrics::MetricsStore;
+use rustfrp_bin::manager::VersionManager;
 use rustfrp_client::db::Database;
 use rustfrp_client::process::manager::ProcessManager;
 use rustfrp_client::ClientState;
@@ -44,6 +46,9 @@ pub struct ApiState {
     pub start_time: Instant,
     pub app_state: Arc<RwLock<ClientState>>,
     pub reload_tasks: Arc<RwLock<HashMap<String, ReloadTaskStatus>>>,
+    pub frp_versions: VersionManager,
+    pub frp_version_operation: Arc<tokio::sync::Mutex<()>>,
+    pub metrics: MetricsStore,
 }
 
 impl ApiState {
@@ -61,6 +66,9 @@ impl ApiState {
             start_time: Instant::now(),
             app_state,
             reload_tasks: Arc::new(RwLock::new(HashMap::new())),
+            frp_versions: VersionManager::default(),
+            frp_version_operation: Arc::new(tokio::sync::Mutex::new(())),
+            metrics: MetricsStore::new(360),
         }
     }
 }

@@ -7,5 +7,6 @@
 //! - `generator.rs` — SQLite → TOML 生成器 + 原子写入（tmp → rename）
 
 pub mod generator;
+pub mod import;
 pub mod model;
 pub mod validate;

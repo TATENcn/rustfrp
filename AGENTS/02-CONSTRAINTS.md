@@ -19,7 +19,7 @@ modification_policy: constitution
 |---|---|---|
 | ARCH-001 | 核心最小化，不含 UI 和业务逻辑 | [→](#一架构约束) |
 | ARCH-002 | 插件隔离，崩溃不影响核心 | [→](#一架构约束) |
-| ARCH-003 | SQLite 唯一真理来源，禁双向同步 | [→](#一架构约束) |
+| ARCH-003 | SQLite 唯一真理来源；仅允许显式一次性迁移导入 | [→](#一架构约束) |
 | ARCH-004 | 字段 1:1 映射 FRP 规范 | [→](#一架构约束) |
 | ARCH-005 | Profile/Proxy/Binding 三表解耦 | [→](#一架构约束) |
 | ARCH-006 | FRP 子进程运行，优雅退出 | [→](#一架构约束) |
@@ -88,11 +88,13 @@ modification_policy: constitution
 
 **规定**：
 - SQLite 是配置的唯一持久化存储
-- 系统绝不从 TOML 反向解析写入 SQLite
+- 禁止运行时自动或持续执行 TOML → SQLite 双向同步
+- 允许用户显式执行一次性迁移导入；导入必须先解析和校验，并在单个事务中写入 SQLite
+- 导入完成后，源 TOML 不再参与运行时配置管理，也不会被持续监听
 - TOML 文件仅为运行时产物，每次启动/重载时从 SQLite 重新生成
 - 用户永远不需要手动编辑生成的 TOML 文件
 
-**验证**：检查代码中是否存在 TOML → SQLite 的写入路径，存在即违规。
+**验证**：除显式迁移入口外，不得存在 TOML → SQLite 写入路径；导入失败测试必须断言事务完整回滚。
 
 ---
 
@@ -475,7 +477,7 @@ SELECT name FROM sqlite_master WHERE type='table'
 |---|---|---|
 | ARCH-001 | 核心最小化，不含 UI 和业务逻辑 | P0 |
 | ARCH-002 | 插件隔离，崩溃不影响核心 | P0 |
-| ARCH-003 | SQLite 唯一真理来源，禁双向同步 | P0 |
+| ARCH-003 | SQLite 唯一真理来源；仅允许显式一次性迁移导入 | P0 |
 | ARCH-004 | 字段 1:1 映射 FRP 规范 | P0 |
 | ARCH-005 | Profile/Proxy/Binding 三表解耦 | P0 |
 | ARCH-006 | FRP 子进程运行，优雅退出 | P0 |

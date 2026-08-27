@@ -10,12 +10,14 @@ import {
   NButton,
   NSpace,
   NSwitch,
+  NSelect,
   NIcon,
   useMessage,
   type MenuOption,
 } from "naive-ui";
 import { useI18n } from "@/i18n";
 import { useSystemStore } from "@/stores/system";
+import { useEnvironmentStore } from "@/stores/environments";
 import { onMounted } from "vue";
 
 const router = useRouter();
@@ -23,6 +25,7 @@ const route = useRoute();
 const i18n = useI18n();
 const message = useMessage();
 const systemStore = useSystemStore();
+const environmentStore = useEnvironmentStore();
 
 const collapsed = ref(false);
 const hasToken = ref(!!localStorage.getItem("api_token"));
@@ -157,6 +160,7 @@ const statusText = computed(() => {
 
 onMounted(() => {
   systemStore.fetchStatus();
+  environmentStore.fetchAll();
 });
 </script>
 
@@ -179,6 +183,15 @@ onMounted(() => {
           i18n.t("app.title")
         }}</span>
         <NSpace align="center" :size="8">
+          <NSelect
+            v-if="environmentStore.environments.length"
+            :value="environmentStore.activeId"
+            :options="environmentStore.environments.map((item) => ({ label: item.name, value: item.id! }))"
+            size="small"
+            style="width: 150px"
+            aria-label="Environment"
+            @update:value="environmentStore.select"
+          />
           <!-- i18n toggle — primary button so it's clearly visible -->
           <NButton
             type="primary"

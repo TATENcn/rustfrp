@@ -7,19 +7,21 @@
 //! - PUT    /api/v1/profiles/{id}  — update a profile
 //! - DELETE /api/v1/profiles/{id}  — delete a profile (stops frpc first)
 
-use axum::extract::{Path, State};
+use axum::extract::{Extension, Path, State};
 use axum::Json;
 use chrono::Utc;
 use rustfrp_client::config::model::FrpsProfile;
 
+use super::auth::AuthIdentity;
 use super::response::ApiResponse;
 use super::state::ApiState;
 
 /// List all profiles
 pub async fn list(
     State(state): State<ApiState>,
+    Extension(identity): Extension<AuthIdentity>,
 ) -> Result<Json<ApiResponse<Vec<FrpsProfile>>>, (axum::http::StatusCode, Json<ApiResponse<()>>)> {
-    let profiles = state.db.list_profiles().await.map_err(|e| {
+    let all_profiles = state.db.list_profiles().await.map_err(|e| {
         (
             super::response::status_code(&e),
             Json(ApiResponse::<()> {
@@ -30,6 +32,17 @@ pub async fn list(
             }),
         )
     })?;
+    let mut profiles = Vec::new();
+    for profile in all_profiles {
+        if state
+            .db
+            .profile_belongs_to_tenant(profile.id.unwrap_or_default(), &identity.tenant)
+            .await
+            .map_err(api_error)?
+        {
+            profiles.push(profile);
+        }
+    }
 
     let count = profiles.len();
     Ok(Json(ApiResponse::ok_list(profiles, count)))
@@ -38,8 +51,10 @@ pub async fn list(
 /// Get a single profile by ID
 pub async fn get(
     State(state): State<ApiState>,
+    Extension(identity): Extension<AuthIdentity>,
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse<FrpsProfile>>, (axum::http::StatusCode, Json<ApiResponse<()>>)> {
+    ensure_profile_tenant(&state, id, &identity.tenant).await?;
     let profile = state.db.get_profile(id).await.map_err(|e| {
         (
             super::response::status_code(&e),
@@ -58,6 +73,7 @@ pub async fn get(
 /// Create a new profile
 pub async fn create(
     State(state): State<ApiState>,
+    Extension(identity): Extension<AuthIdentity>,
     Json(mut profile): Json<FrpsProfile>,
 ) -> Result<
     (axum::http::StatusCode, Json<ApiResponse<FrpsProfile>>),
@@ -68,6 +84,11 @@ pub async fn create(
     profile.created_at = now.clone();
     profile.updated_at = now;
 
+    let environment_id = state
+        .db
+        .default_environment_for_tenant(&identity.tenant)
+        .await
+        .map_err(api_error)?;
     let id = state.db.insert_profile(&profile).await.map_err(|e| {
         (
             super::response::status_code(&e),
@@ -80,6 +101,10 @@ pub async fn create(
         )
     })?;
 
+    if let Err(error) = state.db.set_profile_environment(id, environment_id).await {
+        let _ = state.db.delete_profile(id).await;
+        return Err(api_error(error));
+    }
     profile.id = Some(id);
     Ok((
         axum::http::StatusCode::CREATED,
@@ -90,9 +115,11 @@ pub async fn create(
 /// Update an existing profile (full replacement)
 pub async fn update(
     State(state): State<ApiState>,
+    Extension(identity): Extension<AuthIdentity>,
     Path(id): Path<i64>,
     Json(mut profile): Json<FrpsProfile>,
 ) -> Result<Json<ApiResponse<FrpsProfile>>, (axum::http::StatusCode, Json<ApiResponse<()>>)> {
+    ensure_profile_tenant(&state, id, &identity.tenant).await?;
     // Ensure we update the correct record
     profile.id = Some(id);
     // Server manages timestamps
@@ -132,20 +159,10 @@ pub async fn update(
 /// Delete a profile (stops associated frpc process first)
 pub async fn delete(
     State(state): State<ApiState>,
+    Extension(identity): Extension<AuthIdentity>,
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse<()>>, (axum::http::StatusCode, Json<ApiResponse<()>>)> {
-    // Verify profile exists
-    state.db.get_profile(id).await.map_err(|e| {
-        (
-            super::response::status_code(&e),
-            Json(ApiResponse {
-                success: false,
-                data: None,
-                count: None,
-                error: Some(super::response::ApiError::from_client_error(&e)),
-            }),
-        )
-    })?;
+    ensure_profile_tenant(&state, id, &identity.tenant).await?;
 
     // Stop frpc for this profile first (best-effort, don't fail if not running)
     let _ = state.process_manager.stop(id).await;
@@ -169,6 +186,48 @@ pub async fn delete(
         count: None,
         error: None,
     }))
+}
+
+fn api_error(
+    error: rustfrp_client::error::ClientError,
+) -> (axum::http::StatusCode, Json<ApiResponse<()>>) {
+    (
+        super::response::status_code(&error),
+        Json(ApiResponse {
+            success: false,
+            data: None,
+            count: None,
+            error: Some(super::response::ApiError::from_client_error(&error)),
+        }),
+    )
+}
+
+async fn ensure_profile_tenant(
+    state: &ApiState,
+    id: i64,
+    tenant: &str,
+) -> Result<(), (axum::http::StatusCode, Json<ApiResponse<()>>)> {
+    let belongs = state
+        .db
+        .profile_belongs_to_tenant(id, tenant)
+        .await
+        .map_err(api_error)?;
+    if belongs {
+        Ok(())
+    } else {
+        Err((
+            axum::http::StatusCode::NOT_FOUND,
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::generic(
+                    "TENANT_NOT_FOUND",
+                    "profile was not found in the active tenant".into(),
+                )),
+            }),
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -202,12 +261,20 @@ mod tests {
         ApiState::new(db, process_manager, config_dir, app_state)
     }
 
+    fn identity() -> Extension<AuthIdentity> {
+        Extension(AuthIdentity {
+            name: "test".into(),
+            tenant: "default".into(),
+            scopes: vec!["*".into()],
+        })
+    }
+
     // ── Profile CRUD integration tests ──
 
     #[tokio::test]
     async fn test_list_profiles_empty() {
         let state = setup_test_state().await;
-        let result = list(State(state)).await;
+        let result = list(State(state), identity()).await;
         assert!(result.is_ok());
         let Json(resp) = result.unwrap();
         assert!(resp.success);
@@ -225,7 +292,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = create(State(state.clone()), Json(profile)).await;
+        let result = create(State(state.clone()), identity(), Json(profile)).await;
         assert!(result.is_ok());
         let (status, Json(resp)) = result.unwrap();
         assert_eq!(status, axum::http::StatusCode::CREATED);
@@ -243,7 +310,7 @@ mod tests {
         );
 
         // Now GET the profile
-        let result = get(State(state), Path(id)).await;
+        let result = get(State(state), identity(), Path(id)).await;
         assert!(result.is_ok());
         let Json(resp) = result.unwrap();
         assert_eq!(resp.data.unwrap().server_addr, "frp.example.com");
@@ -252,7 +319,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_profile_not_found() {
         let state = setup_test_state().await;
-        let result = get(State(state), Path(99999)).await;
+        let result = get(State(state), identity(), Path(99999)).await;
         assert!(result.is_err());
         let (status, _) = result.unwrap_err();
         assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
@@ -269,7 +336,9 @@ mod tests {
             server_port: 7000,
             ..Default::default()
         };
-        let created = create(State(state.clone()), Json(profile)).await.unwrap();
+        let created = create(State(state.clone()), identity(), Json(profile))
+            .await
+            .unwrap();
         let id = created.1.data.as_ref().unwrap().id.unwrap();
 
         // Update
@@ -281,7 +350,7 @@ mod tests {
         };
         updated.id = Some(id);
 
-        let result = update(State(state.clone()), Path(id), Json(updated)).await;
+        let result = update(State(state.clone()), identity(), Path(id), Json(updated)).await;
         assert!(result.is_ok());
         let Json(resp) = result.unwrap();
         let data = resp.data.unwrap();
@@ -300,16 +369,18 @@ mod tests {
             server_port: 7000,
             ..Default::default()
         };
-        let created = create(State(state.clone()), Json(profile)).await.unwrap();
+        let created = create(State(state.clone()), identity(), Json(profile))
+            .await
+            .unwrap();
         let id = created.1.data.as_ref().unwrap().id.unwrap();
 
         // Delete
-        let result = delete(State(state.clone()), Path(id)).await;
+        let result = delete(State(state.clone()), identity(), Path(id)).await;
         assert!(result.is_ok());
         assert!(result.unwrap().data.is_none()); // no body on success
 
         // Verify gone
-        let result = get(State(state), Path(id)).await;
+        let result = get(State(state), identity(), Path(id)).await;
         assert!(result.is_err());
     }
 }

@@ -12,6 +12,7 @@
 use crate::error::{Result, SharedError};
 use crate::plugin::lifecycle::LifecycleManager;
 use crate::plugin::manifest::{PluginManifest, PluginType};
+use crate::plugin::runtime::{HostAction, WasmPluginRuntime};
 use crate::plugin::sandbox::{Sandbox, SandboxConfig};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -28,13 +29,14 @@ struct PluginInstance {
     /// WASM 沙箱（仅用于 WASM 类型）
     #[allow(dead_code)]
     sandbox: Option<Sandbox>,
+    runtime: Option<Arc<std::sync::Mutex<WasmPluginRuntime>>>,
     /// 插件目录路径
     #[allow(dead_code)]
     dir: PathBuf,
 }
 
 impl PluginInstance {
-    fn new(manifest: PluginManifest, dir: PathBuf) -> Self {
+    fn new(manifest: PluginManifest, dir: PathBuf) -> Result<Self> {
         let sandbox = if manifest.plugin_type == PluginType::Wasm {
             Some(Sandbox::new(SandboxConfig::with_permissions(
                 manifest.permissions.clone(),
@@ -43,12 +45,23 @@ impl PluginInstance {
             None
         };
 
-        Self {
+        let runtime = if manifest.plugin_type == PluginType::Wasm {
+            let config = SandboxConfig::with_permissions(manifest.permissions.clone());
+            Some(Arc::new(std::sync::Mutex::new(
+                WasmPluginRuntime::from_file(&dir.join(&manifest.entry), config)
+                    .map_err(SharedError::PluginLoad)?,
+            )))
+        } else {
+            None
+        };
+
+        Ok(Self {
             manifest,
             lifecycle: LifecycleManager::new(),
             sandbox,
+            runtime,
             dir,
-        }
+        })
     }
 }
 
@@ -177,7 +190,12 @@ impl PluginManager {
         self.check_dependencies(&manifest).await?;
 
         // 创建插件实例
-        let instance = PluginInstance::new(manifest, dir.to_path_buf());
+        let instance = PluginInstance::new(manifest, dir.to_path_buf())?;
+        instance
+            .lifecycle
+            .transition_to(crate::plugin::lifecycle::LifecycleState::Loaded)
+            .await
+            .map_err(SharedError::PluginLifecycleViolation)?;
 
         tracing::info!(
             name = %name,
@@ -241,6 +259,194 @@ impl PluginManager {
         self.instances.read().await.len()
     }
 
+    /// Initialize and start all loaded plugins while isolating failures.
+    pub async fn start_all(&self) -> Vec<(String, Result<()>)> {
+        let names: Vec<String> = self.instances.read().await.keys().cloned().collect();
+        let mut results = Vec::with_capacity(names.len());
+        for name in names {
+            results.push((name.clone(), self.start_plugin(&name).await));
+        }
+        results
+    }
+
+    pub async fn start_plugin(&self, name: &str) -> Result<()> {
+        let (lifecycle, runtime) = {
+            let instances = self.instances.read().await;
+            let instance = instances.get(name).ok_or_else(|| {
+                SharedError::PluginLoad(format!("Plugin '{name}' does not exist"))
+            })?;
+            (instance.lifecycle.clone(), instance.runtime.clone())
+        };
+        if let Some(runtime) = runtime {
+            let result = tokio::task::spawn_blocking(move || {
+                let mut runtime = runtime
+                    .lock()
+                    .map_err(|_| "plugin runtime mutex poisoned".to_owned())?;
+                runtime.init()?;
+                runtime.start()
+            })
+            .await
+            .map_err(|e| SharedError::PluginPanic(e.to_string()))?;
+            if let Err(error) = result {
+                lifecycle.set_error(error.clone()).await;
+                return Err(SharedError::PluginPanic(error));
+            }
+        }
+        lifecycle
+            .transition_to(crate::plugin::lifecycle::LifecycleState::Ready)
+            .await
+            .map_err(SharedError::PluginLifecycleViolation)?;
+        lifecycle
+            .transition_to(crate::plugin::lifecycle::LifecycleState::Running)
+            .await
+            .map_err(SharedError::PluginLifecycleViolation)
+    }
+
+    pub async fn stop_all(&self) {
+        let names: Vec<String> = self.instances.read().await.keys().cloned().collect();
+        for name in names {
+            if let Err(error) = self.stop_plugin(&name).await {
+                tracing::warn!(%name, %error, "plugin stop failed");
+            }
+        }
+    }
+
+    pub async fn stop_plugin(&self, name: &str) -> Result<()> {
+        let (lifecycle, runtime) = {
+            let instances = self.instances.read().await;
+            let instance = instances.get(name).ok_or_else(|| {
+                SharedError::PluginUnload(format!("Plugin '{name}' does not exist"))
+            })?;
+            (instance.lifecycle.clone(), instance.runtime.clone())
+        };
+        lifecycle
+            .transition_to(crate::plugin::lifecycle::LifecycleState::Stopping)
+            .await
+            .map_err(SharedError::PluginLifecycleViolation)?;
+        if let Some(runtime) = runtime {
+            tokio::task::spawn_blocking(move || {
+                runtime
+                    .lock()
+                    .map_err(|_| "plugin runtime mutex poisoned".to_owned())?
+                    .stop()
+            })
+            .await
+            .map_err(|e| SharedError::PluginPanic(e.to_string()))?
+            .map_err(SharedError::PluginPanic)?;
+        }
+        lifecycle
+            .transition_to(crate::plugin::lifecycle::LifecycleState::Stopped)
+            .await
+            .map_err(SharedError::PluginLifecycleViolation)
+    }
+
+    /// Drain actions emitted by all plugin host calls.
+    pub async fn drain_actions(&self) -> Vec<(String, HostAction)> {
+        let runtimes: Vec<_> = self
+            .instances
+            .read()
+            .await
+            .iter()
+            .filter_map(|(name, instance)| {
+                instance
+                    .runtime
+                    .clone()
+                    .map(|runtime| (name.clone(), runtime))
+            })
+            .collect();
+        tokio::task::spawn_blocking(move || {
+            let mut actions = Vec::new();
+            for (name, runtime) in runtimes {
+                if let Ok(mut runtime) = runtime.lock() {
+                    actions.extend(
+                        runtime
+                            .drain_actions()
+                            .into_iter()
+                            .map(|action| (name.clone(), action)),
+                    );
+                }
+            }
+            actions
+        })
+        .await
+        .unwrap_or_default()
+    }
+
+    /// Broadcast a structured event only to plugins that subscribed to its topic.
+    pub async fn broadcast_event(&self, topic: &str, payload: &str) -> Vec<(String, Result<()>)> {
+        let runtimes: Vec<_> = self
+            .instances
+            .read()
+            .await
+            .iter()
+            .filter_map(|(name, instance)| {
+                instance
+                    .runtime
+                    .clone()
+                    .map(|runtime| (name.clone(), runtime))
+            })
+            .collect();
+        let topic = topic.to_owned();
+        let event = serde_json::json!({ "topic": topic, "payload": payload }).to_string();
+        tokio::task::spawn_blocking(move || {
+            runtimes
+                .into_iter()
+                .filter_map(|(name, runtime)| {
+                    let mut runtime = runtime.lock().ok()?;
+                    if !runtime.subscriptions().iter().any(|item| item == &topic) {
+                        return None;
+                    }
+                    Some((
+                        name,
+                        runtime.on_event(&event).map_err(SharedError::PluginPanic),
+                    ))
+                })
+                .collect()
+        })
+        .await
+        .unwrap_or_default()
+    }
+
+    /// Update a host configuration value visible to all WASM plugins.
+    pub async fn set_host_config(&self, key: &str, value: &str) {
+        let runtimes: Vec<_> = self
+            .instances
+            .read()
+            .await
+            .values()
+            .filter_map(|instance| instance.runtime.clone())
+            .collect();
+        let (key, value) = (key.to_owned(), value.to_owned());
+        let _ = tokio::task::spawn_blocking(move || {
+            for runtime in runtimes {
+                if let Ok(mut runtime) = runtime.lock() {
+                    runtime.set_config(key.clone(), value.clone());
+                }
+            }
+        })
+        .await;
+    }
+
+    /// Update the JSON traffic snapshot visible to all WASM plugins.
+    pub async fn set_traffic_stats(&self, json: &str) {
+        let runtimes: Vec<_> = self
+            .instances
+            .read()
+            .await
+            .values()
+            .filter_map(|instance| instance.runtime.clone())
+            .collect();
+        let json = json.to_owned();
+        let _ = tokio::task::spawn_blocking(move || {
+            for runtime in runtimes {
+                if let Ok(mut runtime) = runtime.lock() {
+                    runtime.set_traffic_stats(json.clone());
+                }
+            }
+        })
+        .await;
+    }
+
     /// 校验插件依赖
     async fn check_dependencies(&self, manifest: &PluginManifest) -> Result<()> {
         let instances = self.instances.read().await;
@@ -275,7 +481,7 @@ mod tests {
     }
 
     fn write_entry(dir: &Path, name: &str) {
-        std::fs::write(dir.join(name), "dummy content").unwrap();
+        std::fs::write(dir.join(name), "(module (memory (export \"memory\") 1))").unwrap();
     }
 
     #[tokio::test]
@@ -350,5 +556,30 @@ mod tests {
 
         manager.unload_plugin("test-plugin").await.unwrap();
         assert_eq!(manager.plugin_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn official_plugins_compile_and_run() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join("plugins/official");
+        let manager = PluginManager::new(root.clone());
+        for plugin in ["failover", "traffic-statistics", "webhook-notifications"] {
+            manager
+                .load_plugin(&root.join(plugin))
+                .await
+                .unwrap_or_else(|error| panic!("official plugin {plugin} failed: {error}"));
+        }
+        let started = manager.start_all().await;
+        assert!(started.iter().all(|(_, result)| result.is_ok()));
+
+        let delivered = manager
+            .broadcast_event("connection.disconnected", r#"{"profile":"default"}"#)
+            .await;
+        assert_eq!(delivered.len(), 2);
+        assert!(delivered.iter().all(|(_, result)| result.is_ok()));
+        let actions = manager.drain_actions().await;
+        assert!(actions.iter().any(|(_, action)| matches!(action, HostAction::Process { action, target } if action == "failover" && target == "default")));
+        manager.stop_all().await;
     }
 }

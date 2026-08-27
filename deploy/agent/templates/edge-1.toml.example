@@ -1,0 +1,10 @@
+# Rename this file to edge-1.toml and run the agent with --node-id edge-1.
+bindAddr = "0.0.0.0"
+bindPort = 7000
+
+# Keep secrets outside version control in real deployments.
+auth.method = "token"
+auth.token = "replace-me"
+
+webServer.addr = "127.0.0.1"
+webServer.port = 7500

@@ -1,0 +1,10 @@
+{
+  "name": "rustfrp-webhook-notifications",
+  "version": "0.1.0",
+  "type": "wasm",
+  "entry": "webhook-notifications.wat",
+  "description": "Requests an HTTPS webhook notification for connection events",
+  "permissions": ["read-config", "subscribe-events", "network-access"],
+  "dependencies": [],
+  "min_core_version": "0.1.0"
+}

@@ -1,0 +1,97 @@
+services:
+  daemon:
+    build:
+      context: .
+    image: ghcr.io/tatencn/rustfrp:${RUSTFRP_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${RUSTFRP_PORT:-7900}:7900"
+    volumes:
+      - rustfrp-data:/data
+    environment:
+      RUSTFRP_API_TOKEN_FILE: /run/secrets/rustfrp_api_token
+      RUST_LOG: ${RUST_LOG:-rustfrp=info}
+    secrets:
+      - rustfrp_api_token
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:7900/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  frps:
+    image: ghcr.io/fatedier/frps:${FRP_VERSION:-v0.70.1}
+    restart: unless-stopped
+    command: ["-c", "/etc/frp/frps.toml"]
+    ports:
+      - "${FRPS_BIND_PORT:-7000}:7000"
+      - "${FRPS_HTTP_PORT:-8080}:8080"
+      - "${FRPS_HTTPS_PORT:-8443}:8443"
+    volumes:
+      - ./deploy/compose/frps.toml:/etc/frp/frps.toml:ro
+
+  control:
+    build:
+      context: .
+      target: control
+    image: ghcr.io/tatencn/rustfrp-control:${RUSTFRP_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    command: ["--bind", "0.0.0.0:3000", "--targets", "/etc/rustfrp/targets.json"]
+    volumes:
+      - ./deploy/compose/targets.json:/etc/rustfrp/targets.json:ro
+    secrets:
+      - rustfrp_api_token
+    ports:
+      - "${RUSTFRP_CONTROL_PORT:-3000}:3000"
+    depends_on:
+      - frps
+
+  prometheus:
+    image: prom/prometheus:v3.13.2
+    restart: unless-stopped
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus", "--storage.tsdb.retention.time=30d"]
+    volumes:
+      - ./deploy/compose/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/compose/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    depends_on:
+      - control
+
+  alertmanager:
+    image: prom/alertmanager:v0.33.1
+    restart: unless-stopped
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml", "--storage.path=/alertmanager"]
+    volumes:
+      - ./deploy/compose/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      - "${ALERTMANAGER_PORT:-9093}:9093"
+
+  grafana:
+    image: grafana/grafana:13.1.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD before starting Grafana}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./deploy/compose/grafana:/etc/grafana/provisioning:ro
+      - ./deploy/compose/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  rustfrp-data:
+  prometheus-data:
+  grafana-data:
+  alertmanager-data:
+
+secrets:
+  rustfrp_api_token:
+    file: ${RUSTFRP_API_TOKEN_FILE:-./deploy/compose/secrets/rustfrp_api_token.txt}

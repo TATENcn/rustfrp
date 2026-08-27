@@ -11,11 +11,11 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-license = "AGPL-3.0"
+license = "AGPL-3.0-only"
 repository = "https://github.com/taten/rustfrp"
-rust-version = "1.81"
+rust-version = "1.88"
 
 [workspace.dependencies]
 # === 异步运行时 ===
@@ -52,10 +52,12 @@ chrono = { version = "0.4", features = ["serde"] }
 # tikv-jemallocator = { version = "0.5", optional = true }
 
 # === CLI ===
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 
 # === HTTP 客户端（仅 monitor 和 frp 管理 crate 使用） ===
 reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
+wasmtime = { version = "=36.0.14", default-features = false, features = ["std", "runtime", "cranelift", "wat"] }
+sysinfo = { version = "0.37.2", default-features = false, features = ["system"] }
 
 # === 开发 / 测试（各 crate 通过 dev-dependencies 继承） ===
 tempfile = "3"

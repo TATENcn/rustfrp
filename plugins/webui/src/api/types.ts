@@ -173,7 +173,32 @@ export interface ProcessInfo {
   pid: number | null
   running: boolean
   restart_count: number
+  last_failure?: {
+    reason: 'authentication_failed' | 'network_unreachable' | 'configuration_invalid' | 'address_in_use' | 'tls_error' | 'unknown'
+    summary: string
+    exit_code: number
+    occurrences: number
+  } | null
   config_path: string
+}
+
+export interface InstalledFrpVersion {
+  version: string
+  platform: string
+  active: boolean
+  integrity_ok: boolean
+  frpc_path: string
+  has_frps: boolean
+}
+
+export interface FrpVersionList {
+  active: string | null
+  installed: InstalledFrpVersion[]
+}
+
+export interface AvailableFrpVersion {
+  version: string
+  published_at: string | null
 }
 
 export interface StatusResponse {
@@ -185,6 +210,41 @@ export interface StatusResponse {
   total_bindings: number
   total_visitors: number
   processes: ProcessInfo[]
+}
+
+export interface Environment {
+  id?: number
+  name: string
+  description?: string | null
+  color: string
+  is_default: boolean
+  created_at: string
+  updated_at: string
+  profile_ids: number[]
+}
+
+export interface ResourceSample {
+  timestamp: string
+  daemon_cpu_percent: number
+  daemon_memory_bytes: number
+  system_cpu_percent: number
+  system_memory_used_bytes: number
+  system_memory_total_bytes: number
+  processes: Array<{ profile_id: number; pid: number; cpu_percent: number; memory_bytes: number }>
+}
+
+export interface TrafficSample {
+  timestamp: string
+  environment_id: number
+  profile_id: number
+  received_bytes: number
+  sent_bytes: number
+  active_connections: number
+}
+
+export interface MetricsHistory {
+  resources: ResourceSample[]
+  traffic: TrafficSample[]
 }
 
 export interface ReloadResponse {

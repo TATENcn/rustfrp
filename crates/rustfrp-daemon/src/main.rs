@@ -24,10 +24,15 @@ struct Cli {
     #[arg(long, default_value = "127.0.0.1:7900")]
     api_listen: String,
 
-    /// API token for bearer authentication (optional; without it, auth is disabled)
+    /// API token for bearer authentication (falls back to RUSTFRP_API_TOKEN)
     #[cfg(feature = "http-api")]
     #[arg(long)]
     api_token: Option<String>,
+
+    /// JSON policy containing SHA256 token digests, tenants, and scopes.
+    #[cfg(feature = "http-api")]
+    #[arg(long, env = "RUSTFRP_AUTH_POLICY_FILE")]
+    auth_policy_file: Option<String>,
 }
 
 #[tokio::main]
@@ -56,12 +61,35 @@ async fn main() -> anyhow::Result<()> {
 
     #[cfg(feature = "http-api")]
     {
-        match cli.api_token {
-            Some(token) => {
-                rustfrp_daemon::serve_with_auth(core, &cli.api_listen, &token).await?;
-            }
-            None => {
-                rustfrp_daemon::serve(core, &cli.api_listen).await?;
+        let api_token = cli
+            .api_token
+            .or_else(|| {
+                std::env::var("RUSTFRP_API_TOKEN")
+                    .ok()
+                    .filter(|token| !token.is_empty())
+            })
+            .or_else(|| {
+                std::env::var("RUSTFRP_API_TOKEN_FILE")
+                    .ok()
+                    .and_then(|path| {
+                        std::fs::read_to_string(path)
+                            .ok()
+                            .map(|token| token.trim().to_owned())
+                            .filter(|token| !token.is_empty())
+                    })
+            });
+
+        if let Some(path) = cli.auth_policy_file {
+            let policy = rustfrp_daemon::api::auth::AuthPolicy::from_file(path)?;
+            rustfrp_daemon::serve_with_policy(core, &cli.api_listen, policy).await?;
+        } else {
+            match api_token {
+                Some(token) => {
+                    rustfrp_daemon::serve_with_auth(core, &cli.api_listen, &token).await?;
+                }
+                None => {
+                    rustfrp_daemon::serve(core, &cli.api_listen).await?;
+                }
             }
         }
     }

@@ -1,6 +1,6 @@
 //! FRP 二进制解压
 //!
-//! 解压 tar.gz 格式的 FRP 发布包。
+//! Extract official FRP tar.gz and Windows zip release archives.
 
 use crate::FrpError;
 use flate2::read::GzDecoder;
@@ -22,13 +22,19 @@ pub fn extract(archive_path: &Path, output_dir: &Path) -> Result<(), FrpError> {
 
     std::fs::create_dir_all(output_dir)?;
 
-    let file = std::fs::File::open(archive_path)?;
-    let decoder = GzDecoder::new(file);
-    let mut archive = Archive::new(decoder);
-
-    archive
-        .unpack(output_dir)
-        .map_err(|e| FrpError::Extract(format!("Extraction failed: {e}")))?;
+    if archive_path
+        .extension()
+        .is_some_and(|extension| extension == "zip")
+    {
+        extract_zip(archive_path, output_dir)?;
+    } else {
+        let file = std::fs::File::open(archive_path)?;
+        let decoder = GzDecoder::new(file);
+        let mut archive = Archive::new(decoder);
+        archive
+            .unpack(output_dir)
+            .map_err(|e| FrpError::Extract(format!("Extraction failed: {e}")))?;
+    }
 
     tracing::info!(dir = %output_dir.display(), "FRP extraction completed");
 
@@ -63,15 +69,65 @@ pub fn extract(archive_path: &Path, output_dir: &Path) -> Result<(), FrpError> {
     Ok(())
 }
 
+fn extract_zip(archive_path: &Path, output_dir: &Path) -> Result<(), FrpError> {
+    let file = std::fs::File::open(archive_path)?;
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|error| FrpError::Extract(format!("Invalid zip archive: {error}")))?;
+    for index in 0..archive.len() {
+        let mut entry = archive
+            .by_index(index)
+            .map_err(|error| FrpError::Extract(format!("Invalid zip entry: {error}")))?;
+        let relative = entry.enclosed_name().ok_or_else(|| {
+            FrpError::Extract(format!("Unsafe path in zip archive: {}", entry.name()))
+        })?;
+        let output = output_dir.join(relative);
+        if entry.is_dir() {
+            std::fs::create_dir_all(&output)?;
+            continue;
+        }
+        if let Some(parent) = output.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut destination = std::fs::File::create(output)?;
+        std::io::copy(&mut entry, &mut destination)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
     use tempfile::TempDir;
+    use zip::write::SimpleFileOptions;
 
     #[test]
     fn test_extract_nonexistent_file() {
         let tmp = TempDir::new().unwrap();
         let result = extract(Path::new("/nonexistent/file.tar.gz"), tmp.path());
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn extracts_windows_zip_archive() {
+        let tmp = TempDir::new().unwrap();
+        let archive_path = tmp.path().join("frp_windows_amd64.zip");
+        let file = std::fs::File::create(&archive_path).unwrap();
+        let mut archive = zip::ZipWriter::new(file);
+        archive
+            .start_file(
+                "frp_0.70.1_windows_amd64/frpc.exe",
+                SimpleFileOptions::default(),
+            )
+            .unwrap();
+        archive.write_all(b"frpc-binary").unwrap();
+        archive.finish().unwrap();
+
+        let output = tmp.path().join("out");
+        extract(&archive_path, &output).unwrap();
+        assert_eq!(
+            std::fs::read(output.join("frp_0.70.1_windows_amd64/frpc.exe")).unwrap(),
+            b"frpc-binary"
+        );
     }
 }
