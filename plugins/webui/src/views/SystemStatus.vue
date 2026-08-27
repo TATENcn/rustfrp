@@ -16,6 +16,7 @@ import {
   useMessage,
 } from 'naive-ui'
 import { useI18n } from '@/i18n'
+import { formatDuration } from '@/i18n/format'
 import { useSystemStore } from '@/stores/system'
 import { downloadBackup, importFrpcToml } from '@/api/config'
 import { extractApiError, resolveErrorMessage } from '@/api/errors'
@@ -28,7 +29,7 @@ import {
   listFrpVersions,
 } from '@/api/frp'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const message = useMessage()
 const systemStore = useSystemStore()
 
@@ -176,12 +177,7 @@ async function checkConfig() {
   }
 }
 
-function formatUptime(secs: number): string {
-  const h = Math.floor(secs / 3600)
-  const m = Math.floor((secs % 3600) / 60)
-  const s = secs % 60
-  return `${h}h ${m}m ${s}s`
-}
+const formatUptime = (seconds: number) => formatDuration(seconds, locale.value)
 
 function selectImportFile(event: Event) {
   importFile.value = (event.target as HTMLInputElement).files?.[0] ?? null

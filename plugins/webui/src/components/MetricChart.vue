@@ -4,9 +4,9 @@ import { computed } from 'vue'
 const props = withDefaults(defineProps<{
   values: number[]
   color?: string
-  unit?: string
+  formatValue?: (value: number) => string
   emptyText?: string
-}>(), { color: '#18a058', unit: '', emptyText: 'No samples yet' })
+}>(), { color: '#18a058', emptyText: 'No samples yet' })
 
 const width = 600
 const height = 150
@@ -17,11 +17,12 @@ const points = computed(() => props.values.map((value, index) => {
   return `${x.toFixed(1)},${y.toFixed(1)}`
 }).join(' '))
 const latest = computed(() => props.values.at(-1) ?? 0)
+const formattedLatest = computed(() => props.formatValue?.(latest.value) ?? String(latest.value))
 </script>
 
 <template>
   <div v-if="values.length" class="metric-chart">
-    <div class="metric-value">{{ latest.toLocaleString(undefined, { maximumFractionDigits: 1 }) }}{{ unit }}</div>
+    <div class="metric-value">{{ formattedLatest }}</div>
     <svg :viewBox="`0 0 ${width} ${height}`" role="img" aria-label="metric history">
       <line x1="0" :y1="height" :x2="width" :y2="height" stroke="currentColor" opacity="0.12" />
       <polyline :points="points" fill="none" :stroke="color" stroke-width="3" vector-effect="non-scaling-stroke" />

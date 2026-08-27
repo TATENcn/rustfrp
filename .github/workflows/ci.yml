@@ -88,6 +88,10 @@ jobs:
         working-directory: plugins/webui
         run: bun scripts/check-i18n-keys.ts
 
+      - name: Unit tests
+        working-directory: plugins/webui
+        run: bun test
+
       - name: Build embedded WebUI
         working-directory: plugins/webui
         run: bun run build
