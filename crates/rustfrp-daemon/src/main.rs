@@ -24,7 +24,7 @@ struct Cli {
     #[arg(long, default_value = "127.0.0.1:7900")]
     api_listen: String,
 
-    /// API token for bearer authentication (optional; without it, auth is disabled)
+    /// API token for bearer authentication (falls back to RUSTFRP_API_TOKEN)
     #[cfg(feature = "http-api")]
     #[arg(long)]
     api_token: Option<String>,
@@ -56,7 +56,13 @@ async fn main() -> anyhow::Result<()> {
 
     #[cfg(feature = "http-api")]
     {
-        match cli.api_token {
+        let api_token = cli.api_token.or_else(|| {
+            std::env::var("RUSTFRP_API_TOKEN")
+                .ok()
+                .filter(|token| !token.is_empty())
+        });
+
+        match api_token {
             Some(token) => {
                 rustfrp_daemon::serve_with_auth(core, &cli.api_listen, &token).await?;
             }
