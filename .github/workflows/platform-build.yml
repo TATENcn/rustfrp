@@ -23,7 +23,7 @@ jobs:
   webui:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: '1.3'
@@ -31,7 +31,7 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bun run build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: platform-webui
           path: plugins/webui/dist/
@@ -58,8 +58,8 @@ jobs:
             os: macos-15
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: platform-webui
           path: plugins/webui/dist
