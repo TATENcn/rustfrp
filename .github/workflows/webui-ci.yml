@@ -34,6 +34,9 @@ jobs:
       - name: Check i18n keys
         run: bun scripts/check-i18n-keys.ts
 
+      - name: Unit tests
+        run: bun test
+
       - name: Build
         run: bun run build
 

@@ -1,6 +1,12 @@
-# webui
+# RustFRP WebUI
 
-This template should help get you started developing with Vue 3 in Vite.
+The daemon-embedded WebUI uses Vue 3, TypeScript, Vite, Bun, Pinia, Vue Router,
+and Naive UI. User-facing text uses the typed message maps under `src/i18n`,
+while locale-sensitive data formatting is centralized in `src/i18n/format.ts`
+using the standard ECMA-402 `Intl` APIs.
+
+`Intl.DurationFormat` has a built-in fallback for older browsers. Byte values
+remain IEC/base-1024 (KiB, MiB, GiB); `Intl` formats only their numeric portion.
 
 ## Recommended IDE Setup
 
@@ -40,3 +46,12 @@ bun dev
 ```sh
 bun run build
 ```
+
+### Unit Tests
+
+```sh
+bun test
+```
+
+Both the main CI workflow and WebUI CI run the unit tests, translation-key
+check, TypeScript check, and production build.
