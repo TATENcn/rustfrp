@@ -455,8 +455,10 @@ mod tests {
             .insert_proxy(&crate::config::model::LocalProxy::default())
             .await
             .unwrap();
-        let mut second = crate::config::model::LocalProxy::default();
-        second.name = "second".into();
+        let second = crate::config::model::LocalProxy {
+            name: "second".into(),
+            ..Default::default()
+        };
         let second_proxy = db.insert_proxy(&second).await.unwrap();
         db.insert_binding(&sample_binding(profile_id, first_proxy))
             .await
