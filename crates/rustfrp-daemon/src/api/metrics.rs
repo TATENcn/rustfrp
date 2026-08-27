@@ -1,11 +1,12 @@
 //! Resource/traffic history and Prometheus exposition.
 
 use axum::body::Body;
-use axum::extract::{Query, State};
+use axum::extract::{Extension, Query, State};
 use axum::http::{header, Response, StatusCode};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 
+use super::auth::AuthIdentity;
 use super::response::{ApiError, ApiResponse};
 use super::state::ApiState;
 use crate::metrics::{ResourceSample, TrafficSample};
@@ -38,8 +39,38 @@ pub async fn history(
 
 pub async fn ingest_traffic(
     State(state): State<ApiState>,
+    Extension(identity): Extension<AuthIdentity>,
     Json(mut sample): Json<TrafficSample>,
 ) -> Result<(StatusCode, Json<ApiResponse<()>>), (StatusCode, Json<ApiResponse<()>>)> {
+    let belongs = state
+        .db
+        .profile_belongs_to_tenant(sample.profile_id, &identity.tenant)
+        .await
+        .map_err(|error| {
+            (
+                super::response::status_code(&error),
+                Json(ApiResponse {
+                    success: false,
+                    data: None,
+                    count: None,
+                    error: Some(ApiError::from_client_error(&error)),
+                }),
+            )
+        })?;
+    if !belongs {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(ApiError::generic(
+                    "TENANT_NOT_FOUND",
+                    "profile was not found in the active tenant".into(),
+                )),
+            }),
+        ));
+    }
     let expected = state
         .db
         .profile_environment_id(sample.profile_id)
@@ -89,6 +120,14 @@ pub async fn prometheus(State(state): State<ApiState>) -> Response<Body> {
             sample.daemon_cpu_percent, sample.daemon_memory_bytes
         ));
         output.push_str(&format!("rustfrp_system_cpu_percent {}\nrustfrp_system_memory_used_bytes {}\nrustfrp_system_memory_total_bytes {}\n", sample.system_cpu_percent, sample.system_memory_used_bytes, sample.system_memory_total_bytes));
+        output.push_str(&format!(
+            "rustfrp_ebpf_available {}\nrustfrp_ebpf_pinned_objects {}\n",
+            u8::from(sample.ebpf.available),
+            sample.ebpf.pinned_objects
+        ));
+        if let Some(value) = sample.ebpf.unprivileged_disabled {
+            output.push_str(&format!("rustfrp_ebpf_unprivileged_disabled {value}\n"));
+        }
         for process in &sample.processes {
             output.push_str(&format!(
                 "rustfrp_frpc_cpu_percent{{profile_id=\"{}\",pid=\"{}\"}} {}\n",

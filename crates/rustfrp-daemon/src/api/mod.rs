@@ -9,6 +9,7 @@ pub mod response;
 pub mod state;
 
 // Sub-modules for each resource type
+pub mod auth;
 pub mod bindings;
 pub mod config_transfer;
 pub mod environments;
@@ -20,7 +21,7 @@ pub mod proxies;
 pub mod system;
 pub mod visitors;
 
-use axum::extract::Request;
+use axum::extract::{Extension, Request};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -32,6 +33,7 @@ use tower_http::trace::TraceLayer;
 
 use rustfrp_client::core::ClientCore;
 
+use self::auth::{AuthIdentity, AuthPolicy};
 use self::response::{ApiError, ApiResponse};
 use self::state::ApiState;
 
@@ -42,14 +44,19 @@ use self::state::ApiState;
 pub trait AuthMiddleware: Send + Sync + 'static {
     /// Authenticate the request. Returns `Ok(())` if allowed,
     /// or `Err(response)` with a 401/403 response body.
-    fn authenticate(&self, request: &Request) -> Result<(), Response>;
+    fn authenticate(&self, request: &mut Request) -> Result<(), Response>;
 }
 
 /// MVP implementation: allow all requests through.
 pub struct NoAuth;
 
 impl AuthMiddleware for NoAuth {
-    fn authenticate(&self, _request: &Request) -> Result<(), Response> {
+    fn authenticate(&self, request: &mut Request) -> Result<(), Response> {
+        request.extensions_mut().insert(AuthIdentity {
+            name: "local".into(),
+            tenant: "default".into(),
+            scopes: vec!["*".into()],
+        });
         Ok(())
     }
 }
@@ -70,7 +77,7 @@ impl BearerToken {
 }
 
 impl AuthMiddleware for BearerToken {
-    fn authenticate(&self, request: &Request) -> Result<(), Response> {
+    fn authenticate(&self, request: &mut Request) -> Result<(), Response> {
         // Health check endpoint is always public
         if request.uri().path() == "/api/v1/health" {
             return Ok(());
@@ -89,7 +96,14 @@ impl AuthMiddleware for BearerToken {
             .and_then(|v| v.strip_prefix("Bearer "));
 
         match auth_header {
-            Some(t) if t == self.token => Ok(()),
+            Some(t) if t == self.token => {
+                request.extensions_mut().insert(AuthIdentity {
+                    name: "legacy".into(),
+                    tenant: "default".into(),
+                    scopes: vec!["*".into()],
+                });
+                Ok(())
+            }
             _ => {
                 let body = ApiResponse::<()> {
                     success: false,
@@ -104,6 +118,57 @@ impl AuthMiddleware for BearerToken {
             }
         }
     }
+}
+
+#[derive(Clone)]
+pub struct ScopedBearerToken {
+    policy: AuthPolicy,
+}
+
+impl ScopedBearerToken {
+    pub fn new(policy: AuthPolicy) -> Self {
+        Self { policy }
+    }
+}
+
+impl AuthMiddleware for ScopedBearerToken {
+    fn authenticate(&self, request: &mut Request) -> Result<(), Response> {
+        if request.uri().path() == "/api/v1/health" {
+            return Ok(());
+        }
+        let path = request.uri().path();
+        if path.starts_with("/assets/") || !path.starts_with("/api/") {
+            return Ok(());
+        }
+        let bearer = request
+            .headers()
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.strip_prefix("Bearer "));
+        match bearer.and_then(|token| self.policy.authenticate(token, request)) {
+            Some(identity) => {
+                request.extensions_mut().insert(identity);
+                Ok(())
+            }
+            None => Err(auth_error(
+                "Token is invalid, outside its tenant, or lacks the required scope",
+            )),
+        }
+    }
+}
+
+fn auth_error(message: &str) -> Response {
+    let body = ApiResponse::<()> {
+        success: false,
+        data: None,
+        count: None,
+        error: Some(ApiError::generic("AUTH_001", message.into())),
+    };
+    (StatusCode::UNAUTHORIZED, Json(body)).into_response()
+}
+
+async fn whoami(Extension(identity): Extension<AuthIdentity>) -> Json<ApiResponse<AuthIdentity>> {
+    Json(ApiResponse::ok(identity))
 }
 
 /// Build the axum Router with all API endpoints, static assets, and SPA fallback.
@@ -198,6 +263,7 @@ pub fn create_router(state: ApiState, auth: impl AuthMiddleware) -> Router {
             axum::routing::get(system::reload_status),
         )
         .route("/api/v1/health", axum::routing::get(system::health))
+        .route("/api/v1/auth/whoami", axum::routing::get(whoami))
         .route(
             "/api/v1/metrics/history",
             axum::routing::get(metrics::history),
@@ -263,10 +329,10 @@ pub fn create_router(state: ApiState, auth: impl AuthMiddleware) -> Router {
                 ),
         )
         .layer(axum::middleware::from_fn(
-            move |request: Request, next: axum::middleware::Next| {
+            move |mut request: Request, next: axum::middleware::Next| {
                 let auth = auth.clone();
                 async move {
-                    auth.authenticate(&request)?;
+                    auth.authenticate(&mut request)?;
                     Ok::<_, Response>(next.run(request).await)
                 }
             },
@@ -352,6 +418,30 @@ pub async fn serve_with_auth(
     }
 
     tracing::info!("Daemon shut down");
+    Ok(())
+}
+
+pub async fn serve_with_policy(
+    core: ClientCore,
+    listen_addr: &str,
+    policy: AuthPolicy,
+) -> anyhow::Result<()> {
+    let state = ApiState::new(
+        core.db().clone(),
+        core.process_manager().clone(),
+        core.config_dir().clone(),
+        core.state().clone(),
+    );
+    state.metrics.spawn_sampler(core.process_manager().clone());
+    let router = create_router(state, ScopedBearerToken::new(policy));
+    let addr: SocketAddr = listen_addr.parse()?;
+    tracing::info!(%addr, "HTTP API server starting (auth: scoped bearer policy)");
+    let listener = TcpListener::bind(addr).await?;
+    let api_server = axum::serve(listener, router.into_make_service());
+    tokio::select! {
+        result = api_server => if let Err(error) = result { tracing::error!(%error, "HTTP API server error"); },
+        result = core.run() => if let Err(error) = result { tracing::error!(%error, "Client core error"); },
+    }
     Ok(())
 }
 

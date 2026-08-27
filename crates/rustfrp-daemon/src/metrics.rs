@@ -23,7 +23,16 @@ pub struct ResourceSample {
     pub system_cpu_percent: f32,
     pub system_memory_used_bytes: u64,
     pub system_memory_total_bytes: u64,
+    pub ebpf: EbpfStatus,
     pub processes: Vec<ProcessResourceSample>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EbpfStatus {
+    /// Kernel BTF and bpffs are present, so an external/privileged eBPF collector can attach.
+    pub available: bool,
+    pub pinned_objects: u64,
+    pub unprivileged_disabled: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,6 +100,7 @@ impl MetricsStore {
                         system_cpu_percent: system.global_cpu_usage(),
                         system_memory_used_bytes: system.used_memory(),
                         system_memory_total_bytes: system.total_memory(),
+                        ebpf: detect_ebpf(),
                         processes: process_samples,
                     })
                     .await;
@@ -147,6 +157,32 @@ impl MetricsStore {
     }
 }
 
+fn detect_ebpf() -> EbpfStatus {
+    detect_ebpf_at(
+        std::path::Path::new("/sys/kernel/btf/vmlinux"),
+        std::path::Path::new("/sys/fs/bpf"),
+        std::path::Path::new("/proc/sys/kernel/unprivileged_bpf_disabled"),
+    )
+}
+
+fn detect_ebpf_at(
+    btf: &std::path::Path,
+    bpffs: &std::path::Path,
+    unprivileged: &std::path::Path,
+) -> EbpfStatus {
+    let pinned_objects = std::fs::read_dir(bpffs)
+        .map(|entries| entries.flatten().take(10_000).count() as u64)
+        .unwrap_or(0);
+    let unprivileged_disabled = std::fs::read_to_string(unprivileged)
+        .ok()
+        .and_then(|value| value.trim().parse().ok());
+    EbpfStatus {
+        available: btf.is_file() && bpffs.is_dir(),
+        pinned_objects,
+        unprivileged_disabled,
+    }
+}
+
 fn push_bounded<T>(queue: &mut VecDeque<T>, value: T, capacity: usize) {
     if queue.len() == capacity {
         queue.pop_front();
@@ -175,5 +211,21 @@ mod tests {
         }
         assert_eq!(store.traffic(None, None, 10).await.len(), 2);
         assert_eq!(store.traffic(Some(7), Some(1), 10).await.len(), 1);
+    }
+
+    #[test]
+    fn detects_ebpf_capability_without_requiring_privileges() {
+        let root = tempfile::tempdir().unwrap();
+        let btf = root.path().join("vmlinux");
+        let bpffs = root.path().join("bpf");
+        let unprivileged = root.path().join("unprivileged");
+        std::fs::write(&btf, b"btf").unwrap();
+        std::fs::create_dir(&bpffs).unwrap();
+        std::fs::write(bpffs.join("rustfrp-flow"), b"").unwrap();
+        std::fs::write(&unprivileged, b"2\n").unwrap();
+        let status = detect_ebpf_at(&btf, &bpffs, &unprivileged);
+        assert!(status.available);
+        assert_eq!(status.pinned_objects, 1);
+        assert_eq!(status.unprivileged_disabled, Some(2));
     }
 }

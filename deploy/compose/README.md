@@ -27,3 +27,20 @@ delivery; no third-party destination is enabled implicitly.
 
 For additional FRPS nodes, append entries to `targets.json`. Their metrics URLs
 must be reachable from the control container.
+
+For multiple automation identities, tenant claims, and least-privilege scopes,
+copy `auth-policy.example.json` outside the repository, replace the example
+digest (`printf %s YOUR_TOKEN | sha256sum`), mount it read-only, and set
+`RUSTFRP_AUTH_POLICY_FILE` to its container path. Policy files store only SHA256
+digests; bearer tokens shorter than 32 characters are rejected, so generate
+high-entropy credentials. Tenant-safe scopes are `read`, `write`, and
+`telemetry:write`; global
+operations additionally require `platform:read` or `platform:write`. `*` grants
+all scopes and should be reserved for platform administration.
+Call `/api/v1/auth/whoami` to verify the active identity and tenant. Supplying an
+`X-RustFRP-Tenant` header that differs from the token claim is rejected.
+
+On Linux, daemon resource samples and Prometheus output also report kernel BTF,
+bpffs, pinned-object, and unprivileged-BPF status. Loading flow probes remains an
+explicit privileged deployment choice; the daemon itself needs no additional
+capabilities and degrades cleanly on other platforms.

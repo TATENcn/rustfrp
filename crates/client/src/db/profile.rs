@@ -74,7 +74,7 @@ impl Database {
         let id = tx.last_insert_rowid();
         tx.execute(
             "INSERT INTO profile_environment (profile_id, environment_id)
-             SELECT ?1, id FROM environment WHERE is_default = 1",
+             SELECT ?1, id FROM environment WHERE tenant_id = 'default' AND is_default = 1",
             [id],
         )
         .map_err(ClientError::DatabaseQuery)?;

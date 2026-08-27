@@ -506,6 +506,7 @@ mod tests {
             server_addr: "frp.example.com".into(),
             server_port: 7000,
             token: "test123".into(),
+            user: Some("tenant-user".into()),
             ..Default::default()
         };
         let profile_id = db.insert_profile(&profile).await.unwrap();
@@ -543,6 +544,7 @@ mod tests {
         assert!(content.contains("frp.example.com"));
         assert!(content.contains("RDP"));
         assert!(content.contains("3389"));
+        assert!(content.contains("user = \"tenant-user\""));
         // 文件名应为 sanitized profile name
         assert!(paths[0]
             .file_name()

@@ -1,0 +1,10 @@
+{
+  "tokens": [
+    {
+      "name": "platform-admin",
+      "tenant": "default",
+      "token_sha256": "3eb1bd439947eb762998e566ccc2e099c791118b2f40579cc4f7da2b5061b7f9",
+      "scopes": ["*"]
+    }
+  ]
+}

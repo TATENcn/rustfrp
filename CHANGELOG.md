@@ -4,6 +4,12 @@
 
 ### Added
 
+- Zero-trust API policy files with digest-only bearer credentials, tenant-bound
+  identities, read/write/telemetry scopes, and a whoami audit endpoint; plus
+  privilege-free eBPF readiness and pinned-object observability on Linux.
+- Tenant-isolated Environment and Profile administration with independent
+  defaults, non-enumerating ownership failures, and verified FRP user/serverUser
+  generation for namespaced server-side proxy identities.
 - Supply-chain policy enforcement with cargo-deny, grouped Dependabot updates,
   scheduled all-feature, ignored, and documentation test coverage, plus a
   security-patched Wasmtime 36 LTS runtime and canonical SPDX metadata.

@@ -28,6 +28,11 @@ struct Cli {
     #[cfg(feature = "http-api")]
     #[arg(long)]
     api_token: Option<String>,
+
+    /// JSON policy containing SHA256 token digests, tenants, and scopes.
+    #[cfg(feature = "http-api")]
+    #[arg(long, env = "RUSTFRP_AUTH_POLICY_FILE")]
+    auth_policy_file: Option<String>,
 }
 
 #[tokio::main]
@@ -74,12 +79,17 @@ async fn main() -> anyhow::Result<()> {
                     })
             });
 
-        match api_token {
-            Some(token) => {
-                rustfrp_daemon::serve_with_auth(core, &cli.api_listen, &token).await?;
-            }
-            None => {
-                rustfrp_daemon::serve(core, &cli.api_listen).await?;
+        if let Some(path) = cli.auth_policy_file {
+            let policy = rustfrp_daemon::api::auth::AuthPolicy::from_file(path)?;
+            rustfrp_daemon::serve_with_policy(core, &cli.api_listen, policy).await?;
+        } else {
+            match api_token {
+                Some(token) => {
+                    rustfrp_daemon::serve_with_auth(core, &cli.api_listen, &token).await?;
+                }
+                None => {
+                    rustfrp_daemon::serve(core, &cli.api_listen).await?;
+                }
             }
         }
     }
