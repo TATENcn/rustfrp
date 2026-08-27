@@ -1,0 +1,13 @@
+[
+  {
+    "id": "local-frps",
+    "name": "Local FRPS",
+    "metrics_url": "http://frps:7500/metrics"
+  },
+  {
+    "id": "local-daemon",
+    "name": "Local daemon",
+    "metrics_url": "http://daemon:7900/api/v1/metrics/prometheus",
+    "bearer_token_file": "/run/secrets/rustfrp_api_token"
+  }
+]

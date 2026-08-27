@@ -18,6 +18,9 @@ pub struct TargetNode {
     pub name: String,
     /// /metrics 端点 URL
     pub metrics_url: String,
+    /// Optional file containing a bearer token for this endpoint.
+    #[serde(default)]
+    pub bearer_token_file: Option<String>,
 }
 
 /// 节点状态

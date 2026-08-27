@@ -11,7 +11,8 @@ impl Database {
     /// 插入新的 Profile
     pub async fn insert_profile(&self, profile: &FrpsProfile) -> Result<i64> {
         let conn = self.lock().await;
-        conn.execute(
+        let tx = conn.unchecked_transaction()?;
+        tx.execute(
             "INSERT INTO frps_profile
                 (name, server_addr, server_port, token, tls_enable,
                  tls_cert_file, tls_key_file, tls_trusted_ca_file,
@@ -70,8 +71,15 @@ impl Database {
             ],
         )
         .map_err(ClientError::DatabaseQuery)?;
-
-        Ok(conn.last_insert_rowid())
+        let id = tx.last_insert_rowid();
+        tx.execute(
+            "INSERT INTO profile_environment (profile_id, environment_id)
+             SELECT ?1, id FROM environment WHERE is_default = 1",
+            [id],
+        )
+        .map_err(ClientError::DatabaseQuery)?;
+        tx.commit().map_err(ClientError::DatabaseQuery)?;
+        Ok(id)
     }
 
     /// 获取所有 Profile

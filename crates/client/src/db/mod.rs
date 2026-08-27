@@ -12,6 +12,7 @@
 //! - `visitor.rs` — LocalVisitor CRUD
 
 pub mod binding;
+pub mod environment;
 pub mod migrate;
 pub mod profile;
 pub mod proxy;

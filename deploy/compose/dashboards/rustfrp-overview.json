@@ -1,0 +1,20 @@
+{
+  "annotations": { "list": [] },
+  "editable": false,
+  "panels": [
+    { "type": "stat", "title": "Healthy nodes", "id": 1, "gridPos": { "h": 8, "w": 6, "x": 0, "y": 0 }, "targets": [{ "expr": "sum(rustfrp_node_up)", "refId": "A" }] },
+    { "type": "timeseries", "title": "Traffic received", "id": 2, "gridPos": { "h": 8, "w": 9, "x": 6, "y": 0 }, "targets": [{ "expr": "rustfrp_traffic_received_bytes", "legendFormat": "{{node_name}} / {{profile_id}}", "refId": "A" }] },
+    { "type": "timeseries", "title": "Traffic sent", "id": 3, "gridPos": { "h": 8, "w": 9, "x": 15, "y": 0 }, "targets": [{ "expr": "rustfrp_traffic_sent_bytes", "legendFormat": "{{node_name}} / {{profile_id}}", "refId": "A" }] },
+    { "type": "timeseries", "title": "FRPS connections", "id": 4, "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 }, "targets": [{ "expr": "frp_server_client_counts", "legendFormat": "{{node_name}}", "refId": "A" }] },
+    { "type": "timeseries", "title": "Daemon CPU", "id": 5, "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 }, "targets": [{ "expr": "rustfrp_daemon_cpu_percent", "legendFormat": "{{node_name}}", "refId": "A" }] },
+    { "type": "timeseries", "title": "Daemon memory", "id": 6, "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 }, "targets": [{ "expr": "rustfrp_daemon_memory_bytes", "legendFormat": "{{node_name}}", "refId": "A" }] }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 42,
+  "tags": ["rustfrp"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "title": "RustFRP Overview",
+  "uid": "rustfrp-overview",
+  "version": 1
+}

@@ -56,11 +56,23 @@ async fn main() -> anyhow::Result<()> {
 
     #[cfg(feature = "http-api")]
     {
-        let api_token = cli.api_token.or_else(|| {
-            std::env::var("RUSTFRP_API_TOKEN")
-                .ok()
-                .filter(|token| !token.is_empty())
-        });
+        let api_token = cli
+            .api_token
+            .or_else(|| {
+                std::env::var("RUSTFRP_API_TOKEN")
+                    .ok()
+                    .filter(|token| !token.is_empty())
+            })
+            .or_else(|| {
+                std::env::var("RUSTFRP_API_TOKEN_FILE")
+                    .ok()
+                    .and_then(|path| {
+                        std::fs::read_to_string(path)
+                            .ok()
+                            .map(|token| token.trim().to_owned())
+                            .filter(|token| !token.is_empty())
+                    })
+            });
 
         match api_token {
             Some(token) => {

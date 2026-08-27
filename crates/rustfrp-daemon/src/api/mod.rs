@@ -11,8 +11,10 @@ pub mod state;
 // Sub-modules for each resource type
 pub mod bindings;
 pub mod config_transfer;
+pub mod environments;
 pub mod frp_versions;
 pub mod logs;
+pub mod metrics;
 pub mod profiles;
 pub mod proxies;
 pub mod system;
@@ -126,6 +128,18 @@ pub fn create_router(state: ApiState, auth: impl AuthMiddleware) -> Router {
                 .put(profiles::update)
                 .delete(profiles::delete),
         )
+        .route(
+            "/api/v1/profiles/:id/environment",
+            axum::routing::put(environments::assign_profile),
+        )
+        .route(
+            "/api/v1/environments",
+            axum::routing::get(environments::list).post(environments::create),
+        )
+        .route(
+            "/api/v1/environments/:id",
+            axum::routing::put(environments::update).delete(environments::delete),
+        )
         // Proxy CRUD
         .route(
             "/api/v1/proxies",
@@ -184,6 +198,18 @@ pub fn create_router(state: ApiState, auth: impl AuthMiddleware) -> Router {
             axum::routing::get(system::reload_status),
         )
         .route("/api/v1/health", axum::routing::get(system::health))
+        .route(
+            "/api/v1/metrics/history",
+            axum::routing::get(metrics::history),
+        )
+        .route(
+            "/api/v1/metrics/traffic",
+            axum::routing::post(metrics::ingest_traffic),
+        )
+        .route(
+            "/api/v1/metrics/prometheus",
+            axum::routing::get(metrics::prometheus),
+        )
         // Explicit migration import and consistent SQLite backup
         .route(
             "/api/v1/config/import",
@@ -259,6 +285,7 @@ pub async fn serve(core: ClientCore, listen_addr: &str) -> anyhow::Result<()> {
         core.config_dir().clone(),
         core.state().clone(),
     );
+    state.metrics.spawn_sampler(core.process_manager().clone());
 
     let router = create_router(state, NoAuth);
 
@@ -300,6 +327,7 @@ pub async fn serve_with_auth(
         core.config_dir().clone(),
         core.state().clone(),
     );
+    state.metrics.spawn_sampler(core.process_manager().clone());
 
     let router = create_router(state, BearerToken::new(api_token.to_string()));
 
