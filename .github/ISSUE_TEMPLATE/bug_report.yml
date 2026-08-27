@@ -1,0 +1,44 @@
+name: Bug report
+description: Report a reproducible RustFRP defect
+title: "fix: "
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Provide the smallest reliable sequence of steps.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: RustFRP and FRP versions
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: Linux amd64, Windows arm64, macOS arm64, Docker, etc.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      render: shell
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Safety
+      options:
+        - label: I removed tokens, passwords, domains, and other sensitive data from this report.
+          required: true
