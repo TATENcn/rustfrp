@@ -4,6 +4,9 @@
 
 ### Added
 
+- Functional `rustfrp-agent` with authenticated Pull configuration, ETag support,
+  TOML plus native `frps verify` validation, atomic last-known-good caching, PID
+  adoption, crash restart, and an frps lifecycle independent from agent crashes.
 - WebUI controls to copy server-side mapped addresses and create up to 100 TCP
   or UDP port mappings from lists and ranges with conflict validation.
 - Mandatory SHA256 verification against the official FRP release manifest,

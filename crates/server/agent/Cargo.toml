@@ -9,6 +9,7 @@ description = "RustFRP agent — optional frps wrapper for server-side config ma
 
 [dependencies]
 rustfrp-common = { path = "../../common" }
+rustfrp-bin = { path = "../../rustfrp-bin" }
 tokio = { workspace = true, features = ["process", "sync", "time"] }
 serde.workspace = true
 serde_json.workspace = true
@@ -17,6 +18,9 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true
+reqwest.workspace = true
+toml.workspace = true
+sha2 = "0.10"
 chrono.workspace = true
 dirs = "5"
 
