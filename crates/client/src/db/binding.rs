@@ -2,7 +2,7 @@
 //!
 //! 管理 Profile 与 Proxy 的多对多绑定关系。
 
-use crate::config::model::{BindingRule, ProxyType};
+use crate::config::model::BindingRule;
 use crate::db::Database;
 use crate::error::{ClientError, Result};
 use rusqlite::params;
@@ -10,20 +10,7 @@ use rusqlite::params;
 impl Database {
     /// 插入新的绑定规则
     ///
-    /// Checks STCP/XTCP conflict: these proxy types cannot be bound to multiple profiles
-    /// (port conflict on local machine).
     pub async fn insert_binding(&self, binding: &BindingRule) -> Result<i64> {
-        // Check STCP/XTCP conflict
-        let proxy = self.get_proxy(binding.proxy_id).await?;
-        if matches!(proxy.proxy_type, ProxyType::Stcp | ProxyType::Xtcp) {
-            let existing = self.list_bindings_for_proxy(binding.proxy_id).await?;
-            if !existing.is_empty() {
-                return Err(ClientError::ConfigValidation(
-                    "STCP/XTCP proxy cannot be bound to multiple profiles (port conflict)".into(),
-                ));
-            }
-        }
-
         let conn = self.lock().await;
         conn.execute(
             "INSERT INTO binding_rule
@@ -184,6 +171,59 @@ impl Database {
             .map_err(ClientError::DatabaseQuery)?;
 
         Ok(bindings)
+    }
+
+    /// Enabled memberships included in one Profile's generated configuration.
+    pub async fn list_enabled_bindings_for_profile(
+        &self,
+        profile_id: i64,
+    ) -> Result<Vec<BindingRule>> {
+        let conn = self.lock().await;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, profile_id, proxy_id, enabled, running, priority,
+                    group_name, group_key, created_at, updated_at
+             FROM binding_rule WHERE profile_id = ?1 AND enabled = 1 ORDER BY priority, id",
+            )
+            .map_err(ClientError::DatabaseQuery)?;
+        let bindings = stmt
+            .query_map(params![profile_id], row_to_binding)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(ClientError::DatabaseQuery)?;
+        Ok(bindings)
+    }
+
+    /// Persist Profile-level desired state. The legacy binding flag is mirrored
+    /// during the compatibility window so older clients remain readable.
+    pub async fn set_profile_desired_running(&self, profile_id: i64, running: bool) -> Result<()> {
+        let conn = self.lock().await;
+        conn.execute(
+            "INSERT INTO profile_runtime (profile_id, desired_running, updated_at)
+             VALUES (?1, ?2, datetime('now'))
+             ON CONFLICT(profile_id) DO UPDATE SET desired_running=excluded.desired_running,
+                 updated_at=excluded.updated_at",
+            params![profile_id, running as i32],
+        )
+        .map_err(ClientError::DatabaseQuery)?;
+        conn.execute(
+            "UPDATE binding_rule SET running = ?1, updated_at = datetime('now') WHERE profile_id = ?2",
+            params![running as i32, profile_id],
+        ).map_err(ClientError::DatabaseQuery)?;
+        Ok(())
+    }
+
+    pub async fn profile_desired_running(&self, profile_id: i64) -> Result<bool> {
+        let conn = self.lock().await;
+        conn.query_row(
+            "SELECT desired_running FROM profile_runtime WHERE profile_id = ?1",
+            params![profile_id],
+            |row| Ok(row.get::<_, i32>(0)? != 0),
+        )
+        .or_else(|error| match error {
+            rusqlite::Error::QueryReturnedNoRows => Ok(false),
+            other => Err(other),
+        })
+        .map_err(ClientError::DatabaseQuery)
     }
 
     /// 设置绑定的 running 状态
@@ -402,5 +442,44 @@ mod tests {
         db.toggle_binding(id, true).await.unwrap();
         let binding = db.get_binding(id).await.unwrap();
         assert!(binding.enabled);
+    }
+
+    #[tokio::test]
+    async fn profile_runtime_is_shared_by_all_bindings() {
+        let db = setup_db().await;
+        let profile_id = db
+            .insert_profile(&crate::config::model::FrpsProfile::default())
+            .await
+            .unwrap();
+        let first_proxy = db
+            .insert_proxy(&crate::config::model::LocalProxy::default())
+            .await
+            .unwrap();
+        let mut second = crate::config::model::LocalProxy::default();
+        second.name = "second".into();
+        let second_proxy = db.insert_proxy(&second).await.unwrap();
+        db.insert_binding(&sample_binding(profile_id, first_proxy))
+            .await
+            .unwrap();
+        db.insert_binding(&sample_binding(profile_id, second_proxy))
+            .await
+            .unwrap();
+
+        db.set_profile_desired_running(profile_id, true)
+            .await
+            .unwrap();
+        assert!(db.profile_desired_running(profile_id).await.unwrap());
+        assert_eq!(
+            db.list_running_bindings_for_profile(profile_id)
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
+
+        let duplicate = db
+            .insert_binding(&sample_binding(profile_id, first_proxy))
+            .await;
+        assert!(duplicate.is_err());
     }
 }

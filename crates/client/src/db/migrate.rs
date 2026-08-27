@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
 /// 当前最新的 schema 版本
-const LATEST_VERSION: i32 = 12;
+const LATEST_VERSION: i32 = 13;
 
 /// 运行所有待执行的迁移
 ///
@@ -95,6 +95,7 @@ fn apply_migration(conn: &Connection, version: i32) -> Result<()> {
         10 => migrate_v10(&tx)?,
         11 => migrate_v11(&tx)?,
         12 => migrate_v12(&tx)?,
+        13 => migrate_v13(&tx)?,
         _ => {
             return Err(ClientError::DatabaseMigration(format!(
                 "Unknown migration version: {version}"
@@ -666,6 +667,30 @@ fn migrate_v12(tx: &rusqlite::Transaction) -> Result<()> {
            ON environment(tenant_id) WHERE is_default = 1;
          CREATE INDEX idx_environment_tenant ON environment(tenant_id);",
     )?;
+    Ok(())
+}
+
+/// V13: move desired runtime state to the Profile execution unit and prevent
+/// duplicate Profile/Proxy memberships.
+fn migrate_v13(tx: &rusqlite::Transaction) -> Result<()> {
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS profile_runtime (
+            profile_id      INTEGER PRIMARY KEY,
+            desired_running INTEGER NOT NULL DEFAULT 0,
+            updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (profile_id) REFERENCES frps_profile(id) ON DELETE CASCADE
+        );
+        INSERT OR IGNORE INTO profile_runtime (profile_id, desired_running)
+        SELECT profile_id, MAX(running) FROM binding_rule GROUP BY profile_id;
+        DELETE FROM binding_rule
+         WHERE id NOT IN (
+            SELECT MIN(id) FROM binding_rule GROUP BY profile_id, proxy_id
+         );
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_binding_profile_proxy
+            ON binding_rule(profile_id, proxy_id);",
+    )
+    .map_err(|e| ClientError::DatabaseMigration(format!("Failed to add profile runtime: {e}")))?;
+    tracing::info!("V13 Migration: Add profile runtime and unique binding membership");
     Ok(())
 }
 

@@ -198,6 +198,22 @@ pub fn create_router(state: ApiState, auth: impl AuthMiddleware) -> Router {
             axum::routing::put(environments::assign_profile),
         )
         .route(
+            "/api/v1/profiles/:id/proxies",
+            axum::routing::put(profiles::replace_proxies),
+        )
+        .route(
+            "/api/v1/profiles/:id/runtime",
+            axum::routing::get(profiles::runtime),
+        )
+        .route(
+            "/api/v1/profiles/:id/start",
+            axum::routing::post(profiles::start),
+        )
+        .route(
+            "/api/v1/profiles/:id/stop",
+            axum::routing::post(profiles::stop),
+        )
+        .route(
             "/api/v1/environments",
             axum::routing::get(environments::list).post(environments::create),
         )
@@ -230,14 +246,6 @@ pub fn create_router(state: ApiState, auth: impl AuthMiddleware) -> Router {
         .route(
             "/api/v1/bindings/:id/toggle",
             axum::routing::patch(bindings::toggle),
-        )
-        .route(
-            "/api/v1/bindings/:id/start",
-            axum::routing::post(bindings::start_binding),
-        )
-        .route(
-            "/api/v1/bindings/:id/stop",
-            axum::routing::post(bindings::stop_binding),
         )
         // Visitor CRUD
         .route(
