@@ -4,6 +4,8 @@
 
 ### Added
 
+- Mandatory SHA256 verification against the official FRP release manifest,
+  version-aware binary integrity markers, and Windows ZIP archive support.
 - One-shot modern `frpc.toml` migration into SQLite with atomic rollback,
   conflict-safe profile naming, Proxy/Visitor support, and WebUI controls.
 - Transactionally consistent SQLite backup download from the daemon and WebUI.
