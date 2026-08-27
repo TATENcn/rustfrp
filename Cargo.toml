@@ -62,7 +62,7 @@ sysinfo = { version = "0.37.2", default-features = false, features = ["system"] 
 # === 开发 / 测试（各 crate 通过 dev-dependencies 继承） ===
 tempfile = "3"
 test-log = "0.2"
-rstest = "0.22"
+rstest = "0.26"
 mockall = "0.13"
 criterion = "0.5"
 proptest = "1.5"
