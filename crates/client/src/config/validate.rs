@@ -120,7 +120,7 @@ impl LocalProxy {
         ) && self
             .secret_key
             .as_ref()
-            .map_or(true, |k| k.trim().is_empty())
+            .is_none_or(|k| k.trim().is_empty())
         {
             return Err(ClientError::MissingRequiredField(
                 "secret_key is required for stcp/xtcp/sudp proxy types".into(),
@@ -176,7 +176,7 @@ impl LocalVisitor {
         if self
             .secret_key
             .as_ref()
-            .map_or(true, |k| k.trim().is_empty())
+            .is_none_or(|k| k.trim().is_empty())
         {
             return Err(ClientError::MissingRequiredField(
                 "secret_key is required for visitor".into(),
