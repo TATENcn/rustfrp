@@ -5,6 +5,7 @@
 
 pub mod download;
 pub mod extract;
+pub mod manager;
 pub mod verify;
 
 /// FRP 二进制管理错误

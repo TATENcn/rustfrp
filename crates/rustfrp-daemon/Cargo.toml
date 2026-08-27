@@ -24,7 +24,7 @@ clap = { workspace = true }
 
 # HTTP API (optional via feature flag)
 axum = { version = "0.7", optional = true, features = ["macros"] }
-tower = { version = "0.4", optional = true }
+tower = { version = "0.4", optional = true, features = ["util"] }
 tower-http = { version = "0.5", optional = true, features = ["cors", "trace"] }
 rust-embed = { version = "8", optional = true, features = ["compression"] }
 mime_guess = { version = "2", optional = true }

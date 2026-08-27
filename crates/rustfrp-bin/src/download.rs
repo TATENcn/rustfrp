@@ -6,7 +6,7 @@ use crate::{FrpError, FrpVersion};
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
 
-const RELEASE_BASE: &str = "https://github.com/fatedier/frp/releases/download";
+pub const OFFICIAL_RELEASE_BASE: &str = "https://github.com/fatedier/frp/releases/download";
 
 pub fn asset_filename(version: &FrpVersion, platform: &str) -> String {
     let extension = if platform.starts_with("windows_") {
@@ -19,7 +19,7 @@ pub fn asset_filename(version: &FrpVersion, platform: &str) -> String {
 
 pub async fn official_checksum(version: &FrpVersion, asset: &str) -> Result<String, FrpError> {
     let url = format!(
-        "{RELEASE_BASE}/{}/frp_sha256_checksums.txt",
+        "{OFFICIAL_RELEASE_BASE}/{}/frp_sha256_checksums.txt",
         version.tag_name
     );
     let client = reqwest::Client::builder()
@@ -65,8 +65,24 @@ pub async fn download(
     download_dir: &Path,
     platform: &str,
 ) -> Result<PathBuf, FrpError> {
+    download_from(version, download_dir, platform, OFFICIAL_RELEASE_BASE).await
+}
+
+/// Download from an official-compatible mirror base. Integrity remains anchored
+/// to the separately fetched official checksum manifest in `ensure`.
+pub async fn download_from(
+    version: &FrpVersion,
+    download_dir: &Path,
+    platform: &str,
+    release_base: &str,
+) -> Result<PathBuf, FrpError> {
     let filename = asset_filename(version, platform);
-    let url = format!("{RELEASE_BASE}/{}/{}", version.tag_name, filename);
+    let url = format!(
+        "{}/{}/{}",
+        release_base.trim_end_matches('/'),
+        version.tag_name,
+        filename
+    );
 
     let output_path = download_dir.join(&filename);
 

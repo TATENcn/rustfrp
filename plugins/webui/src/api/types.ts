@@ -173,7 +173,32 @@ export interface ProcessInfo {
   pid: number | null
   running: boolean
   restart_count: number
+  last_failure?: {
+    reason: 'authentication_failed' | 'network_unreachable' | 'configuration_invalid' | 'address_in_use' | 'tls_error' | 'unknown'
+    summary: string
+    exit_code: number
+    occurrences: number
+  } | null
   config_path: string
+}
+
+export interface InstalledFrpVersion {
+  version: string
+  platform: string
+  active: boolean
+  integrity_ok: boolean
+  frpc_path: string
+  has_frps: boolean
+}
+
+export interface FrpVersionList {
+  active: string | null
+  installed: InstalledFrpVersion[]
+}
+
+export interface AvailableFrpVersion {
+  version: string
+  published_at: string | null
 }
 
 export interface StatusResponse {

@@ -4,6 +4,9 @@
 
 ### Added
 
+- FRP multi-version registry with version/platform-isolated installs, official
+  release discovery, HTTPS mirror selection anchored to official checksums, and
+  transactional WebUI switching/deletion with process rollback.
 - Functional `rustfrp-agent` with authenticated Pull configuration, ETag support,
   TOML plus native `frps verify` validation, atomic last-known-good caching, PID
   adoption, crash restart, and an frps lifecycle independent from agent crashes.

@@ -11,6 +11,7 @@ pub mod state;
 // Sub-modules for each resource type
 pub mod bindings;
 pub mod config_transfer;
+pub mod frp_versions;
 pub mod logs;
 pub mod profiles;
 pub mod proxies;
@@ -23,6 +24,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use axum::Router;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 
@@ -108,7 +110,7 @@ impl AuthMiddleware for BearerToken {
 /// 1. API routes (`/api/v1/*`)
 /// 2. Static assets (`/assets/*`)
 /// 3. SPA fallback (everything else → `index.html`)
-pub fn create_router(state: ApiState, _auth: impl AuthMiddleware) -> Router {
+pub fn create_router(state: ApiState, auth: impl AuthMiddleware) -> Router {
     use crate::web;
 
     // Group 1: API routes (matched first)
@@ -191,6 +193,23 @@ pub fn create_router(state: ApiState, _auth: impl AuthMiddleware) -> Router {
             "/api/v1/config/export",
             axum::routing::get(config_transfer::export),
         )
+        // FRP binary multi-version management
+        .route(
+            "/api/v1/frp/versions",
+            axum::routing::get(frp_versions::list).post(frp_versions::install),
+        )
+        .route(
+            "/api/v1/frp/releases",
+            axum::routing::get(frp_versions::available),
+        )
+        .route(
+            "/api/v1/frp/versions/:version/activate",
+            axum::routing::post(frp_versions::activate),
+        )
+        .route(
+            "/api/v1/frp/versions/:version",
+            axum::routing::delete(frp_versions::remove),
+        )
         // Shared state
         .with_state(state);
 
@@ -201,6 +220,7 @@ pub fn create_router(state: ApiState, _auth: impl AuthMiddleware) -> Router {
     //
     // Order matters: API first, then static assets, then fallback.
     // axum Router::merge keeps registration order; earlier routes match first.
+    let auth = Arc::new(auth);
     Router::new()
         .merge(api_routes)
         .merge(static_routes)
@@ -216,6 +236,15 @@ pub fn create_router(state: ApiState, _auth: impl AuthMiddleware) -> Router {
                     },
                 ),
         )
+        .layer(axum::middleware::from_fn(
+            move |request: Request, next: axum::middleware::Next| {
+                let auth = auth.clone();
+                async move {
+                    auth.authenticate(&request)?;
+                    Ok::<_, Response>(next.run(request).await)
+                }
+            },
+        ))
 }
 
 /// Start the HTTP API server.
@@ -296,4 +325,65 @@ pub async fn serve_with_auth(
 
     tracing::info!("Daemon shut down");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request as HttpRequest;
+    use rustfrp_client::db::{migrate, Database};
+    use rustfrp_client::process::manager::ProcessManager;
+    use rustfrp_client::ClientState;
+    use rustfrp_common::signal::SignalHandler;
+    use tokio::sync::RwLock;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn bearer_auth_is_applied_to_api_routes_but_not_health() {
+        let database_file = tempfile::NamedTempFile::new().unwrap();
+        let db = Database::open(database_file.path().to_str().unwrap())
+            .await
+            .unwrap();
+        {
+            let connection = db.lock().await;
+            migrate::run(&connection).unwrap();
+        }
+        let runtime = tempfile::tempdir().unwrap();
+        let manager = ProcessManager::new(
+            runtime.path().into(),
+            "/nonexistent/frpc".into(),
+            SignalHandler::new(),
+        );
+        let state = ApiState::new(
+            db,
+            manager,
+            runtime.path().into(),
+            Arc::new(RwLock::new(ClientState::Ready)),
+        );
+        let app = create_router(state, BearerToken::new("secret".into()));
+
+        let unauthorized = app
+            .clone()
+            .oneshot(
+                HttpRequest::builder()
+                    .uri("/api/v1/status")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+        let health = app
+            .oneshot(
+                HttpRequest::builder()
+                    .uri("/api/v1/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(health.status(), StatusCode::OK);
+    }
 }

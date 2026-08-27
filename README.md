@@ -191,6 +191,14 @@ cargo run -p rustfrp-agent -- \
 模板 Pull API 支持 ETag/`If-None-Match`，节点 ID 仅允许字母、数字、短横线
 和下划线，避免目录穿越。生产环境应在控制面前启用 TLS 反向代理。
 
+### FRP 多版本管理
+
+系统状态页可以查询官方稳定版本、从 GitHub 官方源或自定义 HTTPS 镜像安装、
+切换和删除 FRP。安装目录按 `versions/<version>/<platform>/` 隔离，因此多个
+版本可以同时存在。镜像只提供发布归档，SHA256 仍从 fatedier/frp 官方发布
+清单获取。版本切换会重启切换前正在运行的 frpc；新版本启动失败时恢复原
+版本和进程。也可以用 `RUSTFRP_FRP_VERSION` 指定守护进程启动版本。
+
 ## 许可证
 
 [AGPL-3.0](LICENSE) © RustFRP contributors
