@@ -4,6 +4,9 @@
 
 ### Added
 
+- Native release bundles for Linux, Windows, and macOS on amd64 and arm64,
+  including daemon, agent, and control binaries with SHA256 sidecars, plus a
+  six-platform pull-request build gate.
 - FRP multi-version registry with version/platform-isolated installs, official
   release discovery, HTTPS mirror selection anchored to official checksums, and
   transactional WebUI switching/deletion with process rollback.
