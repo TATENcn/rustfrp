@@ -2,19 +2,20 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NCard, NGrid, NGi, NSpace, NStatistic, NSpin, NTag } from 'naive-ui'
 import { useI18n } from '@/i18n'
+import { formatBytes, formatDuration, formatPercent } from '@/i18n/format'
 import { useSystemStore } from '@/stores/system'
 import { useEnvironmentStore } from '@/stores/environments'
 import { getMetricsHistory } from '@/api/metrics'
 import type { MetricsHistory } from '@/api/types'
 import MetricChart from '@/components/MetricChart.vue'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const systemStore = useSystemStore()
 const environmentStore = useEnvironmentStore()
 const history = ref<MetricsHistory>({ resources: [], traffic: [] })
 
 const cpuValues = computed(() => history.value.resources.map((sample) => sample.system_cpu_percent))
-const memoryValues = computed(() => history.value.resources.map((sample) => sample.system_memory_used_bytes / 1024 / 1024))
+const memoryValues = computed(() => history.value.resources.map((sample) => sample.system_memory_used_bytes))
 const receivedValues = computed(() => history.value.traffic.map((sample) => sample.received_bytes))
 const sentValues = computed(() => history.value.traffic.map((sample) => sample.sent_bytes))
 
@@ -37,12 +38,9 @@ onUnmounted(() => {
   if (timer) clearInterval(timer)
 })
 
-function formatUptime(secs: number): string {
-  const h = Math.floor(secs / 3600)
-  const m = Math.floor((secs % 3600) / 60)
-  const s = secs % 60
-  return `${h}h ${m}m ${s}s`
-}
+const formatUptime = (seconds: number) => formatDuration(seconds, locale.value)
+const formatCpu = (value: number) => formatPercent(value, locale.value)
+const formatMemory = (value: number) => formatBytes(value, locale.value)
 </script>
 
 <template>
@@ -103,10 +101,10 @@ function formatUptime(secs: number): string {
     </NGrid>
 
     <NGrid cols="1 m:2" :x-gap="16" :y-gap="16" style="margin-top: 16px">
-      <NGi><NCard title="System CPU" size="small"><MetricChart :values="cpuValues" unit="%" /></NCard></NGi>
-      <NGi><NCard title="System memory" size="small"><MetricChart :values="memoryValues" color="#2080f0" unit=" MiB" /></NCard></NGi>
-      <NGi><NCard title="Traffic received" size="small"><MetricChart :values="receivedValues" color="#18a058" unit=" B" empty-text="No traffic samples yet" /></NCard></NGi>
-      <NGi><NCard title="Traffic sent" size="small"><MetricChart :values="sentValues" color="#f0a020" unit=" B" empty-text="No traffic samples yet" /></NCard></NGi>
+      <NGi><NCard title="System CPU" size="small"><MetricChart :values="cpuValues" :format-value="formatCpu" /></NCard></NGi>
+      <NGi><NCard title="System memory" size="small"><MetricChart :values="memoryValues" color="#2080f0" :format-value="formatMemory" /></NCard></NGi>
+      <NGi><NCard title="Traffic received" size="small"><MetricChart :values="receivedValues" color="#18a058" :format-value="formatMemory" empty-text="No traffic samples yet" /></NCard></NGi>
+      <NGi><NCard title="Traffic sent" size="small"><MetricChart :values="sentValues" color="#f0a020" :format-value="formatMemory" empty-text="No traffic samples yet" /></NCard></NGi>
     </NGrid>
 
     <!-- Process List -->

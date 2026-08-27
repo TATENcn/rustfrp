@@ -16,6 +16,7 @@ import {
   type MenuOption,
 } from "naive-ui";
 import { useI18n } from "@/i18n";
+import { formatDuration } from "@/i18n/format";
 import { useSystemStore } from "@/stores/system";
 import { useEnvironmentStore } from "@/stores/environments";
 import { onMounted } from "vue";
@@ -158,6 +159,15 @@ const statusText = computed(() => {
   return i18n.t("status.frpcRunning", { count });
 });
 
+const uptimeText = computed(() =>
+  systemStore.status
+    ? formatDuration(systemStore.status.uptime_secs, i18n.locale.value, {
+        style: "narrow",
+        includeSeconds: false,
+      })
+    : "",
+);
+
 onMounted(() => {
   systemStore.fetchStatus();
   environmentStore.fetchAll();
@@ -264,8 +274,7 @@ onMounted(() => {
       <span style="font-size: 12px; color: var(--n-text-color-3)">
         {{ i18n.t("app.ready") }} · {{ statusText }}
         <template v-if="systemStore.status">
-          · uptime {{ Math.floor(systemStore.status.uptime_secs / 3600) }}h
-          {{ Math.floor((systemStore.status.uptime_secs % 3600) / 60) }}m
+          · uptime {{ uptimeText }}
         </template>
       </span>
       <span style="font-size: 11px; color: var(--n-text-color-3)">

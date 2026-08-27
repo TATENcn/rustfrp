@@ -735,6 +735,7 @@ impl ProcessGuard {
 | 测试类型 | 工具 | 覆盖率要求 | 说明 |
 |---|---|---|---|
 | 单元测试 | `cargo test --lib` | 核心层 > 80% | 每个 `pub fn` 都有对应测试 |
+| WebUI 单元测试 | `cd plugins/webui && bun test` | 格式化等纯函数 | 每次 WebUI CI 和主 CI 运行 |
 | 集成测试 | `cargo test --test integration` | 核心流程 100% | 跨 crate 场景：DB→生成→进程 |
 | 属性测试 | `proptest` | 校验器必须过 | 自动生成边界用例测试校验器 |
 | Snapshot 测试 | `insta` | TOML 生成必须过 | FRP 配置升级时可快速发现输出变化 |

@@ -147,18 +147,15 @@ stores/
 ### 目录结构
 
 ```
-plugins/gui/src/locales/
-├── index.ts          # vue-i18n 初始化
-├── zh-CN/
-│   ├── common.json   # 通用文本（按钮、标签）
-│   ├── error.json    # 错误消息（与 Rust error code 一一对应）
-│   ├── servers.json  # 服务端页面文本
-│   ├── proxies.json  # 代理页面文本
-│   └── settings.json # 设置页面文本
-└── en/
-    ├── common.json
-    ├── error.json
-    └── ...
+plugins/webui/src/i18n/
+├── index.ts          # 轻量 Vue provide/inject i18n，持久化当前 locale
+├── locale.ts         # SupportedLocale 与 Naive UI locale 映射
+├── format.ts         # Intl 数据格式化与兼容性 fallback
+├── format.test.ts    # Bun 单元测试
+├── types.ts          # 翻译键和插值参数类型
+└── messages/
+    ├── zh.json
+    └── en.json
 ```
 
 ### 翻译键命名规范
@@ -185,7 +182,29 @@ Rust CoreError::code()          → 前端 error.{code} 翻译键
 Rust CoreError::user_message_key()  → 前端按当前语言查找翻译
 ```
 
-如果插值需要（如 `退出码 {code}`），通过 `vue-i18n` 的命名参数传递。
+如果插值需要（如 `退出码 {code}`），通过内置 `t()` 的命名参数传递。
+
+### 区域化数据格式
+
+WebUI 的用户可见数字、持续时间和单位统一由
+`plugins/webui/src/i18n/format.ts` 格式化，并显式传入当前
+`SupportedLocale`。组件不得依赖浏览器默认 locale，也不得各自拼接
+`h`、`m`、`%`、`B` 等展示字符串。
+
+| 数据 | 格式化策略 |
+|---|---|
+| daemon uptime | `Intl.DurationFormat`；先按 86400/3600/60 拆分，旧浏览器使用内置 fallback |
+| 普通数字 | `Intl.NumberFormat` |
+| 后端 CPU 百分比 | 后端值为 0~100，除以 100 后使用 `Intl.NumberFormat` 的 `percent` 样式 |
+| 内存与流量 | 应用层按 1024 换算 IEC 单位（KiB/MiB/GiB），`Intl` 只格式化数字部分 |
+| 日期时间（新增展示时） | `Intl.DateTimeFormat`，API 保持 ISO 8601/UTC，不改变传输格式 |
+
+IP、端口、PID、版本号、SHA256、Token、配置文件、日志原文和 Prometheus
+指标属于机器数据，不做 locale 格式化。`Intl.DurationFormat` 是 Baseline
+2025 能力；除非浏览器支持范围明确提升，必须保留 feature detection fallback。
+
+区域化格式化逻辑使用 `bun test` 验证，中英文输出测试应断言语义片段，避免
+把 ICU/浏览器允许的标点和空格差异写成脆弱的完整字符串快照。
 
 ## 七、前端技术细节
 
@@ -194,20 +213,18 @@ Rust CoreError::user_message_key()  → 前端按当前语言查找翻译
 | 框架 | Vue 3 Composition API + `<script setup>` + TypeScript strict | 类型安全，生态成熟 |
 | 状态管理 | Pinia | Vue 3 官方推荐 |
 | 路由 | Vue Router 4 | 标准选择 |
-| 样式 | TailwindCSS 3 | 原子化 CSS，`dark:` 变体支持主题切换 |
-| 行为组件 | @headlessui/vue | 模态框/下拉菜单/列表的键盘导航和焦点管理，样式完全自控 |
-| 图标 | lucide-vue-next | 开源，按需引入（tree-shaking），风格统一 |
-| 图表 | ECharts 5（按需引入折线图/仪表盘） | 国内生态好，文档中文 |
-| i18n | vue-i18n 9 | Vue 3 标准国际化方案 |
-| 类型共享 | ts-rs（Rust 端自动生成 TypeScript 类型） | 防止 IPC 类型漂移 |
-| 前端构建 | Vite 5 | 极速 HMR |
-| 前端检查 | ESLint 9 + Prettier 3 | 代码风格统一 |
+| UI 组件 | Naive UI 2 | 组件、主题及中英文 locale/date-locale 集成 |
+| 图表 | 轻量内联 SVG | 当前指标历史图无需引入大型图表依赖 |
+| 文本 i18n | 内置 typed message map | 仅中英文、零运行时依赖，编译期约束翻译键 |
+| 数据 i18n | ECMA-402 `Intl` | 持续时间、数字、百分比和单位按当前 UI locale 展示 |
+| 前端构建 | Vite 8 + Bun | 快速构建，Bun 同时运行前端单元测试 |
+| 前端检查 | TypeScript 6 strict + 翻译键检查脚本 | 类型安全并防止中英文键漂移 |
 
 ### 不使用的
 
 | 不引入 | 理由 |
 |---|---|
-| UI 组件库（Element Plus / Ant Design Vue / Vuetify 等） | 自带设计系统，绑架视觉风格。本项目只使用无样式的 Headless 组件 |
-| @heroicons/vue | 与 lucide-vue-next 功能重复 |
-| Sass / Less | TailwindCSS + CSS 变量已覆盖所有样式需求 |
-| Axios | Tauri 的 `invoke()` 替代 HTTP 请求 |
+| 第二套 UI 组件库（Element Plus / Ant Design Vue / Vuetify 等） | 与 Naive UI 重复，增加体积和交互差异 |
+| 大型图表库 | 当前指标图由内联 SVG 满足，避免增加前端包体 |
+| vue-i18n | 当前仅支持中英文，内置 typed message map 已满足需求 |
+| Axios | `ofetch` 已提供统一 HTTP 客户端能力 |
