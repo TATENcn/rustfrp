@@ -117,10 +117,7 @@ impl LocalProxy {
         if matches!(
             self.proxy_type,
             ProxyType::Stcp | ProxyType::Xtcp | ProxyType::Sudp
-        ) && self
-            .secret_key
-            .as_ref()
-            .is_none_or(|k| k.trim().is_empty())
+        ) && self.secret_key.as_ref().is_none_or(|k| k.trim().is_empty())
         {
             return Err(ClientError::MissingRequiredField(
                 "secret_key is required for stcp/xtcp/sudp proxy types".into(),
@@ -173,11 +170,7 @@ impl LocalVisitor {
             return Err(ClientError::MissingRequiredField("server_name".into()));
         }
         // STCP/XTCP/SUDP must have secret_key
-        if self
-            .secret_key
-            .as_ref()
-            .is_none_or(|k| k.trim().is_empty())
-        {
+        if self.secret_key.as_ref().is_none_or(|k| k.trim().is_empty()) {
             return Err(ClientError::MissingRequiredField(
                 "secret_key is required for visitor".into(),
             ));
