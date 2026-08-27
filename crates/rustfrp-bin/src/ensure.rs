@@ -9,14 +9,14 @@
 //! 1. 校验目标二进制的版本、平台和本地完整性标记，匹配时直接返回。
 //! 2. 否则下载官方发布包，强制校验 SHA256，再解压并原子安装。
 
-use crate::download::{asset_filename, download, official_checksum};
+use crate::download::{asset_filename, download_from, official_checksum, OFFICIAL_RELEASE_BASE};
 use crate::extract::extract;
 use crate::verify::{sha256_file, verify_sha256};
 use crate::{default_frp_dir, FrpError, FrpVersion};
 use std::path::{Path, PathBuf};
 
 /// 二进制名（含平台无关的后缀处理）
-fn binary_name(bin: &str) -> String {
+pub(crate) fn binary_name(bin: &str) -> String {
     if cfg!(windows) {
         format!("{bin}.exe")
     } else {
@@ -55,15 +55,31 @@ pub async fn ensure_binary(
     frp_dir: Option<&Path>,
     sha256: Option<&str>,
 ) -> Result<PathBuf, FrpError> {
-    let version_str = resolved_version(version);
+    ensure_binary_from(bin, version, frp_dir, sha256, OFFICIAL_RELEASE_BASE).await
+}
+
+pub async fn ensure_binary_from(
+    bin: &str,
+    version: Option<&str>,
+    frp_dir: Option<&Path>,
+    sha256: Option<&str>,
+    release_base: &str,
+) -> Result<PathBuf, FrpError> {
     let frp_dir = frp_dir
         .map(Path::to_path_buf)
         .unwrap_or_else(default_frp_dir);
-    let target = frp_dir.join(binary_name(bin));
-    let integrity_marker = target.with_extension("sha256");
+    let version_str = selected_version(version, &frp_dir).await;
+    let parsed_version = semver::Version::parse(version_str.trim_start_matches('v'))
+        .map_err(|error| FrpError::Download(format!("Invalid FRP version: {error}")))?;
     let platform = crate::platform::Platform::detect()
         .ok_or_else(|| FrpError::Download("Unsupported platform for auto-download".into()))?;
-    let ver = FrpVersion::from_tag(&version_str);
+    let ver = FrpVersion::from_tag(&parsed_version.to_string());
+    let install_dir = frp_dir
+        .join("versions")
+        .join(&ver.version)
+        .join(&platform.slug);
+    let target = install_dir.join(binary_name(bin));
+    let integrity_marker = target.with_extension("sha256");
 
     // Only trust binaries installed by us after archive verification. The
     // marker also detects later local modification or disk corruption.
@@ -82,11 +98,11 @@ pub async fn ensure_binary(
         tracing::warn!(path = %target.display(), "Cached FRP binary is stale or failed integrity verification; reinstalling");
     }
 
-    std::fs::create_dir_all(&frp_dir).map_err(FrpError::Io)?;
+    std::fs::create_dir_all(&install_dir).map_err(FrpError::Io)?;
 
     // 下载 tar.gz 到临时 staging 目录，避免污染 frp_dir
     let staging = frp_dir.join("downloads");
-    let archive = download(&ver, &staging, &platform.slug).await?;
+    let archive = download_from(&ver, &staging, &platform.slug, release_base).await?;
 
     let asset = asset_filename(&ver, &platform.slug);
     let expected_hash = match sha256 {
@@ -99,7 +115,7 @@ pub async fn ensure_binary(
     }
 
     // 解压到独立解包目录，再定位二进制
-    let unpack = frp_dir.join(format!("frp_{}_{}", ver.version, platform.slug));
+    let unpack = install_dir.join("unpacked");
     extract(&archive, &unpack)?;
 
     // 在解包目录（含一层子目录）内查找二进制
@@ -131,14 +147,30 @@ pub async fn ensure_binary(
     Ok(target)
 }
 
-struct IntegrityMarker<'a> {
-    version: &'a str,
-    platform: &'a str,
-    sha256: &'a str,
+async fn selected_version(explicit: Option<&str>, frp_dir: &Path) -> String {
+    if let Some(version) = explicit {
+        return version.to_owned();
+    }
+    if let Ok(version) = std::env::var("RUSTFRP_FRP_VERSION") {
+        return version;
+    }
+    if let Ok(version) = tokio::fs::read_to_string(frp_dir.join("active-version")).await {
+        let version = version.trim();
+        if !version.is_empty() {
+            return version.to_owned();
+        }
+    }
+    DEFAULT_FRP_VERSION.to_owned()
+}
+
+pub(crate) struct IntegrityMarker<'a> {
+    pub(crate) version: &'a str,
+    pub(crate) platform: &'a str,
+    pub(crate) sha256: &'a str,
 }
 
 impl<'a> IntegrityMarker<'a> {
-    fn parse(contents: &'a str) -> Option<Self> {
+    pub(crate) fn parse(contents: &'a str) -> Option<Self> {
         let mut fields = contents.split_whitespace();
         let marker = Self {
             version: fields.next()?,

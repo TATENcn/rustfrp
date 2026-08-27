@@ -47,9 +47,19 @@ impl ClientCore {
 
         // Ensure rustfrp-managed frpc binary is present (download/verify/extract
         // on first run; idempotent thereafter). Fails loudly if unavailable.
-        let frpc_path = rustfrp_bin::ensure::ensure_binary("frpc", None, None, None)
+        let version_manager = rustfrp_bin::manager::VersionManager::default();
+        let selected_version = std::env::var("RUSTFRP_FRP_VERSION")
+            .ok()
+            .or(version_manager.active_version().await)
+            .unwrap_or_else(|| rustfrp_bin::ensure::DEFAULT_FRP_VERSION.to_owned());
+        let frpc_path =
+            rustfrp_bin::ensure::ensure_binary("frpc", Some(&selected_version), None, None)
+                .await
+                .map_err(|e| ClientError::ProcessStart(format!("frpc unavailable: {e}")))?;
+        version_manager
+            .activate(&selected_version)
             .await
-            .map_err(|e| ClientError::ProcessStart(format!("frpc unavailable: {e}")))?;
+            .map_err(|e| ClientError::ProcessStart(format!("frpc activation failed: {e}")))?;
 
         let plugin_manager = PluginManager::with_default_dir();
         let signal_handler = SignalHandler::new();

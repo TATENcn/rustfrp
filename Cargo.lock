@@ -1757,6 +1757,7 @@ dependencies = [
  "dirs",
  "flate2",
  "reqwest",
+ "semver",
  "serde",
  "sha2",
  "tar",
