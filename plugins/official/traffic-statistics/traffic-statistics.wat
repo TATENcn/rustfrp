@@ -1,0 +1,12 @@
+(module
+  (import "rustfrp" "get_traffic_stats" (func $stats (param i32 i32) (result i32)))
+  (import "rustfrp" "publish_event" (func $publish (param i32 i32 i32 i32) (result i32)))
+  (memory (export "memory") 1)
+  (data (i32.const 0) "traffic.snapshot")
+  (func (export "rustfrp_start") (result i32)
+    (local $len i32)
+    (local.set $len (call $stats (i32.const 1024) (i32.const 8192)))
+    (if (result i32) (i32.ge_s (local.get $len) (i32.const 0))
+      (then (call $publish (i32.const 0) (i32.const 16) (i32.const 1024) (local.get $len)))
+      (else (local.get $len))))
+  (func (export "rustfrp_stop") (result i32) (i32.const 0)))

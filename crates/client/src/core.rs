@@ -124,6 +124,11 @@ impl ClientCore {
         // 1. Load plugins
         let plugins = self.plugin_manager.load_all().await?;
         tracing::info!(count = plugins.len(), "plugins loaded");
+        for (name, result) in self.plugin_manager.start_all().await {
+            if let Err(error) = result {
+                tracing::warn!(%name, %error, "plugin start failed; plugin isolated");
+            }
+        }
 
         // 2. Generate TOML configs
         let toml_files = generate_all_frpc_tomls(&self.db, &self.config_dir).await?;
@@ -232,6 +237,7 @@ impl ClientFacade for ClientCore {
     }
 
     async fn shutdown(&self) -> Result<()> {
+        self.plugin_manager.stop_all().await;
         self.process_manager.shutdown_all().await?;
         tracing::info!("all subsystems shut down");
         Ok(())

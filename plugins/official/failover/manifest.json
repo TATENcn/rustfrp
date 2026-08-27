@@ -1,0 +1,10 @@
+{
+  "name": "rustfrp-failover",
+  "version": "0.1.0",
+  "type": "wasm",
+  "entry": "failover.wat",
+  "description": "Requests a failover when a connection-disconnected event is received",
+  "permissions": ["subscribe-events", "control-process"],
+  "dependencies": [],
+  "min_core_version": "0.1.0"
+}
