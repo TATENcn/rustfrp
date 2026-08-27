@@ -4,6 +4,10 @@
 
 ### Added
 
+- Wasmtime 37 plugin runtime with per-call permission checks, deterministic fuel
+  exhaustion, epoch deadlines, 50 MiB guest-memory limits, lifecycle isolation,
+  event/config/traffic host channels, and runnable Failover, traffic-statistics,
+  and webhook-notification reference plugins.
 - Native release bundles for Linux, Windows, and macOS on amd64 and arm64,
   including daemon, agent, and control binaries with SHA256 sidecars, plus a
   six-platform pull-request build gate.

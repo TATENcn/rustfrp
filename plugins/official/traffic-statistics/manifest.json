@@ -1,0 +1,10 @@
+{
+  "name": "rustfrp-traffic-statistics",
+  "version": "0.1.0",
+  "type": "wasm",
+  "entry": "traffic-statistics.wat",
+  "description": "Publishes a snapshot of local FRP traffic statistics",
+  "permissions": ["read-traffic", "subscribe-events"],
+  "dependencies": [],
+  "min_core_version": "0.1.0"
+}
