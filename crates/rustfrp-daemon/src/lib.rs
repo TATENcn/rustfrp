@@ -12,4 +12,4 @@ pub mod metrics;
 pub mod web;
 
 #[cfg(feature = "http-api")]
-pub use api::{serve, serve_with_auth};
+pub use api::{serve, serve_with_auth, serve_with_policy};

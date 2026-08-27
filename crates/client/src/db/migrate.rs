@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
 /// 当前最新的 schema 版本
-const LATEST_VERSION: i32 = 11;
+const LATEST_VERSION: i32 = 12;
 
 /// 运行所有待执行的迁移
 ///
@@ -94,6 +94,7 @@ fn apply_migration(conn: &Connection, version: i32) -> Result<()> {
         9 => migrate_v9(&tx)?,
         10 => migrate_v10(&tx)?,
         11 => migrate_v11(&tx)?,
+        12 => migrate_v12(&tx)?,
         _ => {
             return Err(ClientError::DatabaseMigration(format!(
                 "Unknown migration version: {version}"
@@ -650,6 +651,21 @@ fn migrate_v11(tx: &rusqlite::Transaction) -> Result<()> {
         ClientError::DatabaseMigration(format!("Failed to assign existing profiles: {e}"))
     })?;
     tracing::info!("V11 Migration: Add deployment environments");
+    Ok(())
+}
+
+/// V12: make deployment environments the isolation boundary for API tenants.
+fn migrate_v12(tx: &rusqlite::Transaction) -> Result<()> {
+    tx.execute(
+        "ALTER TABLE environment ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'",
+        [],
+    )?;
+    tx.execute("DROP INDEX IF EXISTS idx_environment_single_default", [])?;
+    tx.execute_batch(
+        "CREATE UNIQUE INDEX idx_environment_tenant_default
+           ON environment(tenant_id) WHERE is_default = 1;
+         CREATE INDEX idx_environment_tenant ON environment(tenant_id);",
+    )?;
     Ok(())
 }
 

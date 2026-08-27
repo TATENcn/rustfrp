@@ -22,6 +22,7 @@ uuid.workspace = true
 chrono.workspace = true
 anyhow.workspace = true
 clap = { workspace = true }
+sha2 = "0.10"
 
 # HTTP API (optional via feature flag)
 axum = { version = "0.7", optional = true, features = ["macros"] }
