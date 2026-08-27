@@ -11,6 +11,7 @@ use axum::extract::{Extension, Path, State};
 use axum::Json;
 use chrono::Utc;
 use rustfrp_client::config::model::FrpsProfile;
+use serde::{Deserialize, Serialize};
 
 use super::auth::AuthIdentity;
 use super::response::ApiResponse;
@@ -186,6 +187,224 @@ pub async fn delete(
         count: None,
         error: None,
     }))
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProfileRuntimeResponse {
+    pub profile_id: i64,
+    pub desired_running: bool,
+    pub running: bool,
+    pub process_status: String,
+    pub enabled_proxy_count: usize,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReplaceProfileProxiesBody {
+    pub proxy_ids: Vec<i64>,
+}
+
+/// Replace the proxy memberships of a Profile. BindingRule remains the
+/// persistence model; the UI exposes it as a Profile-owned multi-select.
+pub async fn replace_proxies(
+    State(state): State<ApiState>,
+    Extension(identity): Extension<AuthIdentity>,
+    Path(id): Path<i64>,
+    Json(body): Json<ReplaceProfileProxiesBody>,
+) -> Result<
+    Json<ApiResponse<Vec<rustfrp_client::config::model::BindingRule>>>,
+    (axum::http::StatusCode, Json<ApiResponse<()>>),
+> {
+    ensure_profile_tenant(&state, id, &identity.tenant).await?;
+    let mut requested = body.proxy_ids;
+    requested.sort_unstable();
+    requested.dedup();
+    for proxy_id in &requested {
+        state.db.get_proxy(*proxy_id).await.map_err(api_error)?;
+    }
+
+    let existing = state
+        .db
+        .list_bindings_for_profile(id)
+        .await
+        .map_err(api_error)?;
+    for binding in &existing {
+        if !requested.contains(&binding.proxy_id) {
+            state
+                .db
+                .delete_binding(binding.id.unwrap_or_default())
+                .await
+                .map_err(api_error)?;
+        }
+    }
+    for (priority, proxy_id) in requested.iter().enumerate() {
+        if let Some(binding) = existing
+            .iter()
+            .find(|binding| binding.proxy_id == *proxy_id)
+        {
+            if !binding.enabled {
+                state
+                    .db
+                    .toggle_binding(binding.id.unwrap_or_default(), true)
+                    .await
+                    .map_err(api_error)?;
+            }
+        } else {
+            let binding = rustfrp_client::config::model::BindingRule {
+                profile_id: id,
+                proxy_id: *proxy_id,
+                enabled: true,
+                priority: priority as i32,
+                ..Default::default()
+            };
+            state.db.insert_binding(&binding).await.map_err(api_error)?;
+        }
+    }
+
+    if state.process_manager.is_running(id).await {
+        let profile = state.db.get_profile(id).await.map_err(api_error)?;
+        let generated = rustfrp_client::config::generator::generate_frpc_toml_for_profile(
+            &state.db,
+            id,
+            &state.config_dir,
+        )
+        .await
+        .map_err(api_error)?;
+        if generated.is_some() {
+            state
+                .process_manager
+                .ensure_running(id, &profile.name)
+                .await
+                .map_err(api_error)?;
+        } else {
+            state.process_manager.stop(id).await.map_err(api_error)?;
+            state
+                .db
+                .set_profile_desired_running(id, false)
+                .await
+                .map_err(api_error)?;
+        }
+    }
+    let bindings = state
+        .db
+        .list_bindings_for_profile(id)
+        .await
+        .map_err(api_error)?;
+    Ok(Json(ApiResponse::ok(bindings)))
+}
+
+pub async fn runtime(
+    State(state): State<ApiState>,
+    Extension(identity): Extension<AuthIdentity>,
+    Path(id): Path<i64>,
+) -> Result<
+    Json<ApiResponse<ProfileRuntimeResponse>>,
+    (axum::http::StatusCode, Json<ApiResponse<()>>),
+> {
+    ensure_profile_tenant(&state, id, &identity.tenant).await?;
+    let desired = state
+        .db
+        .profile_desired_running(id)
+        .await
+        .map_err(api_error)?;
+    let running = state.process_manager.is_running(id).await;
+    let count = state
+        .db
+        .list_enabled_bindings_for_profile(id)
+        .await
+        .map_err(api_error)?
+        .len();
+    Ok(Json(ApiResponse::ok(ProfileRuntimeResponse {
+        profile_id: id,
+        desired_running: desired,
+        running,
+        process_status: if running { "running" } else { "stopped" }.into(),
+        enabled_proxy_count: count,
+    })))
+}
+
+pub async fn start(
+    State(state): State<ApiState>,
+    Extension(identity): Extension<AuthIdentity>,
+    Path(id): Path<i64>,
+) -> Result<
+    Json<ApiResponse<ProfileRuntimeResponse>>,
+    (axum::http::StatusCode, Json<ApiResponse<()>>),
+> {
+    ensure_profile_tenant(&state, id, &identity.tenant).await?;
+    let profile = state.db.get_profile(id).await.map_err(api_error)?;
+    let enabled = state
+        .db
+        .list_enabled_bindings_for_profile(id)
+        .await
+        .map_err(api_error)?;
+    if enabled.is_empty() {
+        return Err((
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(super::response::ApiError::generic(
+                    "PROFILE_HAS_NO_PROXIES",
+                    "Select at least one enabled proxy before starting the profile".into(),
+                )),
+            }),
+        ));
+    }
+    rustfrp_client::config::generator::generate_frpc_toml_for_profile(
+        &state.db,
+        id,
+        &state.config_dir,
+    )
+    .await
+    .map_err(api_error)?;
+    let action = state
+        .process_manager
+        .ensure_running(id, &profile.name)
+        .await
+        .map_err(api_error)?;
+    state
+        .db
+        .set_profile_desired_running(id, true)
+        .await
+        .map_err(api_error)?;
+    Ok(Json(ApiResponse::ok(ProfileRuntimeResponse {
+        profile_id: id,
+        desired_running: true,
+        running: true,
+        process_status: action.as_str().into(),
+        enabled_proxy_count: enabled.len(),
+    })))
+}
+
+pub async fn stop(
+    State(state): State<ApiState>,
+    Extension(identity): Extension<AuthIdentity>,
+    Path(id): Path<i64>,
+) -> Result<
+    Json<ApiResponse<ProfileRuntimeResponse>>,
+    (axum::http::StatusCode, Json<ApiResponse<()>>),
+> {
+    ensure_profile_tenant(&state, id, &identity.tenant).await?;
+    state.process_manager.stop(id).await.map_err(api_error)?;
+    state
+        .db
+        .set_profile_desired_running(id, false)
+        .await
+        .map_err(api_error)?;
+    let count = state
+        .db
+        .list_enabled_bindings_for_profile(id)
+        .await
+        .map_err(api_error)?
+        .len();
+    Ok(Json(ApiResponse::ok(ProfileRuntimeResponse {
+        profile_id: id,
+        desired_running: false,
+        running: false,
+        process_status: "stopped".into(),
+        enabled_proxy_count: count,
+    })))
 }
 
 fn api_error(

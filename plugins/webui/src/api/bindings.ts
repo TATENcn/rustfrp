@@ -1,5 +1,5 @@
 import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from '@/api/client'
-import type { ApiEnvelope, BindingRule, BindingControlResponse } from '@/api/types'
+import type { ApiEnvelope, BindingRule } from '@/api/types'
 
 export function listBindings(params?: {
   profile_id?: number
@@ -26,14 +26,6 @@ export function updateBinding(id: number, binding: BindingRule): Promise<ApiEnve
 
 export function toggleBinding(id: number, enabled: boolean): Promise<ApiEnvelope<BindingRule>> {
   return apiPatch<BindingRule>(`/bindings/${id}/toggle`, { enabled })
-}
-
-export function startBinding(id: number): Promise<ApiEnvelope<BindingControlResponse>> {
-  return apiPost<BindingControlResponse>(`/bindings/${id}/start`)
-}
-
-export function stopBinding(id: number): Promise<ApiEnvelope<BindingControlResponse>> {
-  return apiPost<BindingControlResponse>(`/bindings/${id}/stop`)
 }
 
 export function deleteBinding(id: number): Promise<ApiEnvelope<null>> {

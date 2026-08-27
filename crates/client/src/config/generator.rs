@@ -100,17 +100,17 @@ pub async fn generate_frpc_toml_for_profile(
     let safe_name = sanitize_filename(&profile.name);
     let output_path = output_dir.join(format!("{safe_name}.toml"));
 
-    let bindings = db.list_running_bindings_for_profile(profile_id).await?;
+    let bindings = db.list_enabled_bindings_for_profile(profile_id).await?;
 
     if bindings.is_empty() {
-        // 没有 running 的 binding → 删除 TOML 文件
+        // No enabled membership means there is no runnable Profile config.
         if output_path.exists() {
             std::fs::remove_file(&output_path)
                 .map_err(|e| ClientError::TomlWrite(format!("Failed to remove TOML: {e}")))?;
             tracing::info!(
                 path = %output_path.display(),
                 profile = %profile.name,
-                "TOML removed (no running bindings)"
+                "TOML removed (no enabled bindings)"
             );
         }
         return Ok(None);
