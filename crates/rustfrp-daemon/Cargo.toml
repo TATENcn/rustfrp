@@ -8,9 +8,9 @@ rust-version.workspace = true
 description = "RustFRP daemon — HTTP API server for frpc configuration management"
 
 [dependencies]
-rustfrp-client = { path = "../client" }
-rustfrp-bin = { path = "../rustfrp-bin" }
-rustfrp-common = { path = "../common" }
+rustfrp-client = { version = "0.1.0", path = "../client" }
+rustfrp-bin = { version = "0.1.0", path = "../rustfrp-bin" }
+rustfrp-common = { version = "0.1.0", path = "../common" }
 tokio = { workspace = true, features = ["process", "sync", "time", "signal", "net"] }
 serde.workspace = true
 serde_json.workspace = true
@@ -27,7 +27,7 @@ clap = { workspace = true }
 axum = { version = "0.7", optional = true, features = ["macros"] }
 tower = { version = "0.4", optional = true, features = ["util"] }
 tower-http = { version = "0.5", optional = true, features = ["cors", "trace"] }
-rust-embed = { version = "8", optional = true, features = ["compression"] }
+rust-embed = { version = "8", optional = true }
 mime_guess = { version = "2", optional = true }
 
 [features]
