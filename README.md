@@ -128,7 +128,7 @@ crates/
 ├── common/           # 共享：信号、日志、插件管理器、错误
 └── server/
     ├── control/      # 监控服务器（Pull 模式指标采集）
-    └── agent/        # 服务端 frps 管理（开发中）
+    └── agent/        # 服务端 frps 配置 Pull、校验、缓存与进程守护
 plugins/
 └── webui/            # Vue 3 + Vite + naive-ui 管理界面
 ```
@@ -166,6 +166,30 @@ just build-release    # 发布构建
 ```bash
 bash scripts/e2e-local.sh
 ```
+
+### 可选的 frps Agent
+
+控制面以只读方式从模板目录提供 `<node-id>.toml`，Agent 使用 Bearer Token
+主动拉取。候选配置会先通过 TOML 检查及 `frps verify`，成功后才原子替换
+`frps.toml`；控制面不可用时继续使用最后有效缓存。Agent 退出或崩溃不会
+杀死 frps，重新启动后会通过 PID 文件接管它。
+
+```bash
+export RUSTFRP_AGENT_TOKEN='replace-with-a-long-random-token'
+
+# 控制面
+cargo run -p rustfrp-control -- \
+  --templates-dir ./deploy/agent/templates \
+  --targets ./targets.json
+
+# frps 节点；省略 --frps-path 时自动下载并校验官方 frps
+cargo run -p rustfrp-agent -- \
+  --node-id edge-1 \
+  --control-url http://control.example.com:3000
+```
+
+模板 Pull API 支持 ETag/`If-None-Match`，节点 ID 仅允许字母、数字、短横线
+和下划线，避免目录穿越。生产环境应在控制面前启用 TLS 反向代理。
 
 ## 许可证
 

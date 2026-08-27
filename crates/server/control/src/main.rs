@@ -26,6 +26,14 @@ struct Cli {
 
     #[arg(long, default_value = "targets.json")]
     targets: String,
+
+    /// Read-only directory containing <node-id>.toml agent templates.
+    #[arg(long)]
+    templates_dir: Option<std::path::PathBuf>,
+
+    /// Environment variable containing the bearer token required by agents.
+    #[arg(long, default_value = "RUSTFRP_AGENT_TOKEN")]
+    agent_token_env: String,
 }
 
 #[tokio::main]
@@ -50,7 +58,19 @@ async fn main() -> anyhow::Result<()> {
     )?;
     scraper.start().await;
 
-    let router = web::create_router(targets);
+    let agent_token = if cli.templates_dir.is_some() {
+        let token = std::env::var(&cli.agent_token_env).map_err(|_| {
+            anyhow::anyhow!(
+                "templates are enabled but {} is not set",
+                cli.agent_token_env
+            )
+        })?;
+        anyhow::ensure!(!token.is_empty(), "agent token must not be empty");
+        Some(token)
+    } else {
+        None
+    };
+    let router = web::create_router(targets, cli.templates_dir, agent_token);
     let listener = tokio::net::TcpListener::bind(addr).await?;
 
     tracing::info!("Web service started: http://{addr}");
