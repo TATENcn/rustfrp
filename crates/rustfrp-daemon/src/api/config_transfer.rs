@@ -63,27 +63,30 @@ pub async fn import(
 }
 
 /// GET /api/v1/config/export — download a consistent SQLite backup.
-pub async fn export(State(state): State<ApiState>) -> Result<Response<Body>, Response<Body>> {
-    let bytes = state.db.export_backup().await.map_err(|error| {
-        let body = serde_json::to_vec(&ApiResponse::<()> {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(ApiError::from_client_error(&error)),
-        })
-        .unwrap_or_default();
-        Response::builder()
-            .status(super::response::status_code(&error))
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(body))
-            .expect("static response headers are valid")
-    })?;
+pub async fn export(State(state): State<ApiState>) -> Response<Body> {
+    let bytes = match state.db.export_backup().await {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            let body = serde_json::to_vec(&ApiResponse::<()> {
+                success: false,
+                data: None,
+                count: None,
+                error: Some(ApiError::from_client_error(&error)),
+            })
+            .unwrap_or_default();
+            return Response::builder()
+                .status(super::response::status_code(&error))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body))
+                .expect("static response headers are valid");
+        }
+    };
 
     let filename = format!(
         "rustfrp-backup-{}.sqlite",
         chrono::Utc::now().format("%Y%m%d-%H%M%S")
     );
-    Ok(Response::builder()
+    Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/vnd.sqlite3")
         .header(
@@ -91,7 +94,7 @@ pub async fn export(State(state): State<ApiState>) -> Result<Response<Body>, Res
             format!("attachment; filename=\"{filename}\""),
         )
         .body(Body::from(bytes))
-        .expect("static response headers are valid"))
+        .expect("static response headers are valid")
 }
 
 #[cfg(test)]
