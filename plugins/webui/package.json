@@ -6,10 +6,11 @@
   "packageManager": "bun@>=1.2",
   "scripts": {
     "dev": "vite",
-    "build": "bun x tsc --noEmit && vite build",
+    "build": "bun run check:icons && bun x tsc --noEmit && vite build",
     "test": "bun test",
     "preview": "vite preview",
-    "type-check": "bun x tsc --noEmit"
+    "type-check": "bun x tsc --noEmit",
+    "check:icons": "bun scripts/check-ui-icons.ts"
   },
   "dependencies": {
     "naive-ui": "^2.40.0",
@@ -19,11 +20,15 @@
     "vue-router": "^4.4.0"
   },
   "devDependencies": {
+    "@iconify-json/lucide": "^1.2.126",
+    "@tailwindcss/vite": "^4.3.3",
     "@tsconfig/node24": "^24.0.4",
     "@types/node": "^24.13.2",
     "@vitejs/plugin-vue": "^6.0.7",
     "@vue/tsconfig": "^0.9.1",
+    "tailwindcss": "^4.3.3",
     "typescript": "~6.0.0",
+    "unplugin-icons": "^23.0.1",
     "vite": "^8.0.16",
     "vue-tsc": "^3.3.5"
   },

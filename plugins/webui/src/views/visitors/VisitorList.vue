@@ -17,6 +17,8 @@ import { resolveErrorMessage } from '@/api/errors'
 import type { LocalVisitor, VisitorType } from '@/api/types'
 import ErrorAlert from '@/components/ErrorAlert.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import PageHeader from '@/components/common/PageHeader.vue'
+import AppIcon from '@/components/icon/AppIcon.vue'
 
 const { t } = useI18n()
 const message = useMessage()
@@ -146,23 +148,15 @@ onMounted(async () => {
 
 <template>
   <div>
+    <PageHeader :title="t('nav.visitors')">
+      <template #icon><span class="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary"><AppIcon name="visitors" :size="21" /></span></template>
+      <template #actions><NInput v-model:value="search" :placeholder="t('common.search')" clearable class="w-60"><template #prefix><AppIcon name="search" :size="16" /></template></NInput><NButton type="primary" @click="showCreate = !showCreate">{{ t('visitor.create') }}</NButton></template>
+    </PageHeader>
     <ErrorAlert :error="store.error" @dismiss="store.error = null" />
 
-    <NSpace justify="space-between" style="margin-bottom: 16px">
-      <NInput
-        v-model:value="search"
-        :placeholder="t('common.search')"
-        clearable
-        style="width: 240px"
-      />
-      <NButton type="primary" @click="showCreate = !showCreate">
-        {{ t('visitor.create') }}
-      </NButton>
-    </NSpace>
-
     <!-- Create form -->
-    <div v-if="showCreate" style="margin-bottom: 16px; padding: 12px; border: 1px solid var(--n-border-color); border-radius: 4px">
-      <NSpace vertical style="width: 100%">
+    <div v-if="showCreate" class="mb-4 rounded-card border border-border bg-surface p-4 shadow-card">
+      <NSpace vertical class="w-full">
         <NSpace>
           <NInput v-model:value="newVisitor.name" placeholder="Name" style="width: 150px" />
           <NSelect v-model:value="newVisitor.visitor_type" :options="typeOptions" style="width: 100px" />
@@ -184,9 +178,9 @@ onMounted(async () => {
     </div>
 
     <!-- Edit modal -->
-    <div v-if="editing" style="margin-bottom: 16px; padding: 12px; border: 1px solid var(--n-info-color); border-radius: 4px">
-      <NSpace vertical style="width: 100%">
-        <div style="font-weight: 600">{{ t('visitor.edit') }}: {{ editing.name }}</div>
+    <div v-if="editing" class="mb-4 rounded-card border border-info bg-surface p-4 shadow-card">
+      <NSpace vertical class="w-full">
+        <div class="font-semibold">{{ t('visitor.edit') }}: {{ editing.name }}</div>
         <NSpace>
           <NInput v-model:value="editing.name" placeholder="Name" style="width: 150px" />
           <NInput v-model:value="editing.server_name" placeholder="Server Name" style="width: 150px" />

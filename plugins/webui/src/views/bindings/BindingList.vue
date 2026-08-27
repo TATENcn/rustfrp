@@ -18,6 +18,9 @@ import { resolveErrorMessage } from '@/api/errors'
 import type { BindingRule } from '@/api/types'
 import ErrorAlert from '@/components/ErrorAlert.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import StatusBadge from '@/components/common/StatusBadge.vue'
+import PageHeader from '@/components/common/PageHeader.vue'
+import AppIcon from '@/components/icon/AppIcon.vue'
 
 const { t } = useI18n()
 const message = useMessage()
@@ -48,20 +51,6 @@ function getStatus(row: BindingRule): BindingStatus {
   if (!row.enabled) return 'disabled'
   if (row.running) return 'running'
   return 'standby'
-}
-
-const statusColor: Record<BindingStatus, string> = {
-  running: '#18a058',
-  standby: '#f0a020',
-  disabled: '#999',
-  error: '#d03050',
-}
-
-const statusIcon: Record<BindingStatus, string> = {
-  running: '●',
-  standby: '◉',
-  disabled: '○',
-  error: '⚠',
 }
 
 // ── Columns ──
@@ -102,15 +91,10 @@ const columns: DataTableColumns<BindingRule> = [
     width: 120,
     render(row) {
       const status = getStatus(row)
-      return h(
-        NTag,
-        {
-          color: { color: statusColor[status], textColor: '#fff' },
-          size: 'small',
-          round: true,
-        },
-        { default: () => `${statusIcon[status]} ${t(`binding.status.${status}`)}` },
-      )
+      return h(StatusBadge, {
+        status: status === 'standby' ? 'idle' : status,
+        label: t(`binding.status.${status}`),
+      })
     },
   },
   {
@@ -265,32 +249,29 @@ onMounted(async () => {
 
 <template>
   <div>
+    <PageHeader :title="t('nav.bindings')">
+      <template #icon><span class="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary"><AppIcon name="bindings" :size="21" /></span></template>
+      <template #actions><NButton type="primary" @click="showCreate = !showCreate">{{ t('binding.create') }}</NButton></template>
+    </PageHeader>
     <ErrorAlert :error="store.error" @dismiss="store.error = null" />
-
-    <NSpace justify="space-between" style="margin-bottom: 16px">
-      <span></span>
-      <NButton type="primary" @click="showCreate = !showCreate">
-        {{ t('binding.create') }}
-      </NButton>
-    </NSpace>
 
     <!-- Create form -->
     <div
       v-if="showCreate"
-      style="margin-bottom: 16px; padding: 12px; border: 1px solid var(--n-border-color); border-radius: 4px"
+      class="mb-4 rounded-card border border-border bg-surface p-4 shadow-card"
     >
       <NSpace align="center">
         <NSelect
           v-model:value="newBinding.profile_id"
           :options="profileStore.profiles.map((p) => ({ label: p.name, value: p.id! }))"
           placeholder="Profile"
-          style="width: 180px"
+          class="w-44"
         />
         <NSelect
           v-model:value="newBinding.proxy_id"
           :options="proxyStore.proxies.map((p) => ({ label: p.name, value: p.id! }))"
           placeholder="Proxy"
-          style="width: 180px"
+          class="w-44"
         />
         <NSwitch v-model:value="newBinding.enabled" />
         <NButton type="primary" size="small" @click="handleCreate">
