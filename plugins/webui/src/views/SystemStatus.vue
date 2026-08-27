@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, h } from 'vue'
 import {
   NCard,
   NButton,
@@ -8,19 +8,19 @@ import {
   NGrid,
   NGi,
   NStatistic,
-  NSpin,
-  NDivider,
   NInput,
   NSelect,
   NPopconfirm,
+  NDataTable,
   useMessage,
+  type DataTableColumns,
 } from 'naive-ui'
 import { useI18n } from '@/i18n'
 import { formatDuration } from '@/i18n/format'
 import { useSystemStore } from '@/stores/system'
 import { downloadBackup, importFrpcToml } from '@/api/config'
 import { extractApiError, resolveErrorMessage } from '@/api/errors'
-import type { AvailableFrpVersion, FrpVersionList, StatusResponse } from '@/api/types'
+import type { AvailableFrpVersion, FrpVersionList, InstalledFrpVersion } from '@/api/types'
 import {
   activateFrpVersion,
   deleteFrpVersion,
@@ -28,6 +28,13 @@ import {
   listAvailableFrpVersions,
   listFrpVersions,
 } from '@/api/frp'
+import AppIcon from '@/components/icon/AppIcon.vue'
+import PageHeader from '@/components/common/PageHeader.vue'
+import LastUpdated from '@/components/common/LastUpdated.vue'
+import RefreshButton from '@/components/common/RefreshButton.vue'
+import StatusBadge from '@/components/common/StatusBadge.vue'
+import DataState from '@/components/common/DataState.vue'
+import ProcessTable from '@/components/processes/ProcessTable.vue'
 
 const { t, locale } = useI18n()
 const message = useMessage()
@@ -48,14 +55,38 @@ const mirrorMode = ref<'official' | 'custom'>('official')
 const mirrorBase = ref('')
 const frpBusy = ref(false)
 
-let timer: ReturnType<typeof setInterval> | null = null
+const frpVersionColumns: DataTableColumns<InstalledFrpVersion> = [
+  {
+    title: t('frpVersion.version'), key: 'version', minWidth: 140,
+    render: version => h(NSpace, { align: 'center', wrap: false }, {
+      default: () => [version.version, version.active ? h(NTag, { type: 'success', size: 'small' }, { default: () => t('frpVersion.active') }) : null],
+    }),
+  },
+  { title: t('frpVersion.platform'), key: 'platform', minWidth: 150 },
+  {
+    title: t('frpVersion.integrity'), key: 'integrity_ok', width: 130,
+    render: version => h(NTag, { type: version.integrity_ok ? 'success' : 'error', size: 'small' }, { default: () => version.integrity_ok ? t('frpVersion.verified') : t('frpVersion.damaged') }),
+  },
+  {
+    title: t('common.actions'), key: 'actions', width: 190,
+    render: version => h(NSpace, null, {
+      default: () => [
+        h(NButton, { size: 'small', disabled: version.active || !version.integrity_ok || frpBusy.value, onClick: () => handleFrpActivate(version.version) }, { default: () => t('frpVersion.activate') }),
+        h(NPopconfirm, { onPositiveClick: () => handleFrpDelete(version.version) }, {
+          trigger: () => h(NButton, { size: 'small', type: 'error', disabled: version.active || frpBusy.value }, { default: () => t('common.delete') }),
+          default: () => t('frpVersion.deleteConfirm', { version: version.version }),
+        }),
+      ],
+    }),
+  },
+]
+
 let reloadTimer: ReturnType<typeof setInterval> | null = null
 
 onMounted(() => {
   systemStore.fetchStatus()
   loadFrpVersions()
   loadAvailableVersions()
-  timer = setInterval(() => systemStore.fetchStatus(), 10_000)
 })
 
 async function loadFrpVersions() {
@@ -126,7 +157,6 @@ async function handleFrpDelete(version: string) {
 }
 
 onUnmounted(() => {
-  if (timer) clearInterval(timer)
   if (reloadTimer) clearInterval(reloadTimer)
 })
 
@@ -221,11 +251,16 @@ async function handleExport() {
 </script>
 
 <template>
-  <NSpin :show="systemStore.loading && !systemStore.status">
-    <NSpace vertical>
-      <h3 style="margin: 0">{{ t('nav.status') }}</h3>
+  <PageHeader :title="t('nav.status')" :description="locale === 'zh' ? '管理系统配置、FRP 版本并检查进程运行详情。' : 'Manage configuration, FRP versions, and inspect process details.'">
+    <template #icon><span class="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary"><AppIcon name="status" :size="21" /></span></template>
+    <template #status><StatusBadge :status="systemStore.stale ? 'stale' : systemStore.status?.active_frpc_instances ? 'running' : 'stopped'" :label="systemStore.status?.state ?? 'unknown'" /></template>
+    <template #actions><LastUpdated :value="systemStore.lastUpdated" :stale="systemStore.stale" /><RefreshButton :loading="systemStore.refreshing" @click="systemStore.fetchStatus" /></template>
+  </PageHeader>
 
-      <NCard size="small" title="System Actions">
+  <DataState :phase="systemStore.phase" :error="systemStore.error" @retry="systemStore.fetchStatus">
+    <NSpace vertical :size="16">
+
+      <NCard size="small" :bordered="false" class="shadow-card" title="System Actions">
         <NSpace>
           <NButton type="primary" @click="handleReload" :loading="reloadPolling">
             {{ t('app.reload') }}
@@ -237,24 +272,24 @@ async function handleExport() {
             Refresh Status
           </NButton>
         </NSpace>
-        <div v-if="reloadTaskId" style="margin-top: 8px; font-size: 13px; color: var(--n-text-color-2)">
+        <div v-if="reloadTaskId" class="mt-2 text-xs text-foreground-muted">
           Task: {{ reloadTaskId }} · {{ reloadTaskStatus }}
         </div>
-        <NTag v-if="configStatus !== 'idle'" :type="configStatus === 'valid' ? 'success' : 'error'" style="margin-top: 8px">
+        <NTag v-if="configStatus !== 'idle'" :type="configStatus === 'valid' ? 'success' : 'error'" class="mt-2">
           {{ configStatus === 'valid' ? t('status.configValid') : configStatus === 'invalid' ? t('status.configInvalid') : 'Checking...' }}
         </NTag>
       </NCard>
 
-      <NCard size="small" :title="t('configTransfer.title')">
+      <NCard size="small" :bordered="false" class="shadow-card" :title="t('configTransfer.title')">
         <NSpace vertical>
-          <p style="margin: 0; color: var(--n-text-color-2)">
+          <p class="m-0 text-sm text-foreground-muted">
             {{ t('configTransfer.description') }}
           </p>
           <NSpace align="center">
             <NInput
               v-model:value="importProfileName"
               :placeholder="t('configTransfer.profileName')"
-              style="width: 220px"
+              class="w-56"
             />
             <input type="file" accept=".toml,text/plain" @change="selectImportFile" />
             <NButton type="primary" :loading="importing" @click="handleImport">
@@ -267,9 +302,9 @@ async function handleExport() {
         </NSpace>
       </NCard>
 
-      <NCard size="small" :title="t('frpVersion.title')">
+      <NCard size="small" :bordered="false" class="shadow-card" :title="t('frpVersion.title')">
         <NSpace vertical>
-          <p style="margin: 0; color: var(--n-text-color-2)">
+          <p class="m-0 text-sm text-foreground-muted">
             {{ t('frpVersion.description') }}
           </p>
           <NSpace align="center">
@@ -279,7 +314,7 @@ async function handleExport() {
               tag
               :placeholder="t('frpVersion.select')"
               :options="availableVersions.map((release) => ({ label: release.version, value: release.version }))"
-              style="width: 180px"
+              class="w-44"
             />
             <NSelect
               v-model:value="mirrorMode"
@@ -287,137 +322,65 @@ async function handleExport() {
                 { label: t('frpVersion.official'), value: 'official' },
                 { label: t('frpVersion.customMirror'), value: 'custom' },
               ]"
-              style="width: 190px"
+              class="w-48"
             />
             <NInput
               v-if="mirrorMode === 'custom'"
               v-model:value="mirrorBase"
               :placeholder="t('frpVersion.mirrorPlaceholder')"
-              style="width: 360px"
+              class="w-80"
             />
             <NButton type="primary" :loading="frpBusy" @click="handleFrpInstall">
               {{ t('frpVersion.install') }}
             </NButton>
           </NSpace>
-          <table v-if="frpVersions.installed.length" style="width: 100%; border-collapse: collapse">
-            <thead>
-              <tr style="text-align: left; border-bottom: 1px solid var(--n-border-color)">
-                <th style="padding: 8px">{{ t('frpVersion.version') }}</th>
-                <th style="padding: 8px">{{ t('frpVersion.platform') }}</th>
-                <th style="padding: 8px">{{ t('frpVersion.integrity') }}</th>
-                <th style="padding: 8px">{{ t('common.actions') }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="version in frpVersions.installed" :key="version.version" style="border-bottom: 1px solid var(--n-border-color)">
-                <td style="padding: 8px">
-                  {{ version.version }}
-                  <NTag v-if="version.active" type="success" size="small">{{ t('frpVersion.active') }}</NTag>
-                </td>
-                <td style="padding: 8px">{{ version.platform }}</td>
-                <td style="padding: 8px">
-                  <NTag :type="version.integrity_ok ? 'success' : 'error'" size="small">
-                    {{ version.integrity_ok ? t('frpVersion.verified') : t('frpVersion.damaged') }}
-                  </NTag>
-                </td>
-                <td style="padding: 8px">
-                  <NSpace>
-                    <NButton size="small" :disabled="version.active || !version.integrity_ok || frpBusy" @click="handleFrpActivate(version.version)">
-                      {{ t('frpVersion.activate') }}
-                    </NButton>
-                    <NPopconfirm @positive-click="handleFrpDelete(version.version)">
-                      <template #trigger>
-                        <NButton size="small" type="error" :disabled="version.active || frpBusy">
-                          {{ t('common.delete') }}
-                        </NButton>
-                      </template>
-                      {{ t('frpVersion.deleteConfirm', { version: version.version }) }}
-                    </NPopconfirm>
-                  </NSpace>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          <p v-else style="color: var(--n-text-color-3)">{{ t('frpVersion.noneInstalled') }}</p>
+          <NDataTable v-if="frpVersions.installed.length" :columns="frpVersionColumns" :data="frpVersions.installed" :row-key="row => row.version" :bordered="false" />
+          <p v-else class="text-sm text-foreground-muted">{{ t('frpVersion.noneInstalled') }}</p>
         </NSpace>
       </NCard>
 
       <NGrid cols="1 s:2 m:4" :x-gap="12" :y-gap="12" v-if="systemStore.status">
         <NGi>
-          <NCard size="small">
+          <NCard size="small" :bordered="false" class="shadow-card">
             <NStatistic label="State" :value="systemStore.status.state" />
           </NCard>
         </NGi>
         <NGi>
-          <NCard size="small">
+          <NCard size="small" :bordered="false" class="shadow-card">
             <NStatistic label="Uptime" :value="formatUptime(systemStore.status.uptime_secs)" />
           </NCard>
         </NGi>
         <NGi>
-          <NCard size="small">
+          <NCard size="small" :bordered="false" class="shadow-card">
             <NStatistic label="Active frpc" :value="systemStore.status.active_frpc_instances" />
           </NCard>
         </NGi>
         <NGi>
-          <NCard size="small">
+          <NCard size="small" :bordered="false" class="shadow-card">
             <NStatistic label="Total Profiles" :value="systemStore.status.total_profiles" />
           </NCard>
         </NGi>
         <NGi>
-          <NCard size="small">
+          <NCard size="small" :bordered="false" class="shadow-card">
             <NStatistic label="Total Proxies" :value="systemStore.status.total_proxies" />
           </NCard>
         </NGi>
         <NGi>
-          <NCard size="small">
+          <NCard size="small" :bordered="false" class="shadow-card">
             <NStatistic label="Total Bindings" :value="systemStore.status.total_bindings" />
           </NCard>
         </NGi>
         <NGi>
-          <NCard size="small">
+          <NCard size="small" :bordered="false" class="shadow-card">
             <NStatistic label="Total Visitors" :value="systemStore.status.total_visitors" />
           </NCard>
         </NGi>
       </NGrid>
 
-      <NDivider />
-
-      <!-- Processes -->
-      <NCard title="FRP Processes" size="small" v-if="systemStore.status?.processes?.length">
-        <table style="width: 100%; border-collapse: collapse">
-          <thead>
-            <tr style="text-align: left; border-bottom: 1px solid var(--n-border-color)">
-              <th style="padding: 8px">Profile</th>
-              <th style="padding: 8px">PID</th>
-              <th style="padding: 8px">Status</th>
-              <th style="padding: 8px">Restarts</th>
-              <th style="padding: 8px">Config</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="p in systemStore.status.processes"
-              :key="p.profile_id"
-              style="border-bottom: 1px solid var(--n-border-color)"
-            >
-              <td style="padding: 8px">{{ p.profile_name }}</td>
-              <td style="padding: 8px">{{ p.pid ?? '-' }}</td>
-              <td style="padding: 8px">
-                <NTag :type="p.running ? 'success' : 'error'" size="small">
-                  {{ p.running ? 'Running' : 'Stopped' }}
-                </NTag>
-              </td>
-              <td style="padding: 8px">{{ p.restart_count }}</td>
-              <td style="padding: 8px; font-size: 12px; color: var(--n-text-color-3)">
-                {{ p.config_path }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </NCard>
-      <NCard v-else size="small">
-        <p style="color: var(--n-text-color-3)">No frpc processes running</p>
+      <NCard title="FRP Processes" size="small" :bordered="false" class="shadow-card">
+        <ProcessTable v-if="systemStore.status?.processes?.length" :processes="systemStore.status.processes" />
+        <p v-else class="py-8 text-center text-sm text-foreground-muted">No frpc processes running</p>
       </NCard>
     </NSpace>
-  </NSpin>
+  </DataState>
 </template>

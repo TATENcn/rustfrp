@@ -220,6 +220,15 @@ IP、端口、PID、版本号、SHA256、Token、配置文件、日志原文和 
 | 前端构建 | Vite 8 + Bun | 快速构建，Bun 同时运行前端单元测试 |
 | 前端检查 | TypeScript 6 strict + 翻译键检查脚本 | 类型安全并防止中英文键漂移 |
 
+### 主题与图标
+
+- 页面布局、响应式和语义化设计令牌使用 Tailwind CSS 4；复杂交互组件继续使用 Naive UI。
+- 浅色、深色和跟随系统模式由 `stores/theme.ts` 统一管理，主题色通过 CSS variables 与 Naive UI `themeOverrides` 同步。
+- 功能性图标使用 Iconify 的构建时离线方案：`unplugin-icons` + 单独的 `@iconify-json/lucide` 图标集。
+- 页面只能通过 `AppIcon` 的语义名称使用图标；具体 Iconify 导入集中在 `components/icon/registry.ts`。
+- 禁止 Emoji、图标字体、运行时 Iconify API、页面手写 UI SVG 和混用多个图标集。指标图表等数据可视化 SVG 不属于 UI 图标。
+- 图标策略由 `bun run check:icons` 检查，生产构建必须先通过该检查。
+
 ### 不使用的
 
 | 不引入 | 理由 |

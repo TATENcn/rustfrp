@@ -221,25 +221,22 @@ ts-rs = "8"                   # Rust → TypeScript 类型导出
     "vue": "^3.5",
     "pinia": "^2.2",
     "vue-router": "^4.4",
-    "vue-i18n": "^9.14",
-    "echarts": "^5.5",
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-shell": "^2",
-    "@tauri-apps/plugin-notification": "^2",
-    "@tauri-apps/plugin-autostart": "^2",
-    "tailwindcss": "^3.4",
-    "@headlessui/vue": "^1.7",
-    "lucide-vue-next": "^0.400"
+    "naive-ui": "^2.40",
+    "ofetch": "^1.4"
   },
   "devDependencies": {
-    "typescript": "^5.5",
-    "vite": "^5.4",
-    "@vitejs/plugin-vue": "^5.1",
-    "prettier": "^3.3",
-    "eslint": "^9"
+    "typescript": "~6.0",
+    "vite": "^8.0",
+    "@vitejs/plugin-vue": "^6.0",
+    "tailwindcss": "^4.3",
+    "@tailwindcss/vite": "^4.3",
+    "unplugin-icons": "^23.0",
+    "@iconify-json/lucide": "^1.2"
   }
 }
 ```
+
+Tailwind 与 Iconify 都仅在构建阶段工作：Tailwind 输出实际使用的 CSS，Iconify 将注册表中实际导入的 Lucide 图标编译为 Vue SVG 组件。WebUI 不访问 Iconify API，也不携带图标运行时或完整图标集。
 
 ---
 

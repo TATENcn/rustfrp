@@ -17,6 +17,8 @@ import { resolveErrorMessage } from '@/api/errors'
 import type { FrpsProfile } from '@/api/types'
 import ErrorAlert from '@/components/ErrorAlert.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import PageHeader from '@/components/common/PageHeader.vue'
+import AppIcon from '@/components/icon/AppIcon.vue'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -93,19 +95,14 @@ onMounted(() => Promise.all([store.fetchAll(), environmentStore.fetchAll()]))
 
 <template>
   <div>
+    <PageHeader :title="t('nav.profiles')">
+      <template #icon><span class="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary"><AppIcon name="profiles" :size="21" /></span></template>
+      <template #actions>
+        <NInput v-model:value="search" :placeholder="t('common.search')" clearable class="w-60"><template #prefix><AppIcon name="search" :size="16" /></template></NInput>
+        <NButton type="primary" @click="router.push({ name: 'profile-new' })">{{ t('profile.create') }}</NButton>
+      </template>
+    </PageHeader>
     <ErrorAlert :error="store.error" @dismiss="store.error = null" />
-
-    <NSpace justify="space-between" style="margin-bottom: 16px">
-      <NInput
-        v-model:value="search"
-        :placeholder="t('common.search')"
-        clearable
-        style="width: 240px"
-      />
-      <NButton type="primary" @click="router.push({ name: 'profile-new' })">
-        {{ t('profile.create') }}
-      </NButton>
-    </NSpace>
 
     <NDataTable
       :columns="columns"
