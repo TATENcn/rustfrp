@@ -4,6 +4,7 @@
 //! 负责进程的启动、停止、热重载和生命周期编排（ARCH-009）。
 
 use crate::error::{ClientError, Result};
+use crate::process::diagnostic::ProcessFailure;
 use crate::process::guard::ProcessGuard;
 use rustfrp_common::signal::SignalHandler;
 use std::collections::HashMap;
@@ -47,6 +48,7 @@ pub struct ProcessInfo {
     pub pid: Option<u32>,
     pub running: bool,
     pub restart_count: u32,
+    pub last_failure: Option<ProcessFailure>,
     pub config_path: String,
 }
 
@@ -199,6 +201,7 @@ impl ProcessManager {
                 pid: guard.pid(),
                 running: guard.is_running(),
                 restart_count: guard.restart_count(),
+                last_failure: guard.last_failure(),
                 config_path: guard.config_path().to_string_lossy().to_string(),
             })
             .collect()

@@ -14,6 +14,9 @@
 
 ### Changed
 
+- frpc crash recovery now uses bounded exponential backoff, replenishes its retry
+  budget after a stable run, groups repeated failures, and exposes structured
+  authentication/network/configuration/port/TLS diagnostics in the status API.
 - API configuration payloads now apply model defaults to omitted fields, keeping
   older clients compatible when new fields are introduced.
 
