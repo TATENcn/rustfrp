@@ -34,11 +34,33 @@ impl FrpsProfile {
             return Err(ClientError::InvalidPort("server_port cannot be 0".into()));
         }
 
-        // Token 非空（生产环境基本要求）
-        if self.token.trim().is_empty() {
-            return Err(ClientError::MissingRequiredField(
-                "token is required for FRP authentication".into(),
-            ));
+        match self.auth_method.as_deref() {
+            Some("none") => {}
+            Some("oidc") => {
+                if self.oidc_client_id.as_deref().is_none_or(str::is_empty)
+                    || self.oidc_client_secret.as_deref().is_none_or(str::is_empty)
+                    || self
+                        .oidc_token_endpoint_url
+                        .as_deref()
+                        .is_none_or(str::is_empty)
+                {
+                    return Err(ClientError::MissingRequiredField(
+                        "OIDC client ID, client secret, and token endpoint URL are required".into(),
+                    ));
+                }
+            }
+            Some("token") | None => {
+                if self.token.trim().is_empty() {
+                    return Err(ClientError::MissingRequiredField(
+                        "token is required for FRP authentication".into(),
+                    ));
+                }
+            }
+            Some(method) => {
+                return Err(ClientError::ConfigValidation(format!(
+                    "Unsupported authentication method: {method}"
+                )));
+            }
         }
 
         // 心跳参数合理性
@@ -316,6 +338,18 @@ mod tests {
             server_addr: "frp.example.com".into(),
             server_port: 7000,
             token: "secure_token".into(),
+            ..Default::default()
+        };
+        assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_profile_without_authentication() {
+        let p = FrpsProfile {
+            name: "No Auth Server".into(),
+            server_addr: "frp.example.com".into(),
+            server_port: 7000,
+            auth_method: Some("none".into()),
             ..Default::default()
         };
         assert!(p.validate().is_ok());

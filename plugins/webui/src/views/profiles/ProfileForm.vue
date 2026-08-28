@@ -54,7 +54,7 @@ const defaultProfile = (): FrpsProfile => ({
   quic_keepalive_period: null,
   quic_max_idle_timeout: null,
   quic_max_incoming_streams: null,
-  auth_method: null,
+  auth_method: 'none',
   oidc_client_id: null,
   oidc_client_secret: null,
   oidc_token_endpoint_url: null,
@@ -85,6 +85,7 @@ const transportOptions = [
 ]
 
 const authOptions = [
+  { label: t('profile.authNone'), value: 'none' },
   { label: 'Token', value: 'token' },
   { label: 'OIDC', value: 'oidc' },
 ]
@@ -123,10 +124,14 @@ function handleCancel() {
 onMounted(async () => {
   if (props.profile) {
     form.value = { ...props.profile }
+    form.value.auth_method ??= 'token'
   } else if (isEdit.value) {
     await store.fetchAll()
     const existing = store.profiles.find((p) => p.id === editId.value)
-    if (existing) form.value = { ...existing }
+    if (existing) {
+      form.value = { ...existing }
+      form.value.auth_method ??= 'token'
+    }
   }
 })
 </script>
@@ -157,12 +162,11 @@ onMounted(async () => {
         <NSelect
           v-model:value="form.auth_method"
           :options="authOptions"
-          clearable
           :placeholder="t('profile.authPlaceholder')"
         />
       </NFormItem>
       <NFormItem
-        v-if="!form.auth_method || form.auth_method === 'token'"
+        v-if="form.auth_method === 'token'"
         :label="t('profile.token')"
         path="token"
       >
@@ -173,6 +177,23 @@ onMounted(async () => {
           :placeholder="isEdit ? t('profile.tokenKeep') : ''"
         />
       </NFormItem>
+      <template v-if="form.auth_method === 'oidc'">
+        <NFormItem label="OIDC Client ID">
+          <NInput v-model:value="form.oidc_client_id" />
+        </NFormItem>
+        <NFormItem label="OIDC Client Secret">
+          <NInput v-model:value="form.oidc_client_secret" type="password" show-password-on="click" />
+        </NFormItem>
+        <NFormItem label="OIDC Token Endpoint URL">
+          <NInput v-model:value="form.oidc_token_endpoint_url" placeholder="https://issuer.example.com/oauth/token" />
+        </NFormItem>
+        <NFormItem label="OIDC Audience">
+          <NInput v-model:value="form.oidc_audience" />
+        </NFormItem>
+        <NFormItem label="OIDC Scope">
+          <NInput v-model:value="form.oidc_scope" />
+        </NFormItem>
+      </template>
 
       <!-- TLS -->
       <NFormItem label="TLS Enable">

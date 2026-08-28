@@ -229,7 +229,9 @@ async fn build_frpc_config(
     // We emit the [auth] block when OIDC is configured (all fields present),
     // or when token auth is needed. When [auth] is present, we omit the
     // top-level token to avoid duplication (frpc handles both equivalently).
-    let auth = if profile.auth_method.as_deref() == Some("oidc") {
+    let auth = if profile.auth_method.as_deref() == Some("none") {
+        None
+    } else if profile.auth_method.as_deref() == Some("oidc") {
         if let (Some(ref client_id), Some(ref client_secret), Some(ref token_url)) = (
             &profile.oidc_client_id,
             &profile.oidc_client_secret,
@@ -247,20 +249,36 @@ async fn build_frpc_config(
                 }),
             })
         } else {
-            None
+            return Err(ClientError::ConfigValidation(
+                "OIDC client ID, client secret, and token endpoint URL are required".into(),
+            ));
         }
-    } else if token.is_some() {
-        Some(AuthConfig {
-            method: Some("token".into()),
-            token: token.clone(),
-            oidc: None,
-        })
+    } else if profile.auth_method.as_deref() == Some("token") || profile.auth_method.is_none() {
+        match token.clone() {
+            Some(token) => Some(AuthConfig {
+                method: Some("token".into()),
+                token: Some(token),
+                oidc: None,
+            }),
+            None => {
+                return Err(ClientError::ConfigValidation(
+                    "Token is required when token authentication is selected".into(),
+                ));
+            }
+        }
     } else {
-        None
+        return Err(ClientError::ConfigValidation(format!(
+            "Unsupported authentication method: {}",
+            profile.auth_method.as_deref().unwrap_or_default()
+        )));
     };
 
     // When using auth block, token goes inside auth, not at top level
-    let top_level_token = if auth.is_some() { None } else { token };
+    let top_level_token = if auth.is_some() || profile.auth_method.as_deref() == Some("none") {
+        None
+    } else {
+        token
+    };
 
     Ok(FrpcConfig {
         server_addr: profile.server_addr.clone(),
@@ -551,6 +569,22 @@ mod tests {
             .unwrap()
             .to_string_lossy()
             .contains("Test_Server"));
+    }
+
+    #[tokio::test]
+    async fn test_no_auth_omits_stored_token() {
+        let db = setup_db().await;
+        let profile = FrpsProfile {
+            name: "No Auth".into(),
+            server_addr: "frp.example.com".into(),
+            token: "dormant-token".into(),
+            auth_method: Some("none".into()),
+            ..Default::default()
+        };
+
+        let config = build_frpc_config(&profile, &[], &db).await.unwrap();
+        assert!(config.auth.is_none());
+        assert!(config.token.is_none());
     }
 
     #[tokio::test]

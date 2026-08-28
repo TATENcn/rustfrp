@@ -49,7 +49,7 @@ pub struct FrpsProfile {
     pub quic_max_idle_timeout: Option<i32>,
     /// QUIC max incoming streams.
     pub quic_max_incoming_streams: Option<i32>,
-    /// Authentication method: "token" or "oidc". Default: token.
+    /// Authentication method: "none", "token" or "oidc". Legacy `None` means token.
     pub auth_method: Option<String>,
     /// OIDC client ID (when auth_method = "oidc").
     pub oidc_client_id: Option<String>,
