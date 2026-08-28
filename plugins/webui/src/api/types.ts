@@ -138,6 +138,7 @@ export interface ProfileRuntimeResponse {
   process_status: 'started' | 'reloaded' | 'already_running' | 'running' | 'stopped' | 'not_running'
   profile_id: number
   enabled_proxy_count: number
+  config_pending: boolean
 }
 
 // ── LocalVisitor (matches Rust LocalVisitor 1:1) ──

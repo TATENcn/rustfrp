@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
 /// 当前最新的 schema 版本
-const LATEST_VERSION: i32 = 13;
+const LATEST_VERSION: i32 = 14;
 
 /// 运行所有待执行的迁移
 ///
@@ -96,6 +96,7 @@ fn apply_migration(conn: &Connection, version: i32) -> Result<()> {
         11 => migrate_v11(&tx)?,
         12 => migrate_v12(&tx)?,
         13 => migrate_v13(&tx)?,
+        14 => migrate_v14(&tx)?,
         _ => {
             return Err(ClientError::DatabaseMigration(format!(
                 "Unknown migration version: {version}"
@@ -691,6 +692,20 @@ fn migrate_v13(tx: &rusqlite::Transaction) -> Result<()> {
     )
     .map_err(|e| ClientError::DatabaseMigration(format!("Failed to add profile runtime: {e}")))?;
     tracing::info!("V13 Migration: Add profile runtime and unique binding membership");
+    Ok(())
+}
+
+/// V14: persist whether a running Profile is using an outdated generated
+/// configuration after its proxy membership changes.
+fn migrate_v14(tx: &rusqlite::Transaction) -> Result<()> {
+    tx.execute(
+        "ALTER TABLE profile_runtime ADD COLUMN config_pending INTEGER NOT NULL DEFAULT 0",
+        [],
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to add profile runtime pending state: {e}"))
+    })?;
+    tracing::info!("V14 Migration: Add profile runtime pending configuration state");
     Ok(())
 }
 

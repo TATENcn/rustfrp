@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NModal, NButton, NSpace } from 'naive-ui'
+import { NModal, NCard, NButton, NSpace } from 'naive-ui'
 import { useI18n } from '@/i18n'
 
 const props = defineProps<{
@@ -18,20 +18,31 @@ const { t } = useI18n()
 </script>
 
 <template>
-  <NModal :show="show" :title="title" @update:show="emit('cancel')">
-    <template #header>{{ title }}</template>
-    <p>{{ content }}</p>
-    <template #footer>
-      <NSpace justify="end">
-        <NButton @click="emit('cancel')">{{ t('common.cancel') }}</NButton>
-        <NButton
-          type="error"
-          :loading="loading"
-          @click="emit('confirm')"
-        >
-          {{ t('common.delete') }}
-        </NButton>
-      </NSpace>
-    </template>
+  <NModal
+    :show="show"
+    :mask-closable="!loading"
+    @update:show="value => { if (!value && !loading) emit('cancel') }"
+  >
+    <NCard
+      :title="title"
+      :bordered="false"
+      role="alertdialog"
+      aria-modal="true"
+      style="width: min(440px, calc(100vw - 32px))"
+    >
+      <p style="margin: 0">{{ content }}</p>
+      <template #footer>
+        <NSpace justify="end">
+          <NButton :disabled="loading" @click="emit('cancel')">{{ t('common.cancel') }}</NButton>
+          <NButton
+            type="error"
+            :loading="loading"
+            @click="emit('confirm')"
+          >
+            {{ t('common.delete') }}
+          </NButton>
+        </NSpace>
+      </template>
+    </NCard>
   </NModal>
 </template>

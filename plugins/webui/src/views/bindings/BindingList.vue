@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { NButton, NCard, NCheckbox, NCheckboxGroup, NEmpty, NInput, NModal, NSkeleton, NTag, NTooltip, useMessage } from 'naive-ui'
+import { NAlert, NButton, NCard, NCheckbox, NCheckboxGroup, NEmpty, NInput, NModal, NSkeleton, NTag, NTooltip, useMessage } from 'naive-ui'
 import { useI18n } from '@/i18n'
 import { useBindingStore } from '@/stores/bindings'
 import { useProfileStore } from '@/stores/profiles'
@@ -61,7 +61,7 @@ async function saveAssignment() {
     const wasRunning = profileStore.runtimes[profileId]?.running ?? false
     await profileStore.replaceProxies(profileId, draftSelection.value)
     await Promise.all([bindingStore.fetchAll(), profileStore.fetchRuntime(profileId)])
-    message.success(wasRunning && draftSelection.value.length ? t('binding.assignmentSavedReloaded') : t('binding.assignmentSaved'))
+    message.success(wasRunning && profileStore.runtimes[profileId]?.config_pending ? t('binding.assignmentSavedPending') : t('binding.assignmentSaved'))
     closeAssignment()
   } catch (error) {
     message.error(extractApiError(error).message)
@@ -147,6 +147,7 @@ onMounted(async () => {
               :status="statusFor(profile.id!).status"
               :label="statusFor(profile.id!).label"
             />
+            <NTag v-if="profileStore.runtimes[profile.id!]?.config_pending" size="small" type="warning" :bordered="false">{{ t('binding.updateRequired') }}</NTag>
           </div>
         </template>
         <template #header-extra>
@@ -163,6 +164,9 @@ onMounted(async () => {
           <div><div class="text-xs text-foreground-muted">{{ t('binding.server') }}</div><div class="mt-1 font-medium">{{ profile.server_addr }}:{{ profile.server_port }}</div></div>
           <div><div class="text-xs text-foreground-muted">{{ t('binding.transport') }}</div><div class="mt-1 font-medium uppercase">{{ profile.transport_protocol }}</div></div>
         </div>
+        <NAlert v-if="profileStore.runtimes[profile.id!]?.config_pending" type="warning" class="mt-4" :title="t('binding.updateRequired')">
+          {{ t('binding.updateRequiredDescription') }}
+        </NAlert>
         <div class="mt-4 border-t border-border pt-4">
           <div class="mb-2 text-xs text-foreground-muted">{{ t('binding.assignedProxies') }}</div>
           <div v-if="assignedProxies(profile.id!).length" class="flex flex-wrap gap-2">
@@ -175,8 +179,8 @@ onMounted(async () => {
           <div class="flex items-center justify-between gap-2">
             <NButton quaternary :loading="refreshing === profile.id" @click="refreshRuntime(profile.id!)"><template #icon><AppIcon name="refresh" /></template>{{ t('common.refresh') }}</NButton>
             <div class="flex gap-2">
-              <NButton v-if="profileStore.runtimes[profile.id!]?.running" :loading="controlling === profile.id" :disabled="controlling !== null" @click="reload(profile.id!)"><template #icon><AppIcon name="reload" /></template>{{ t('app.reload') }}</NButton>
               <NButton v-if="profileStore.runtimes[profile.id!]?.running || profileStore.runtimes[profile.id!]?.desired_running" type="warning" :loading="controlling === profile.id" :disabled="controlling !== null" @click="stop(profile.id!)">{{ t('binding.stopProfile') }}</NButton>
+              <NButton v-if="profileStore.runtimes[profile.id!]?.running" :type="profileStore.runtimes[profile.id!]?.config_pending ? 'primary' : 'default'" :loading="controlling === profile.id" :disabled="controlling !== null" @click="reload(profile.id!)"><template #icon><AppIcon name="reload" /></template>{{ profileStore.runtimes[profile.id!]?.config_pending ? t('binding.applyUpdate') : t('app.reload') }}</NButton>
               <NButton v-else type="primary" :loading="controlling === profile.id" :disabled="controlling !== null || !assignedProxyIds(profile.id!).length" @click="start(profile.id!)">{{ t('binding.startProfile') }}</NButton>
             </div>
           </div>

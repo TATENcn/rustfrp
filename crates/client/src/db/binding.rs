@@ -226,6 +226,35 @@ impl Database {
         .map_err(ClientError::DatabaseQuery)
     }
 
+    /// Persist whether the generated configuration differs from the one used
+    /// by the currently running process.
+    pub async fn set_profile_config_pending(&self, profile_id: i64, pending: bool) -> Result<()> {
+        let conn = self.lock().await;
+        conn.execute(
+            "INSERT INTO profile_runtime (profile_id, desired_running, config_pending, updated_at)
+             VALUES (?1, 0, ?2, datetime('now'))
+             ON CONFLICT(profile_id) DO UPDATE SET config_pending=excluded.config_pending,
+                 updated_at=excluded.updated_at",
+            params![profile_id, pending as i32],
+        )
+        .map_err(ClientError::DatabaseQuery)?;
+        Ok(())
+    }
+
+    pub async fn profile_config_pending(&self, profile_id: i64) -> Result<bool> {
+        let conn = self.lock().await;
+        conn.query_row(
+            "SELECT config_pending FROM profile_runtime WHERE profile_id = ?1",
+            params![profile_id],
+            |row| Ok(row.get::<_, i32>(0)? != 0),
+        )
+        .or_else(|error| match error {
+            rusqlite::Error::QueryReturnedNoRows => Ok(false),
+            other => Err(other),
+        })
+        .map_err(ClientError::DatabaseQuery)
+    }
+
     /// 设置绑定的 running 状态
     pub async fn set_running(&self, id: i64, running: bool) -> Result<()> {
         let conn = self.lock().await;
@@ -471,6 +500,16 @@ mod tests {
             .await
             .unwrap();
         assert!(db.profile_desired_running(profile_id).await.unwrap());
+        assert!(!db.profile_config_pending(profile_id).await.unwrap());
+        db.set_profile_config_pending(profile_id, true)
+            .await
+            .unwrap();
+        assert!(db.profile_config_pending(profile_id).await.unwrap());
+        assert!(db.profile_desired_running(profile_id).await.unwrap());
+        db.set_profile_config_pending(profile_id, false)
+            .await
+            .unwrap();
+        assert!(!db.profile_config_pending(profile_id).await.unwrap());
         assert_eq!(
             db.list_running_bindings_for_profile(profile_id)
                 .await

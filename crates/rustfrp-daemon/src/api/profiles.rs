@@ -196,6 +196,7 @@ pub struct ProfileRuntimeResponse {
     pub running: bool,
     pub process_status: String,
     pub enabled_proxy_count: usize,
+    pub config_pending: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -227,6 +228,13 @@ pub async fn replace_proxies(
         .list_bindings_for_profile(id)
         .await
         .map_err(api_error)?;
+    let mut previous = existing
+        .iter()
+        .filter(|binding| binding.enabled)
+        .map(|binding| binding.proxy_id)
+        .collect::<Vec<_>>();
+    previous.sort_unstable();
+    let assignments_changed = previous != requested;
     for binding in &existing {
         if !requested.contains(&binding.proxy_id) {
             state
@@ -260,26 +268,23 @@ pub async fn replace_proxies(
         }
     }
 
-    if state.process_manager.is_running(id).await {
-        let profile = state.db.get_profile(id).await.map_err(api_error)?;
-        let generated = rustfrp_client::config::generator::generate_frpc_toml_for_profile(
-            &state.db,
-            id,
-            &state.config_dir,
-        )
-        .await
-        .map_err(api_error)?;
-        if generated.is_some() {
-            state
-                .process_manager
-                .ensure_running(id, &profile.name)
-                .await
-                .map_err(api_error)?;
-        } else {
+    if assignments_changed && state.process_manager.is_running(id).await {
+        if requested.is_empty() {
             state.process_manager.stop(id).await.map_err(api_error)?;
             state
                 .db
                 .set_profile_desired_running(id, false)
+                .await
+                .map_err(api_error)?;
+            state
+                .db
+                .set_profile_config_pending(id, false)
+                .await
+                .map_err(api_error)?;
+        } else {
+            state
+                .db
+                .set_profile_config_pending(id, true)
                 .await
                 .map_err(api_error)?;
         }
@@ -307,6 +312,11 @@ pub async fn runtime(
         .await
         .map_err(api_error)?;
     let running = state.process_manager.is_running(id).await;
+    let config_pending = state
+        .db
+        .profile_config_pending(id)
+        .await
+        .map_err(api_error)?;
     let count = state
         .db
         .list_enabled_bindings_for_profile(id)
@@ -319,6 +329,7 @@ pub async fn runtime(
         running,
         process_status: if running { "running" } else { "stopped" }.into(),
         enabled_proxy_count: count,
+        config_pending,
     })))
 }
 
@@ -368,12 +379,18 @@ pub async fn start(
         .set_profile_desired_running(id, true)
         .await
         .map_err(api_error)?;
+    state
+        .db
+        .set_profile_config_pending(id, false)
+        .await
+        .map_err(api_error)?;
     Ok(Json(ApiResponse::ok(ProfileRuntimeResponse {
         profile_id: id,
         desired_running: true,
         running: true,
         process_status: action.as_str().into(),
         enabled_proxy_count: enabled.len(),
+        config_pending: false,
     })))
 }
 
@@ -392,6 +409,11 @@ pub async fn stop(
         .set_profile_desired_running(id, false)
         .await
         .map_err(api_error)?;
+    state
+        .db
+        .set_profile_config_pending(id, false)
+        .await
+        .map_err(api_error)?;
     let count = state
         .db
         .list_enabled_bindings_for_profile(id)
@@ -404,6 +426,7 @@ pub async fn stop(
         running: false,
         process_status: "stopped".into(),
         enabled_proxy_count: count,
+        config_pending: false,
     })))
 }
 

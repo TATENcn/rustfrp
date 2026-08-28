@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { onMounted, ref, computed, h } from 'vue'
-import { useRouter } from 'vue-router'
 import {
   NDataTable,
   NButton,
@@ -24,8 +23,8 @@ import ErrorAlert from '@/components/ErrorAlert.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import PageHeader from '@/components/common/PageHeader.vue'
 import AppIcon from '@/components/icon/AppIcon.vue'
+import ProxyForm from './ProxyForm.vue'
 
-const router = useRouter()
 const { t } = useI18n()
 const message = useMessage()
 const store = useProxyStore()
@@ -40,6 +39,23 @@ const batchLoading = ref(false)
 const batchPorts = ref('')
 const batchType = ref<'tcp' | 'udp'>('tcp')
 const batchLocalIp = ref('127.0.0.1')
+const formVisible = ref(false)
+const editingProxy = ref<LocalProxy | null>(null)
+
+function openCreate() {
+  editingProxy.value = null
+  formVisible.value = true
+}
+
+function openEdit(proxy: LocalProxy) {
+  editingProxy.value = proxy
+  formVisible.value = true
+}
+
+function closeForm() {
+  formVisible.value = false
+  editingProxy.value = null
+}
 
 function mappedAddresses(proxy: LocalProxy): string[] {
   if (!proxy.id) return []
@@ -174,13 +190,19 @@ const columns: DataTableColumns<LocalProxy> = [
   {
     title: t('common.actions'),
     key: 'actions',
-    width: 250,
+    width: 310,
     render(row) {
-      return [
-        h(NButton, { size: 'small', disabled: mappedAddresses(row).length === 0, onClick: () => copyMappedAddress(row) }, { default: () => t('proxy.copyAddress') }),
-        h(NButton, { size: 'small', onClick: () => router.push({ name: 'proxy-edit', params: { id: row.id } }) }, { default: () => t('common.edit') }),
-        h(NButton, { size: 'small', type: 'error', style: { marginLeft: '8px' }, onClick: () => (deleting.value = row) }, { default: () => t('common.delete') }),
-      ]
+      return h(
+        NSpace,
+        { size: 8, wrap: false },
+        {
+          default: () => [
+            h(NButton, { size: 'small', disabled: mappedAddresses(row).length === 0, onClick: () => copyMappedAddress(row) }, { default: () => t('proxy.copyAddress') }),
+            h(NButton, { size: 'small', onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
+            h(NButton, { size: 'small', type: 'error', onClick: () => (deleting.value = row) }, { default: () => t('common.delete') }),
+          ],
+        },
+      )
     },
   },
 ]
@@ -220,7 +242,7 @@ onMounted(() => Promise.all([store.fetchAll(), bindingStore.fetchAll(), profileS
       <template #actions>
         <NInput v-model:value="search" :placeholder="t('common.search')" clearable style="width: min(240px, 100%)"><template #prefix><AppIcon name="search" :size="16" /></template></NInput>
         <NButton @click="batchVisible = true">{{ t('proxy.batchCreate') }}</NButton>
-        <NButton type="primary" @click="router.push({ name: 'proxy-new' })">{{ t('proxy.create') }}</NButton>
+        <NButton type="primary" @click="openCreate">{{ t('proxy.create') }}</NButton>
       </template>
     </PageHeader>
     <ErrorAlert :error="store.error" @dismiss="store.error = null" />
@@ -230,6 +252,7 @@ onMounted(() => Promise.all([store.fetchAll(), bindingStore.fetchAll(), profileS
       :data="filtered"
       :loading="store.loading"
       :bordered="false"
+      :scroll-x="1100"
     />
 
     <ConfirmDialog
@@ -240,6 +263,27 @@ onMounted(() => Promise.all([store.fetchAll(), bindingStore.fetchAll(), profileS
       @confirm="confirmDelete"
       @cancel="deleting = null"
     />
+
+    <NModal v-model:show="formVisible" :mask-closable="false">
+      <NCard
+        :title="editingProxy ? t('proxy.edit') : t('proxy.create')"
+        :bordered="false"
+        closable
+        role="dialog"
+        aria-modal="true"
+        style="width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 48px)"
+        content-style="overflow-y: auto"
+        @close="closeForm"
+      >
+        <ProxyForm
+          v-if="formVisible"
+          embedded
+          :proxy="editingProxy"
+          @saved="closeForm"
+          @cancel="closeForm"
+        />
+      </NCard>
+    </NModal>
 
     <NModal v-model:show="batchVisible">
       <NCard :title="t('proxy.batchCreate')" style="width: min(560px, 92vw)" closable @close="batchVisible = false">

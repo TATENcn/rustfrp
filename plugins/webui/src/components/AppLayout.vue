@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NDropdown, NIcon, NLayout, NLayoutContent, NLayoutHeader, NLayoutSider, NMenu, NSelect, NSpace, NTooltip, useMessage, type DropdownOption, type MenuOption } from 'naive-ui'
+import { NButton, NDropdown, NIcon, NLayout, NLayoutContent, NLayoutHeader, NLayoutSider, NMenu, NSelect, NSpace, NTag, NTooltip, useMessage, type DropdownOption, type MenuOption } from 'naive-ui'
 import { useI18n } from '@/i18n'
 import { formatDuration } from '@/i18n/format'
 import { useSystemStore } from '@/stores/system'
@@ -84,7 +84,8 @@ onUnmounted(() => systemStore.stopPolling())
           <div class="min-w-0"><div class="truncate text-base font-semibold text-foreground">{{ i18n.t('app.title') }}</div><div class="hidden text-xs text-foreground-muted sm:block">Control plane</div></div>
         </div>
         <NSpace align="center" :size="8" :wrap="false">
-          <NSelect v-if="environmentStore.environments.length" :value="environmentStore.activeId" :options="environmentStore.environments.map(item => ({ label: item.name, value: item.id! }))" size="small" class="hidden w-40 md:block" aria-label="Environment" @update:value="environmentStore.select" />
+          <NSelect v-if="environmentStore.environments.length > 1" :value="environmentStore.activeId" :options="environmentStore.environments.map(item => ({ label: item.name, value: item.id! }))" size="small" class="hidden w-40 md:block" aria-label="Environment" @update:value="environmentStore.select" />
+          <NTag v-else-if="environmentStore.active" size="small" :bordered="false" class="hidden md:inline-flex">{{ environmentStore.active.name }}</NTag>
           <StatusBadge class="hidden sm:inline-flex" :status="systemStore.error ? 'stale' : activeCount ? 'running' : 'stopped'" :label="i18n.t('status.frpcRunning', { count: activeCount })" />
           <NTooltip><template #trigger><NButton quaternary circle aria-label="Language" @click="toggleLocale"><template #icon><AppIcon name="language" /></template></NButton></template>{{ i18n.locale.value === 'zh' ? 'English' : '中文' }}</NTooltip>
           <NDropdown trigger="click" :options="themeOptions" @select="handleThemeSelect"><NTooltip><template #trigger><NButton quaternary circle aria-label="Appearance"><template #icon><AppIcon name="palette" /></template></NButton></template>{{ i18n.locale.value === 'zh' ? '外观' : 'Appearance' }}</NTooltip></NDropdown>
