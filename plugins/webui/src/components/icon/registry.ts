@@ -19,6 +19,7 @@ import ReloadIcon from '~icons/lucide/rotate-ccw'
 import SearchIcon from '~icons/lucide/search'
 import FilterIcon from '~icons/lucide/list-filter'
 import DownloadIcon from '~icons/lucide/download'
+import UploadIcon from '~icons/lucide/upload'
 import CopyIcon from '~icons/lucide/copy'
 import PauseIcon from '~icons/lucide/pause'
 import ResumeIcon from '~icons/lucide/play'
@@ -57,6 +58,7 @@ export const appIcons = {
   search: SearchIcon,
   filter: FilterIcon,
   download: DownloadIcon,
+  upload: UploadIcon,
   copy: CopyIcon,
   pause: PauseIcon,
   resume: ResumeIcon,

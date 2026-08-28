@@ -18,6 +18,7 @@ export type AppIconName =
   | 'search'
   | 'filter'
   | 'download'
+  | 'upload'
   | 'copy'
   | 'pause'
   | 'resume'

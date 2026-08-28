@@ -46,6 +46,7 @@ const reloadTaskStatus = ref<string | null>(null)
 const configStatus = ref<'idle' | 'checking' | 'valid' | 'invalid'>('idle')
 const importProfileName = ref('imported')
 const importFile = ref<File | null>(null)
+const importFileInput = ref<HTMLInputElement | null>(null)
 const importing = ref(false)
 const exporting = ref(false)
 const frpVersions = ref<FrpVersionList>({ active: null, installed: [] })
@@ -213,6 +214,10 @@ function selectImportFile(event: Event) {
   importFile.value = (event.target as HTMLInputElement).files?.[0] ?? null
 }
 
+function chooseImportFile() {
+  importFileInput.value?.click()
+}
+
 async function handleImport() {
   if (!importFile.value || !importProfileName.value.trim()) {
     message.warning(t('configTransfer.selectFile'))
@@ -228,6 +233,8 @@ async function handleImport() {
         proxies: summary.proxies_imported,
         visitors: summary.visitors_imported,
       }))
+      importFile.value = null
+      if (importFileInput.value) importFileInput.value.value = ''
       await systemStore.fetchStatus()
     }
   } catch (error) {
@@ -281,25 +288,41 @@ async function handleExport() {
       </NCard>
 
       <NCard size="small" :bordered="false" class="shadow-card" :title="t('configTransfer.title')">
-        <NSpace vertical>
-          <p class="m-0 text-sm text-foreground-muted">
-            {{ t('configTransfer.description') }}
-          </p>
-          <NSpace align="center">
-            <NInput
-              v-model:value="importProfileName"
-              :placeholder="t('configTransfer.profileName')"
-              class="w-56"
-            />
-            <input type="file" accept=".toml,text/plain" @change="selectImportFile" />
-            <NButton type="primary" :loading="importing" @click="handleImport">
-              {{ t('configTransfer.import') }}
-            </NButton>
-            <NButton :loading="exporting" @click="handleExport">
-              {{ t('configTransfer.export') }}
-            </NButton>
-          </NSpace>
-        </NSpace>
+        <p class="m-0 text-sm text-foreground-muted">
+          {{ t('configTransfer.description') }}
+        </p>
+        <div class="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.55fr)]">
+          <section class="rounded-xl border border-border bg-surface-subtle p-4">
+            <div class="font-medium">{{ t('configTransfer.importTitle') }}</div>
+            <p class="mb-4 mt-1 text-xs text-foreground-muted">{{ t('configTransfer.importHint') }}</p>
+            <div class="grid gap-3 sm:grid-cols-[minmax(180px,1fr)_minmax(0,1.4fr)]">
+              <NInput v-model:value="importProfileName" :placeholder="t('configTransfer.profileName')" />
+              <div class="flex min-w-0 items-center gap-2">
+                <input ref="importFileInput" class="hidden" type="file" accept=".toml,text/plain" @change="selectImportFile" />
+                <NButton class="shrink-0" @click="chooseImportFile">
+                  <template #icon><AppIcon name="upload" /></template>{{ t('configTransfer.chooseFile') }}
+                </NButton>
+                <span class="min-w-0 truncate text-sm" :class="importFile ? 'text-foreground' : 'text-foreground-muted'">
+                  {{ importFile?.name ?? t('configTransfer.noFile') }}
+                </span>
+              </div>
+            </div>
+            <div class="mt-4 flex justify-end">
+              <NButton type="primary" :loading="importing" :disabled="!importFile || !importProfileName.trim()" @click="handleImport">
+                <template #icon><AppIcon name="upload" /></template>{{ t('configTransfer.import') }}
+              </NButton>
+            </div>
+          </section>
+          <section class="flex flex-col rounded-xl border border-border bg-surface-subtle p-4">
+            <div class="font-medium">{{ t('configTransfer.exportTitle') }}</div>
+            <p class="mb-4 mt-1 text-xs text-foreground-muted">{{ t('configTransfer.exportHint') }}</p>
+            <div class="mt-auto flex justify-end">
+              <NButton :loading="exporting" @click="handleExport">
+                <template #icon><AppIcon name="download" /></template>{{ t('configTransfer.export') }}
+              </NButton>
+            </div>
+          </section>
+        </div>
       </NCard>
 
       <NCard size="small" :bordered="false" class="shadow-card" :title="t('frpVersion.title')">

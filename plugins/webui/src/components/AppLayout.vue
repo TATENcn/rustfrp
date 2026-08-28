@@ -65,7 +65,7 @@ function handleThemeSelect(key: string) {
 }
 function toggleLocale() { i18n.setLocale(i18n.locale.value === 'zh' ? 'en' : 'zh') }
 async function handleReload() {
-  try { const task = await systemStore.triggerReload(); if (task) message.success(`Reload started: ${task}`) }
+  try { const task = await systemStore.triggerReload(); if (task) message.success(i18n.t('app.reloadStarted', { task })) }
   catch { message.error(i18n.t('error.serverError')) }
 }
 function handleLogout() { localStorage.removeItem('api_token'); void router.push({ name: 'login' }) }
@@ -81,14 +81,14 @@ onUnmounted(() => systemStore.stopPolling())
       <div class="flex h-full items-center justify-between gap-4">
         <div class="flex min-w-0 items-center gap-3">
           <span class="grid size-9 shrink-0 place-items-center rounded-xl bg-primary text-white shadow-sm"><AppIcon name="proxies" :size="19" /></span>
-          <div class="min-w-0"><div class="truncate text-base font-semibold text-foreground">{{ i18n.t('app.title') }}</div><div class="hidden text-xs text-foreground-muted sm:block">Control plane</div></div>
+          <div class="min-w-0"><div class="truncate text-base font-semibold text-foreground">{{ i18n.t('app.title') }}</div><div class="hidden text-xs text-foreground-muted sm:block">{{ i18n.t('app.controlPlane') }}</div></div>
         </div>
         <NSpace align="center" :size="8" :wrap="false">
-          <NSelect v-if="environmentStore.environments.length > 1" :value="environmentStore.activeId" :options="environmentStore.environments.map(item => ({ label: item.name, value: item.id! }))" size="small" class="hidden w-40 md:block" aria-label="Environment" @update:value="environmentStore.select" />
+          <NSelect v-if="environmentStore.environments.length > 1" :value="environmentStore.activeId" :options="environmentStore.environments.map(item => ({ label: item.name, value: item.id! }))" size="small" class="hidden w-40 md:block" :aria-label="i18n.t('app.environment')" @update:value="environmentStore.select" />
           <NTag v-else-if="environmentStore.active" size="small" :bordered="false" class="hidden md:inline-flex">{{ environmentStore.active.name }}</NTag>
           <StatusBadge class="hidden sm:inline-flex" :status="systemStore.error ? 'stale' : activeCount ? 'running' : 'stopped'" :label="i18n.t('status.frpcRunning', { count: activeCount })" />
-          <NTooltip><template #trigger><NButton quaternary circle aria-label="Language" @click="toggleLocale"><template #icon><AppIcon name="language" /></template></NButton></template>{{ i18n.locale.value === 'zh' ? 'English' : '中文' }}</NTooltip>
-          <NDropdown trigger="click" :options="themeOptions" @select="handleThemeSelect"><NTooltip><template #trigger><NButton quaternary circle aria-label="Appearance"><template #icon><AppIcon name="palette" /></template></NButton></template>{{ i18n.locale.value === 'zh' ? '外观' : 'Appearance' }}</NTooltip></NDropdown>
+          <NTooltip><template #trigger><NButton quaternary circle :aria-label="i18n.t('app.language')" @click="toggleLocale"><template #icon><AppIcon name="language" /></template></NButton></template>{{ i18n.locale.value === 'zh' ? 'English' : '中文' }}</NTooltip>
+          <NDropdown trigger="click" :options="themeOptions" @select="handleThemeSelect"><NTooltip><template #trigger><NButton quaternary circle :aria-label="i18n.t('app.appearance')"><template #icon><AppIcon name="palette" /></template></NButton></template>{{ i18n.t('app.appearance') }}</NTooltip></NDropdown>
           <NTooltip><template #trigger><NButton quaternary circle :aria-label="i18n.t('app.reload')" @click="handleReload"><template #icon><AppIcon name="reload" /></template></NButton></template>{{ i18n.t('app.reload') }}</NTooltip>
           <NTooltip v-if="hasToken"><template #trigger><NButton quaternary circle :aria-label="i18n.t('auth.logout')" @click="handleLogout"><template #icon><AppIcon name="logout" /></template></NButton></template>{{ i18n.t('auth.logout') }}</NTooltip>
         </NSpace>
