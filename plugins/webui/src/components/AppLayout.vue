@@ -103,7 +103,7 @@ onUnmounted(() => systemStore.stopPolling())
       </NLayoutContent>
     </NLayout>
     <footer class="fixed inset-x-0 bottom-0 z-20 flex h-8 items-center justify-between border-t border-border bg-surface px-4 text-xs text-foreground-muted">
-      <span class="flex items-center gap-2"><span class="size-1.5 rounded-full" :class="activeCount ? 'bg-success' : 'bg-foreground-muted'" />{{ i18n.t('app.ready') }} · {{ uptimeText }}</span><span>RustFRP v0.2.0</span>
+      <span class="flex items-center gap-2"><span class="size-1.5 rounded-full" :class="activeCount ? 'bg-success' : 'bg-foreground-muted'" />{{ i18n.t('app.ready') }} · {{ uptimeText }}</span><span>RustFRP v0.3.0</span>
     </footer>
   </NLayout>
 </template>

@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-28
+
+### Added
+
+- Redesigned WebUI with a unified visual system, Lucide icons, responsive layouts,
+  reusable status components, and localized metric formatting.
+- Modal workflows for server profiles, proxies, visitors, and proxy assignments,
+  including searchable multi-selection and explicit save/reload feedback.
+- ECharts-based CPU and memory history, three-second host monitoring, improved
+  process state visibility, and ANSI-aware log rendering and filtering.
+
+### Changed
+
+- Proxy assignment actions now expose running, stopped, and pending-reload states
+  consistently across the frontend and backend.
+- Authentication is optional for server profiles, and profile editing no longer
+  replaces the entire page.
+- Dashboard uptime now updates every second while host metrics refresh every three
+  seconds, keeping the interface responsive without excessive API traffic.
+
+### Fixed
+
+- Corrected responsive toolbar and action-button wrapping in Chinese and English.
+- Fixed unusable delete confirmations, duplicate copy-button targets, missing i18n
+  labels, and non-functional environment indicators.
+
 ## [0.2.0] - 2026-08-27
 
 ### Added
