@@ -123,7 +123,7 @@ export interface BindingRule {
   profile_id: number
   proxy_id: number
   enabled: boolean   // 配置是否已完成、允许被启动（资格）
-  running: boolean   // 代理是否正在 frpc 进程中运行（事实）
+  running: boolean   // deprecated compatibility field; runtime belongs to Profile
   priority: number
   group_name?: string | null
   group_key?: string | null
@@ -132,12 +132,13 @@ export interface BindingRule {
 }
 
 // ── Binding start/stop response ──
-export interface BindingControlResponse {
-  binding_id: number
+export interface ProfileRuntimeResponse {
   running: boolean
-  process_status: 'started' | 'reloaded' | 'already_running' | 'stopped' | 'not_running'
+  desired_running: boolean
+  process_status: 'started' | 'reloaded' | 'already_running' | 'running' | 'stopped' | 'not_running'
   profile_id: number
-  profile_name: string
+  enabled_proxy_count: number
+  config_pending: boolean
 }
 
 // ── LocalVisitor (matches Rust LocalVisitor 1:1) ──

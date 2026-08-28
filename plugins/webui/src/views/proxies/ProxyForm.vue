@@ -23,9 +23,14 @@ const route = useRoute()
 const { t } = useI18n()
 const message = useMessage()
 const store = useProxyStore()
+const props = withDefaults(defineProps<{ proxy?: LocalProxy | null; embedded?: boolean }>(), {
+  proxy: null,
+  embedded: false,
+})
+const emit = defineEmits<{ saved: [LocalProxy]; cancel: [] }>()
 
-const isEdit = computed(() => !!route.params.id)
-const editId = computed(() => Number(route.params.id))
+const isEdit = computed(() => !!props.proxy?.id || !!route.params.id)
+const editId = computed(() => props.proxy?.id ?? Number(route.params.id))
 const loading = ref(false)
 
 const defaultProxy = (): LocalProxy => ({
@@ -107,14 +112,16 @@ async function handleSubmit() {
     payload.locations = splitList(form.value.locations)
     payload.allow_users = splitList(form.value.allow_users)
 
+    let saved: LocalProxy
     if (isEdit.value) {
-      await store.update(editId.value, payload)
+      saved = await store.update(editId.value, payload)
       message.success(t('proxy.updateSuccess'))
     } else {
-      await store.create(payload)
+      saved = await store.create(payload)
       message.success(t('proxy.createSuccess'))
     }
-    router.push({ name: 'proxies' })
+    if (props.embedded) emit('saved', saved)
+    else void router.push({ name: 'proxies' })
   } catch (e: any) {
     message.error(t(resolveErrorMessage(e?.code)))
   } finally {
@@ -122,26 +129,34 @@ async function handleSubmit() {
   }
 }
 
+function loadProxy(proxy: LocalProxy) {
+  form.value = {
+    ...proxy,
+    custom_domains: joinList(proxy.custom_domains) as any,
+    locations: joinList(proxy.locations) as any,
+    allow_users: joinList(proxy.allow_users) as any,
+  }
+}
+
+function handleCancel() {
+  if (props.embedded) emit('cancel')
+  else void router.push({ name: 'proxies' })
+}
+
 onMounted(async () => {
-  if (isEdit.value) {
+  if (props.proxy) {
+    loadProxy(props.proxy)
+  } else if (isEdit.value) {
     await store.fetchAll()
     const existing = store.proxies.find((p) => p.id === editId.value)
-    if (existing) {
-      // Join arrays to comma-separated strings for NInput
-      form.value = {
-        ...existing,
-        custom_domains: joinList(existing.custom_domains) as any,
-        locations: joinList(existing.locations) as any,
-        allow_users: joinList(existing.allow_users) as any,
-      }
-    }
+    if (existing) loadProxy(existing)
   }
 })
 </script>
 
 <template>
   <NSpace vertical>
-    <h3 style="margin: 0">
+    <h3 v-if="!embedded" style="margin: 0">
       {{ isEdit ? t('proxy.edit') : t('proxy.create') }}
     </h3>
 
@@ -199,7 +214,7 @@ onMounted(async () => {
       </template>
 
       <NSpace justify="end" style="margin-top: 16px">
-        <NButton @click="router.push({ name: 'proxies' })">
+        <NButton @click="handleCancel">
           {{ t('common.cancel') }}
         </NButton>
         <NButton type="primary" :loading="loading" @click="handleSubmit">

@@ -1,151 +1,66 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NCard, NGrid, NGi, NSpace, NStatistic, NSpin, NTag } from 'naive-ui'
+import { computed, onMounted, onUnmounted, watch } from 'vue'
+import { NCard } from 'naive-ui'
 import { useI18n } from '@/i18n'
+import { formatBytes, formatDuration, formatPercent } from '@/i18n/format'
 import { useSystemStore } from '@/stores/system'
+import { useMetricsStore } from '@/stores/metrics'
 import { useEnvironmentStore } from '@/stores/environments'
-import { getMetricsHistory } from '@/api/metrics'
-import type { MetricsHistory } from '@/api/types'
+import AppIcon from '@/components/icon/AppIcon.vue'
+import PageHeader from '@/components/common/PageHeader.vue'
+import DataState from '@/components/common/DataState.vue'
+import LastUpdated from '@/components/common/LastUpdated.vue'
+import RefreshButton from '@/components/common/RefreshButton.vue'
+import StatusBadge from '@/components/common/StatusBadge.vue'
+import MetricCard from '@/components/metrics/MetricCard.vue'
+import ProcessTable from '@/components/processes/ProcessTable.vue'
 import MetricChart from '@/components/MetricChart.vue'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const systemStore = useSystemStore()
+const metricsStore = useMetricsStore()
 const environmentStore = useEnvironmentStore()
-const history = ref<MetricsHistory>({ resources: [], traffic: [] })
-
-const cpuValues = computed(() => history.value.resources.map((sample) => sample.system_cpu_percent))
-const memoryValues = computed(() => history.value.resources.map((sample) => sample.system_memory_used_bytes / 1024 / 1024))
-const receivedValues = computed(() => history.value.traffic.map((sample) => sample.received_bytes))
-const sentValues = computed(() => history.value.traffic.map((sample) => sample.sent_bytes))
-
-async function fetchHistory() {
-  const response = await getMetricsHistory(environmentStore.activeId ?? undefined)
-  history.value = response.data ?? { resources: [], traffic: [] }
-}
-
-let timer: ReturnType<typeof setInterval> | null = null
-
-onMounted(() => {
-  systemStore.fetchStatus()
-  environmentStore.fetchAll().then(fetchHistory)
-  timer = setInterval(() => { systemStore.fetchStatus(); fetchHistory() }, 10_000)
-})
-
-watch(() => environmentStore.activeId, () => fetchHistory())
-
-onUnmounted(() => {
-  if (timer) clearInterval(timer)
-})
-
-function formatUptime(secs: number): string {
-  const h = Math.floor(secs / 3600)
-  const m = Math.floor((secs % 3600) / 60)
-  const s = secs % 60
-  return `${h}h ${m}m ${s}s`
-}
+const isZh = computed(() => locale.value === 'zh')
+const history = computed(() => metricsStore.history)
+const latestResource = computed(() => history.value.resources.at(-1))
+const cpuValues = computed(() => history.value.resources.map(sample => sample.system_cpu_percent))
+const memoryValues = computed(() => history.value.resources.map(sample => sample.system_memory_used_bytes))
+const receivedValues = computed(() => history.value.traffic.map(sample => sample.received_bytes))
+const sentValues = computed(() => history.value.traffic.map(sample => sample.sent_bytes))
+const resourceTimestamps = computed(() => history.value.resources.map(sample => sample.timestamp))
+const trafficTimestamps = computed(() => history.value.traffic.map(sample => sample.timestamp))
+const memoryPercentage = computed(() => latestResource.value?.system_memory_total_bytes ? Math.round(latestResource.value.system_memory_used_bytes / latestResource.value.system_memory_total_bytes * 100) : 0)
+const refresh = () => Promise.all([systemStore.fetchStatus(), metricsStore.refresh()])
+watch(() => environmentStore.activeId, id => { void metricsStore.selectEnvironment(id) })
+onMounted(() => { void metricsStore.selectEnvironment(environmentStore.activeId); metricsStore.startPolling() })
+onUnmounted(() => metricsStore.stopPolling())
 </script>
 
 <template>
-  <NSpin :show="systemStore.loading && !systemStore.status">
-    <NGrid cols="1 s:2 m:3 l:4" :x-gap="16" :y-gap="16">
-      <!-- State -->
-      <NGi>
-        <NCard size="small">
-          <NStatistic label="State">
-            <NTag :type="systemStore.status?.active_frpc_instances ? 'success' : 'default'">
-              {{ systemStore.status?.state ?? '-' }}
-            </NTag>
-          </NStatistic>
-        </NCard>
-      </NGi>
+  <PageHeader :title="t('nav.dashboard')" :description="isZh ? '系统运行状态、资源使用与流量趋势概览。' : 'System health, resource usage, and traffic trends.'">
+    <template #icon><span class="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary"><AppIcon name="dashboard" :size="21" /></span></template>
+    <template #status><StatusBadge :status="systemStore.error ? 'stale' : systemStore.status?.active_frpc_instances ? 'running' : 'stopped'" :label="systemStore.status?.state ?? 'unknown'" /></template>
+    <template #actions><LastUpdated :value="systemStore.lastUpdated" :stale="systemStore.stale" /><RefreshButton :loading="systemStore.refreshing || metricsStore.refreshing" @click="refresh" /></template>
+  </PageHeader>
 
-      <!-- Uptime -->
-      <NGi>
-        <NCard size="small">
-          <NStatistic :label="t('status.uptime', { duration: '' })" :value="systemStore.status ? formatUptime(systemStore.status.uptime_secs) : '-'" />
-        </NCard>
-      </NGi>
+  <DataState :phase="systemStore.phase" :error="systemStore.error" @retry="refresh">
+    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <MetricCard :label="isZh ? '运行时间' : 'Uptime'" :value="systemStore.currentUptimeSecs !== null ? formatDuration(systemStore.currentUptimeSecs, locale) : '—'" icon="clock" />
+      <MetricCard :label="isZh ? '运行中的 frpc' : 'Active frpc'" :value="systemStore.status?.active_frpc_instances ?? 0" icon="running" :detail="`${systemStore.status?.total_profiles ?? 0} ${isZh ? '个配置' : 'profiles'}`" />
+      <MetricCard :label="isZh ? '系统 CPU' : 'System CPU'" :value="latestResource ? formatPercent(latestResource.system_cpu_percent, locale) : '—'" icon="cpu" :percentage="latestResource?.system_cpu_percent ?? 0" />
+      <MetricCard :label="isZh ? '系统内存' : 'System memory'" :value="latestResource ? formatBytes(latestResource.system_memory_used_bytes, locale) : '—'" icon="memory" :percentage="memoryPercentage" />
+    </div>
 
-      <!-- Active frpc -->
-      <NGi>
-        <NCard size="small">
-          <NStatistic :label="t('status.frpcRunning', { count: 0 })" :value="systemStore.status?.active_frpc_instances ?? 0" />
-        </NCard>
-      </NGi>
+    <div class="mt-4 grid gap-4 lg:grid-cols-2">
+      <NCard size="small" :bordered="false" class="shadow-card"><template #header><div class="flex items-center gap-2"><AppIcon name="cpu" class="text-primary" />{{ isZh ? '主机 CPU 历史' : 'Host CPU history' }}</div></template><MetricChart :values="cpuValues" :timestamps="resourceTimestamps" :format-value="value => formatPercent(value, locale)" /></NCard>
+      <NCard size="small" :bordered="false" class="shadow-card"><template #header><div class="flex items-center gap-2"><AppIcon name="memory" class="text-primary" />{{ isZh ? '主机内存历史' : 'Host memory history' }}</div></template><MetricChart :values="memoryValues" :timestamps="resourceTimestamps" color="var(--ui-primary)" :format-value="value => formatBytes(value, locale)" /></NCard>
+      <NCard size="small" :bordered="false" class="shadow-card"><template #header><div class="flex items-center gap-2"><AppIcon name="arrow-down" class="text-success" />{{ isZh ? '接收流量' : 'Traffic received' }}</div></template><MetricChart :values="receivedValues" :timestamps="trafficTimestamps" color="var(--ui-success)" :format-value="value => formatBytes(value, locale)" :empty-text="isZh ? '暂无流量样本' : 'No traffic samples yet'" /></NCard>
+      <NCard size="small" :bordered="false" class="shadow-card"><template #header><div class="flex items-center gap-2"><AppIcon name="arrow-up" class="text-warning" />{{ isZh ? '发送流量' : 'Traffic sent' }}</div></template><MetricChart :values="sentValues" :timestamps="trafficTimestamps" color="var(--ui-warning)" :format-value="value => formatBytes(value, locale)" :empty-text="isZh ? '暂无流量样本' : 'No traffic samples yet'" /></NCard>
+    </div>
 
-      <!-- Total Profiles -->
-      <NGi>
-        <NCard size="small">
-          <NStatistic label="Profiles" :value="systemStore.status?.total_profiles ?? 0" />
-        </NCard>
-      </NGi>
-
-      <!-- Total Proxies -->
-      <NGi>
-        <NCard size="small">
-          <NStatistic label="Proxies" :value="systemStore.status?.total_proxies ?? 0" />
-        </NCard>
-      </NGi>
-
-      <!-- Total Bindings -->
-      <NGi>
-        <NCard size="small">
-          <NStatistic label="Bindings" :value="systemStore.status?.total_bindings ?? 0" />
-        </NCard>
-      </NGi>
-
-      <!-- Total Visitors -->
-      <NGi>
-        <NCard size="small">
-          <NStatistic label="Visitors" :value="systemStore.status?.total_visitors ?? 0" />
-        </NCard>
-      </NGi>
-    </NGrid>
-
-    <NGrid cols="1 m:2" :x-gap="16" :y-gap="16" style="margin-top: 16px">
-      <NGi><NCard title="System CPU" size="small"><MetricChart :values="cpuValues" unit="%" /></NCard></NGi>
-      <NGi><NCard title="System memory" size="small"><MetricChart :values="memoryValues" color="#2080f0" unit=" MiB" /></NCard></NGi>
-      <NGi><NCard title="Traffic received" size="small"><MetricChart :values="receivedValues" color="#18a058" unit=" B" empty-text="No traffic samples yet" /></NCard></NGi>
-      <NGi><NCard title="Traffic sent" size="small"><MetricChart :values="sentValues" color="#f0a020" unit=" B" empty-text="No traffic samples yet" /></NCard></NGi>
-    </NGrid>
-
-    <!-- Process List -->
-    <NCard
-      v-if="systemStore.status?.processes?.length"
-      title="FRP Processes"
-      size="small"
-      style="margin-top: 16px"
-    >
-      <table style="width: 100%; border-collapse: collapse">
-        <thead>
-          <tr style="text-align: left; border-bottom: 1px solid var(--n-border-color)">
-            <th style="padding: 8px">Profile</th>
-            <th style="padding: 8px">PID</th>
-            <th style="padding: 8px">Status</th>
-            <th style="padding: 8px">Restarts</th>
-            <th style="padding: 8px">Config</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="p in systemStore.status.processes"
-            :key="p.profile_id"
-            style="border-bottom: 1px solid var(--n-border-color)"
-          >
-            <td style="padding: 8px">{{ p.profile_name }}</td>
-            <td style="padding: 8px">{{ p.pid ?? '-' }}</td>
-            <td style="padding: 8px">
-              <NTag :type="p.running ? 'success' : 'error'" size="small">
-                {{ p.running ? 'Running' : 'Stopped' }}
-              </NTag>
-            </td>
-            <td style="padding: 8px">{{ p.restart_count }}</td>
-            <td style="padding: 8px; font-size: 12px; color: var(--n-text-color-3)">
-              {{ p.config_path }}
-            </td>
-          </tr>
-        </tbody>
-      </table>
+    <NCard class="mt-4 shadow-card" :bordered="false" :title="isZh ? 'FRP 进程' : 'FRP processes'">
+      <ProcessTable v-if="systemStore.status?.processes.length" :processes="systemStore.status.processes" />
+      <div v-else class="py-10 text-center text-sm text-foreground-muted">{{ isZh ? '当前没有 frpc 进程' : 'No frpc processes' }}</div>
     </NCard>
-  </NSpin>
+  </DataState>
 </template>

@@ -10,9 +10,6 @@ import {
   NSpace,
   NSwitch,
   NSelect,
-  NDrawer,
-  NDrawerContent,
-  NSpin,
   useMessage,
   type FormRules,
 } from 'naive-ui'
@@ -26,9 +23,14 @@ const route = useRoute()
 const { t } = useI18n()
 const message = useMessage()
 const store = useProfileStore()
+const props = withDefaults(defineProps<{ profile?: FrpsProfile | null; embedded?: boolean }>(), {
+  profile: null,
+  embedded: false,
+})
+const emit = defineEmits<{ saved: [FrpsProfile]; cancel: [] }>()
 
-const isEdit = computed(() => !!route.params.id)
-const editId = computed(() => Number(route.params.id))
+const isEdit = computed(() => !!props.profile?.id || !!route.params.id)
+const editId = computed(() => props.profile?.id ?? Number(route.params.id))
 const loading = ref(false)
 
 const defaultProfile = (): FrpsProfile => ({
@@ -52,7 +54,7 @@ const defaultProfile = (): FrpsProfile => ({
   quic_keepalive_period: null,
   quic_max_idle_timeout: null,
   quic_max_incoming_streams: null,
-  auth_method: null,
+  auth_method: 'none',
   oidc_client_id: null,
   oidc_client_secret: null,
   oidc_token_endpoint_url: null,
@@ -83,6 +85,7 @@ const transportOptions = [
 ]
 
 const authOptions = [
+  { label: t('profile.authNone'), value: 'none' },
   { label: 'Token', value: 'token' },
   { label: 'OIDC', value: 'oidc' },
 ]
@@ -96,14 +99,16 @@ const rules: FormRules = {
 async function handleSubmit() {
   loading.value = true
   try {
+    let saved: FrpsProfile
     if (isEdit.value) {
-      await store.update(editId.value, form.value)
+      saved = await store.update(editId.value, form.value)
       message.success(t('profile.updateSuccess'))
     } else {
-      await store.create(form.value)
+      saved = await store.create(form.value)
       message.success(t('profile.createSuccess'))
     }
-    router.push({ name: 'profiles' })
+    if (props.embedded) emit('saved', saved)
+    else void router.push({ name: 'profiles' })
   } catch (e: any) {
     message.error(t(resolveErrorMessage(e?.code)))
   } finally {
@@ -111,18 +116,29 @@ async function handleSubmit() {
   }
 }
 
+function handleCancel() {
+  if (props.embedded) emit('cancel')
+  else void router.push({ name: 'profiles' })
+}
+
 onMounted(async () => {
-  if (isEdit.value) {
+  if (props.profile) {
+    form.value = { ...props.profile }
+    form.value.auth_method ??= 'token'
+  } else if (isEdit.value) {
     await store.fetchAll()
     const existing = store.profiles.find((p) => p.id === editId.value)
-    if (existing) form.value = { ...existing }
+    if (existing) {
+      form.value = { ...existing }
+      form.value.auth_method ??= 'token'
+    }
   }
 })
 </script>
 
 <template>
   <NSpace vertical>
-    <h3 style="margin: 0">
+    <h3 v-if="!embedded" style="margin: 0">
       {{ isEdit ? t('profile.edit') : t('profile.create') }}
     </h3>
 
@@ -146,12 +162,11 @@ onMounted(async () => {
         <NSelect
           v-model:value="form.auth_method"
           :options="authOptions"
-          clearable
           :placeholder="t('profile.authPlaceholder')"
         />
       </NFormItem>
       <NFormItem
-        v-if="!form.auth_method || form.auth_method === 'token'"
+        v-if="form.auth_method === 'token'"
         :label="t('profile.token')"
         path="token"
       >
@@ -162,6 +177,23 @@ onMounted(async () => {
           :placeholder="isEdit ? t('profile.tokenKeep') : ''"
         />
       </NFormItem>
+      <template v-if="form.auth_method === 'oidc'">
+        <NFormItem label="OIDC Client ID">
+          <NInput v-model:value="form.oidc_client_id" />
+        </NFormItem>
+        <NFormItem label="OIDC Client Secret">
+          <NInput v-model:value="form.oidc_client_secret" type="password" show-password-on="click" />
+        </NFormItem>
+        <NFormItem label="OIDC Token Endpoint URL">
+          <NInput v-model:value="form.oidc_token_endpoint_url" placeholder="https://issuer.example.com/oauth/token" />
+        </NFormItem>
+        <NFormItem label="OIDC Audience">
+          <NInput v-model:value="form.oidc_audience" />
+        </NFormItem>
+        <NFormItem label="OIDC Scope">
+          <NInput v-model:value="form.oidc_scope" />
+        </NFormItem>
+      </template>
 
       <!-- TLS -->
       <NFormItem label="TLS Enable">
@@ -194,7 +226,7 @@ onMounted(async () => {
       </NFormItem>
 
       <NSpace justify="end" style="margin-top: 16px">
-        <NButton @click="router.push({ name: 'profiles' })">
+        <NButton @click="handleCancel">
           {{ t('common.cancel') }}
         </NButton>
         <NButton type="primary" :loading="loading" @click="handleSubmit">

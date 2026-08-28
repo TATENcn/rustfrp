@@ -5,8 +5,13 @@ import {
   NButton,
   NSpace,
   NInput,
+  NInputNumber,
   NSelect,
   NSwitch,
+  NModal,
+  NCard,
+  NForm,
+  NFormItem,
   useMessage,
   type DataTableColumns,
 } from 'naive-ui'
@@ -17,6 +22,8 @@ import { resolveErrorMessage } from '@/api/errors'
 import type { LocalVisitor, VisitorType } from '@/api/types'
 import ErrorAlert from '@/components/ErrorAlert.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import PageHeader from '@/components/common/PageHeader.vue'
+import AppIcon from '@/components/icon/AppIcon.vue'
 
 const { t } = useI18n()
 const message = useMessage()
@@ -29,7 +36,7 @@ const deleting = ref<LocalVisitor | null>(null)
 const deleteLoading = ref(false)
 const saving = ref(false)
 
-const newVisitor = ref<Partial<LocalVisitor>>({
+const defaultVisitor = (): Partial<LocalVisitor> => ({
   name: '',
   visitor_type: 'stcp',
   server_name: '',
@@ -42,6 +49,7 @@ const newVisitor = ref<Partial<LocalVisitor>>({
   use_compression: true,
   profile_id: 0,
 })
+const newVisitor = ref<Partial<LocalVisitor>>(defaultVisitor())
 
 const typeOptions: { label: string; value: VisitorType }[] = [
   { label: 'STCP', value: 'stcp' },
@@ -93,6 +101,11 @@ function openEdit(visitor: LocalVisitor) {
   editing.value = { ...visitor }
 }
 
+function closeCreate() {
+  showCreate.value = false
+  newVisitor.value = defaultVisitor()
+}
+
 async function handleCreate() {
   if (!newVisitor.value.name || !newVisitor.value.server_name) {
     message.error('Name and Server Name are required')
@@ -102,8 +115,7 @@ async function handleCreate() {
   try {
     await store.create(newVisitor.value as LocalVisitor)
     message.success(t('visitor.createSuccess'))
-    showCreate.value = false
-    newVisitor.value = { name: '', visitor_type: 'stcp', server_name: '', server_user: null, bind_addr: null, bind_port: -1, secret_key: null, enabled: true, use_encryption: true, use_compression: true, profile_id: 0 }
+    closeCreate()
   } catch (e: any) {
     message.error(t(resolveErrorMessage(e?.code)))
   } finally {
@@ -146,65 +158,11 @@ onMounted(async () => {
 
 <template>
   <div>
+    <PageHeader :title="t('nav.visitors')">
+      <template #icon><span class="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary"><AppIcon name="visitors" :size="21" /></span></template>
+      <template #actions><NInput v-model:value="search" :placeholder="t('common.search')" clearable style="width: min(240px, 100%)"><template #prefix><AppIcon name="search" :size="16" /></template></NInput><NButton type="primary" @click="showCreate = true">{{ t('visitor.create') }}</NButton></template>
+    </PageHeader>
     <ErrorAlert :error="store.error" @dismiss="store.error = null" />
-
-    <NSpace justify="space-between" style="margin-bottom: 16px">
-      <NInput
-        v-model:value="search"
-        :placeholder="t('common.search')"
-        clearable
-        style="width: 240px"
-      />
-      <NButton type="primary" @click="showCreate = !showCreate">
-        {{ t('visitor.create') }}
-      </NButton>
-    </NSpace>
-
-    <!-- Create form -->
-    <div v-if="showCreate" style="margin-bottom: 16px; padding: 12px; border: 1px solid var(--n-border-color); border-radius: 4px">
-      <NSpace vertical style="width: 100%">
-        <NSpace>
-          <NInput v-model:value="newVisitor.name" placeholder="Name" style="width: 150px" />
-          <NSelect v-model:value="newVisitor.visitor_type" :options="typeOptions" style="width: 100px" />
-          <NInput v-model:value="newVisitor.server_name" placeholder="Server Name" style="width: 150px" />
-          <NInput v-model:value="newVisitor.bind_addr" placeholder="Bind Addr (opt)" style="width: 140px" />
-          <NInput v-model:value="newVisitor.secret_key" placeholder="Secret Key (opt)" style="width: 140px" />
-          <NSelect
-            v-model:value="newVisitor.profile_id"
-            :options="profileStore.profiles.map(p => ({ label: p.name, value: p.id! }))"
-            placeholder="Profile"
-            style="width: 160px"
-          />
-        </NSpace>
-        <NSpace>
-          <NButton type="primary" size="small" :loading="saving" @click="handleCreate">{{ t('common.save') }}</NButton>
-          <NButton size="small" @click="showCreate = false">{{ t('common.cancel') }}</NButton>
-        </NSpace>
-      </NSpace>
-    </div>
-
-    <!-- Edit modal -->
-    <div v-if="editing" style="margin-bottom: 16px; padding: 12px; border: 1px solid var(--n-info-color); border-radius: 4px">
-      <NSpace vertical style="width: 100%">
-        <div style="font-weight: 600">{{ t('visitor.edit') }}: {{ editing.name }}</div>
-        <NSpace>
-          <NInput v-model:value="editing.name" placeholder="Name" style="width: 150px" />
-          <NInput v-model:value="editing.server_name" placeholder="Server Name" style="width: 150px" />
-          <NInput v-model:value="editing.bind_addr" placeholder="Bind Addr" style="width: 140px" />
-          <NInput v-model:value="editing.secret_key" placeholder="Secret Key" style="width: 140px" />
-          <NSelect
-            v-model:value="editing.profile_id"
-            :options="profileStore.profiles.map(p => ({ label: p.name, value: p.id! }))"
-            style="width: 160px"
-          />
-          <NSwitch v-model:value="editing.enabled" />
-        </NSpace>
-        <NSpace>
-          <NButton type="primary" size="small" :loading="saving" @click="handleUpdate">{{ t('common.save') }}</NButton>
-          <NButton size="small" @click="editing = null">{{ t('common.cancel') }}</NButton>
-        </NSpace>
-      </NSpace>
-    </div>
 
     <NDataTable
       :columns="columns"
@@ -221,5 +179,72 @@ onMounted(async () => {
       @confirm="confirmDelete"
       @cancel="deleting = null"
     />
+
+    <NModal v-model:show="showCreate" :mask-closable="false">
+      <NCard
+        :title="t('visitor.create')"
+        :bordered="false"
+        closable
+        role="dialog"
+        aria-modal="true"
+        style="width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 48px)"
+        content-style="overflow-y: auto"
+        @close="closeCreate"
+      >
+        <NForm label-placement="top">
+          <NFormItem label="Name" required><NInput v-model:value="newVisitor.name" /></NFormItem>
+          <NFormItem label="Type"><NSelect v-model:value="newVisitor.visitor_type" :options="typeOptions" /></NFormItem>
+          <NFormItem label="Server Name" required><NInput v-model:value="newVisitor.server_name" /></NFormItem>
+          <NFormItem label="Server User"><NInput v-model:value="newVisitor.server_user" /></NFormItem>
+          <NFormItem label="Bind Address"><NInput v-model:value="newVisitor.bind_addr" placeholder="127.0.0.1" /></NFormItem>
+          <NFormItem label="Bind Port"><NInputNumber v-model:value="newVisitor.bind_port" :min="-1" :max="65535" /></NFormItem>
+          <NFormItem label="Secret Key"><NInput v-model:value="newVisitor.secret_key" type="password" show-password-on="click" /></NFormItem>
+          <NFormItem label="Profile">
+            <NSelect v-model:value="newVisitor.profile_id" :options="profileStore.profiles.map(p => ({ label: p.name, value: p.id! }))" />
+          </NFormItem>
+          <NFormItem :label="t('common.enabled')"><NSwitch v-model:value="newVisitor.enabled" /></NFormItem>
+          <NFormItem label="Encryption"><NSwitch v-model:value="newVisitor.use_encryption" /></NFormItem>
+          <NFormItem label="Compression"><NSwitch v-model:value="newVisitor.use_compression" /></NFormItem>
+          <NSpace justify="end">
+            <NButton @click="closeCreate">{{ t('common.cancel') }}</NButton>
+            <NButton type="primary" :loading="saving" @click="handleCreate">{{ t('common.save') }}</NButton>
+          </NSpace>
+        </NForm>
+      </NCard>
+    </NModal>
+
+    <NModal :show="!!editing" :mask-closable="false" @update:show="value => { if (!value) editing = null }">
+      <NCard
+        v-if="editing"
+        :title="t('visitor.edit')"
+        :bordered="false"
+        closable
+        role="dialog"
+        aria-modal="true"
+        style="width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 48px)"
+        content-style="overflow-y: auto"
+        @close="editing = null"
+      >
+        <NForm label-placement="top">
+          <NFormItem label="Name" required><NInput v-model:value="editing.name" /></NFormItem>
+          <NFormItem label="Type"><NSelect v-model:value="editing.visitor_type" :options="typeOptions" /></NFormItem>
+          <NFormItem label="Server Name" required><NInput v-model:value="editing.server_name" /></NFormItem>
+          <NFormItem label="Server User"><NInput v-model:value="editing.server_user" /></NFormItem>
+          <NFormItem label="Bind Address"><NInput v-model:value="editing.bind_addr" /></NFormItem>
+          <NFormItem label="Bind Port"><NInputNumber v-model:value="editing.bind_port" :min="-1" :max="65535" /></NFormItem>
+          <NFormItem label="Secret Key"><NInput v-model:value="editing.secret_key" type="password" show-password-on="click" /></NFormItem>
+          <NFormItem label="Profile">
+            <NSelect v-model:value="editing.profile_id" :options="profileStore.profiles.map(p => ({ label: p.name, value: p.id! }))" />
+          </NFormItem>
+          <NFormItem :label="t('common.enabled')"><NSwitch v-model:value="editing.enabled" /></NFormItem>
+          <NFormItem label="Encryption"><NSwitch v-model:value="editing.use_encryption" /></NFormItem>
+          <NFormItem label="Compression"><NSwitch v-model:value="editing.use_compression" /></NFormItem>
+          <NSpace justify="end">
+            <NButton @click="editing = null">{{ t('common.cancel') }}</NButton>
+            <NButton type="primary" :loading="saving" @click="handleUpdate">{{ t('common.save') }}</NButton>
+          </NSpace>
+        </NForm>
+      </NCard>
+    </NModal>
   </div>
 </template>

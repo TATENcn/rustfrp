@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { BindingRule, BindingControlResponse } from '@/api/types'
+import type { BindingRule } from '@/api/types'
 import * as bindingsApi from '@/api/bindings'
 import { extractApiError } from '@/api/errors'
 
@@ -49,34 +49,10 @@ export const useBindingStore = defineStore('bindings', () => {
     return resp.data!
   }
 
-  async function startBinding(id: number): Promise<BindingControlResponse> {
-    const resp = await bindingsApi.startBinding(id)
-    if (resp.data) {
-      // Update local binding state
-      const idx = bindings.value.findIndex((b) => b.id === id)
-      if (idx !== -1) {
-        bindings.value[idx] = { ...bindings.value[idx], running: true }
-      }
-    }
-    return resp.data!
-  }
-
-  async function stopBinding(id: number): Promise<BindingControlResponse> {
-    const resp = await bindingsApi.stopBinding(id)
-    if (resp.data) {
-      // Update local binding state
-      const idx = bindings.value.findIndex((b) => b.id === id)
-      if (idx !== -1) {
-        bindings.value[idx] = { ...bindings.value[idx], running: false }
-      }
-    }
-    return resp.data!
-  }
-
   async function remove(id: number) {
     await bindingsApi.deleteBinding(id)
     bindings.value = bindings.value.filter((b) => b.id !== id)
   }
 
-  return { bindings, loading, error, fetchAll, create, update, toggle, startBinding, stopBinding, remove }
+  return { bindings, loading, error, fetchAll, create, update, toggle, remove }
 })

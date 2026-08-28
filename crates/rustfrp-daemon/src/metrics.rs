@@ -7,6 +7,9 @@ use std::sync::Arc;
 use sysinfo::{Pid, ProcessesToUpdate, System};
 use tokio::sync::RwLock;
 
+pub const RESOURCE_SAMPLE_INTERVAL_SECS: u64 = 3;
+pub const METRICS_HISTORY_CAPACITY: usize = 1_200;
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ProcessResourceSample {
     pub profile_id: i64,
@@ -104,7 +107,10 @@ impl MetricsStore {
                         processes: process_samples,
                     })
                     .await;
-                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(
+                    RESOURCE_SAMPLE_INTERVAL_SECS,
+                ))
+                .await;
             }
         });
     }

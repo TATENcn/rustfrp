@@ -37,7 +37,7 @@ jobs:
     name: Rust quality gate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -70,7 +70,7 @@ jobs:
     name: WebUI quality gate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -87,6 +87,10 @@ jobs:
       - name: Check translations
         working-directory: plugins/webui
         run: bun scripts/check-i18n-keys.ts
+
+      - name: Unit tests
+        working-directory: plugins/webui
+        run: bun test
 
       - name: Build embedded WebUI
         working-directory: plugins/webui

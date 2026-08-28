@@ -49,7 +49,7 @@ pub struct FrpsProfile {
     pub quic_max_idle_timeout: Option<i32>,
     /// QUIC max incoming streams.
     pub quic_max_incoming_streams: Option<i32>,
-    /// Authentication method: "token" or "oidc". Default: token.
+    /// Authentication method: "none", "token" or "oidc". Legacy `None` means token.
     pub auth_method: Option<String>,
     /// OIDC client ID (when auth_method = "oidc").
     pub oidc_client_id: Option<String>,
@@ -466,8 +466,8 @@ pub struct BindingRule {
     pub id: Option<i64>,
     pub profile_id: i64,
     pub proxy_id: i64,
-    pub enabled: bool, // 配置是否已完成、允许被启动（资格）
-    pub running: bool, // 代理是否正在 frpc 进程中运行（事实）
+    pub enabled: bool, // Whether this proxy is included in the Profile configuration.
+    pub running: bool, // Deprecated compatibility mirror; runtime belongs to the Profile.
     pub priority: i32,
     pub group_name: Option<String>,
     pub group_key: Option<String>,

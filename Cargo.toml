@@ -30,7 +30,7 @@ toml = "0.8"
 rusqlite = { version = "0.31", features = ["bundled", "vtab"] }
 
 # === 错误处理 ===
-thiserror = "1"
+thiserror = "2"
 async-trait = "0.1"
 anyhow = "1"                # 仅应用层（monitor、gui），核心层禁止使用
 
@@ -57,12 +57,12 @@ clap = { version = "4", features = ["derive", "env"] }
 # === HTTP 客户端（仅 monitor 和 frp 管理 crate 使用） ===
 reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
 wasmtime = { version = "=36.0.14", default-features = false, features = ["std", "runtime", "cranelift", "wat"] }
-sysinfo = { version = "0.37.2", default-features = false, features = ["system"] }
+sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
 
 # === 开发 / 测试（各 crate 通过 dev-dependencies 继承） ===
 tempfile = "3"
 test-log = "0.2"
-rstest = "0.22"
+rstest = "0.26"
 mockall = "0.13"
 criterion = "0.5"
 proptest = "1.5"

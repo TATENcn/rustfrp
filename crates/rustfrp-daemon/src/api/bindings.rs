@@ -7,8 +7,6 @@
 //! - PUT    /api/v1/bindings/{id}       — update a binding
 //! - DELETE /api/v1/bindings/{id}       — delete a binding
 //! - PATCH  /api/v1/bindings/{id}/toggle — toggle enabled/disabled
-//! - POST   /api/v1/bindings/{id}/start  — start a binding (launch/reload frpc)
-//! - POST   /api/v1/bindings/{id}/stop   — stop a binding (stop/reload frpc)
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -98,6 +96,9 @@ pub async fn create(
             }),
         )
     })?;
+    reconcile_profile_if_running(&state, binding.profile_id)
+        .await
+        .map_err(api_error)?;
 
     binding.id = Some(id);
     Ok((
@@ -116,10 +117,13 @@ pub async fn update(
     binding.updated_at = Utc::now().to_rfc3339();
     // Preserve running state from existing record — start/stop endpoints
     // are the only way to change running state.
-    if let Ok(existing) = state.db.get_binding(id).await {
+    let previous_profile_id = if let Ok(existing) = state.db.get_binding(id).await {
         binding.created_at = existing.created_at;
         binding.running = existing.running;
-    }
+        Some(existing.profile_id)
+    } else {
+        None
+    };
 
     state.db.update_binding(&binding).await.map_err(|e| {
         (
@@ -132,6 +136,16 @@ pub async fn update(
             }),
         )
     })?;
+    if let Some(profile_id) = previous_profile_id {
+        reconcile_profile_if_running(&state, profile_id)
+            .await
+            .map_err(api_error)?;
+    }
+    if previous_profile_id != Some(binding.profile_id) {
+        reconcile_profile_if_running(&state, binding.profile_id)
+            .await
+            .map_err(api_error)?;
+    }
 
     let updated = state.db.get_binding(id).await.map_err(|e| {
         (
@@ -153,6 +167,7 @@ pub async fn delete(
     State(state): State<ApiState>,
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse<()>>, (axum::http::StatusCode, Json<ApiResponse<()>>)> {
+    let existing = state.db.get_binding(id).await.map_err(api_error)?;
     state.db.delete_binding(id).await.map_err(|e| {
         (
             super::response::status_code(&e),
@@ -164,6 +179,9 @@ pub async fn delete(
             }),
         )
     })?;
+    reconcile_profile_if_running(&state, existing.profile_id)
+        .await
+        .map_err(api_error)?;
 
     Ok(Json(ApiResponse {
         success: true,
@@ -187,15 +205,7 @@ pub async fn toggle(
     Path(id): Path<i64>,
     Json(body): Json<ToggleBody>,
 ) -> Result<Json<ApiResponse<BindingRule>>, (axum::http::StatusCode, Json<ApiResponse<()>>)> {
-    // If disabling a running binding, auto-stop first
-    if !body.enabled {
-        if let Ok(existing) = state.db.get_binding(id).await {
-            if existing.running {
-                // Execute stop flow (inline, no API round-trip)
-                let _ = stop_binding_inner(&state, id, &existing).await;
-            }
-        }
-    }
+    let existing = state.db.get_binding(id).await.map_err(api_error)?;
 
     state
         .db
@@ -224,12 +234,58 @@ pub async fn toggle(
             }),
         )
     })?;
+    reconcile_profile_if_running(&state, existing.profile_id)
+        .await
+        .map_err(api_error)?;
 
     Ok(Json(ApiResponse::ok(binding)))
 }
 
-// ── Binding start/stop response ──
+async fn reconcile_profile_if_running(
+    state: &ApiState,
+    profile_id: i64,
+) -> Result<(), rustfrp_client::error::ClientError> {
+    if !state.process_manager.is_running(profile_id).await {
+        return Ok(());
+    }
+    let profile = state.db.get_profile(profile_id).await?;
+    let generated = rustfrp_client::config::generator::generate_frpc_toml_for_profile(
+        &state.db,
+        profile_id,
+        &state.config_dir,
+    )
+    .await?;
+    if generated.is_some() {
+        state
+            .process_manager
+            .ensure_running(profile_id, &profile.name)
+            .await?;
+    } else {
+        state.process_manager.stop(profile_id).await?;
+        state
+            .db
+            .set_profile_desired_running(profile_id, false)
+            .await?;
+    }
+    Ok(())
+}
 
+fn api_error(
+    error: rustfrp_client::error::ClientError,
+) -> (axum::http::StatusCode, Json<ApiResponse<()>>) {
+    (
+        super::response::status_code(&error),
+        Json(ApiResponse {
+            success: false,
+            data: None,
+            count: None,
+            error: Some(super::response::ApiError::from_client_error(&error)),
+        }),
+    )
+}
+
+/* Profile runtime control intentionally lives in api::profiles. BindingRule is
+ * only a Profile/Proxy membership and must never be treated as a process. */
 #[derive(Debug, Serialize)]
 pub struct BindingControlResponse {
     pub binding_id: i64,
@@ -238,13 +294,10 @@ pub struct BindingControlResponse {
     pub profile_id: i64,
     pub profile_name: String,
 }
-
-// ── POST /api/v1/bindings/:id/start ──
-
-pub async fn start_binding(
-    State(state): State<ApiState>,
-    Path(id): Path<i64>,
-) -> Result<Json<ApiResponse<BindingControlResponse>>, (StatusCode, Json<ApiResponse<()>>)> {
+/*
+pub async fn legacy_start_binding_removed(
+    State(state): State<ApiState>, Path(id): Path<i64>,
+) -> Result<Json<ApiResponse<()>>, (StatusCode, Json<ApiResponse<()>>)> {
     let binding = state.db.get_binding(id).await.map_err(|e| {
         (
             super::response::status_code(&e),
@@ -386,6 +439,7 @@ pub async fn start_binding(
         profile_name: profile.name,
     })))
 }
+*/
 
 // ── POST /api/v1/bindings/:id/stop ──
 

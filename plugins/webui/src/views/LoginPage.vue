@@ -12,6 +12,7 @@ import {
 } from 'naive-ui'
 import { useI18n } from '@/i18n'
 import { healthCheck } from '@/api/system'
+import AppIcon from '@/components/icon/AppIcon.vue'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -42,8 +43,13 @@ async function handleLogin() {
 </script>
 
 <template>
-  <div style="display: flex; justify-content: center; align-items: center; height: 100vh">
-    <NCard style="width: 400px" :title="t('app.title')">
+  <div class="grid min-h-screen place-items-center bg-canvas p-6">
+    <NCard class="w-full max-w-md shadow-panel" :bordered="false">
+      <div class="mb-7 flex flex-col items-center text-center">
+        <span class="mb-4 grid size-12 place-items-center rounded-2xl bg-primary text-white"><AppIcon name="proxies" :size="24" /></span>
+        <h1 class="m-0 text-xl font-semibold text-foreground">{{ t('app.title') }}</h1>
+        <p class="mt-2 mb-0 text-sm text-foreground-muted">Secure access to the RustFRP control plane</p>
+      </div>
       <NForm @submit.prevent="handleLogin">
         <NFormItem :label="t('auth.tokenLabel')">
           <NInput
@@ -53,8 +59,8 @@ async function handleLogin() {
             :disabled="loading"
           />
         </NFormItem>
-        <NSpace justify="end">
-          <NButton type="primary" :loading="loading" @click="handleLogin">
+        <NSpace vertical>
+          <NButton block type="primary" :loading="loading" @click="handleLogin">
             {{ t('auth.login') }}
           </NButton>
         </NSpace>

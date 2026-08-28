@@ -8,6 +8,26 @@
 
 RustFRP 是面向个人、家庭实验室和团队运维的 FRP 管理工具。安装后打开浏览器，就能添加服务器、创建端口映射、启动穿透并查看运行状态。它兼容原生 FRP，不改变 FRP 协议，已有的 `frpc.toml` 也可以直接迁移进来。
 
+## 新版 Web 管理界面
+
+新版前端提供统一的中英文界面、响应式布局、实时运行状态、资源趋势图以及更清晰的配置工作流。
+
+### 仪表盘
+
+![RustFRP 仪表盘](docs/images/webui-dashboard.png)
+
+### 代理分配
+
+每个服务器配置可以通过弹窗勾选多个本地代理，并在卡片上直接查看和控制运行状态。
+
+![RustFRP 代理分配](docs/images/webui-proxy-assignments.png)
+
+### 日志控制台
+
+日志支持实例切换、stdout/stderr 筛选、搜索、行数调整、复制和下载，并保留终端颜色。
+
+![RustFRP 日志控制台](docs/images/webui-logs.png)
+
 ## 你可以用它做什么
 
 ### 在网页中管理所有穿透配置

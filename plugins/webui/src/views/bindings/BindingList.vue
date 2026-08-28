@@ -1,321 +1,220 @@
 <script setup lang="ts">
-import { onMounted, ref, h } from 'vue'
-import {
-  NDataTable,
-  NButton,
-  NSpace,
-  NSwitch,
-  NSelect,
-  NTag,
-  useMessage,
-  type DataTableColumns,
-} from 'naive-ui'
+import { computed, onMounted, ref } from 'vue'
+import { NAlert, NButton, NCard, NCheckbox, NCheckboxGroup, NEmpty, NInput, NModal, NSkeleton, NTag, NTooltip, useMessage } from 'naive-ui'
 import { useI18n } from '@/i18n'
 import { useBindingStore } from '@/stores/bindings'
 import { useProfileStore } from '@/stores/profiles'
 import { useProxyStore } from '@/stores/proxies'
-import { resolveErrorMessage } from '@/api/errors'
-import type { BindingRule } from '@/api/types'
+import { extractApiError } from '@/api/errors'
 import ErrorAlert from '@/components/ErrorAlert.vue'
-import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import PageHeader from '@/components/common/PageHeader.vue'
+import StatusBadge from '@/components/common/StatusBadge.vue'
+import AppIcon from '@/components/icon/AppIcon.vue'
+import type { FrpsProfile } from '@/api/types'
 
 const { t } = useI18n()
 const message = useMessage()
-const store = useBindingStore()
+const bindingStore = useBindingStore()
 const profileStore = useProfileStore()
 const proxyStore = useProxyStore()
-
-const showCreate = ref(false)
-const deleting = ref<BindingRule | null>(null)
-const deleteLoading = ref(false)
-const actionLoading = ref<number | null>(null) // binding id currently being started/stopped
-
-const newBinding = ref<Partial<BindingRule>>({
-  profile_id: 0,
-  proxy_id: 0,
-  enabled: true,
-  running: false,
-  priority: 100,
-  group_name: null,
-  group_key: null,
+const saving = ref<number | null>(null)
+const controlling = ref<number | null>(null)
+const refreshing = ref<number | null>(null)
+const activeProfile = ref<FrpsProfile | null>(null)
+const draftSelection = ref<number[]>([])
+const proxySearch = ref('')
+const loading = computed(() => bindingStore.loading || profileStore.loading || proxyStore.loading)
+const filteredProxies = computed(() => {
+  const query = proxySearch.value.trim().toLocaleLowerCase()
+  if (!query) return proxyStore.proxies
+  return proxyStore.proxies.filter(proxy => [proxy.name, proxy.proxy_type, proxy.local_ip, String(proxy.local_port)].some(value => value.toLocaleLowerCase().includes(query)))
 })
 
-// ── Status helper ──
-
-type BindingStatus = 'running' | 'standby' | 'disabled' | 'error'
-
-function getStatus(row: BindingRule): BindingStatus {
-  if (!row.enabled) return 'disabled'
-  if (row.running) return 'running'
-  return 'standby'
+function assignedProxyIds(profileId: number) {
+  return bindingStore.bindings
+    .filter(binding => binding.profile_id === profileId && binding.enabled)
+    .map(binding => binding.proxy_id)
 }
 
-const statusColor: Record<BindingStatus, string> = {
-  running: '#18a058',
-  standby: '#f0a020',
-  disabled: '#999',
-  error: '#d03050',
+function assignedProxies(profileId: number) {
+  const ids = new Set(assignedProxyIds(profileId))
+  return proxyStore.proxies.filter(proxy => proxy.id && ids.has(proxy.id))
 }
 
-const statusIcon: Record<BindingStatus, string> = {
-  running: '●',
-  standby: '◉',
-  disabled: '○',
-  error: '⚠',
+function openAssignment(profile: FrpsProfile) {
+  activeProfile.value = profile
+  draftSelection.value = assignedProxyIds(profile.id!)
+  proxySearch.value = ''
 }
 
-// ── Columns ──
+function closeAssignment() {
+  activeProfile.value = null
+  draftSelection.value = []
+  proxySearch.value = ''
+}
 
-const columns: DataTableColumns<BindingRule> = [
-  { title: 'ID', key: 'id', width: 60 },
-  {
-    title: 'Profile',
-    key: 'profile_id',
-    width: 120,
-    render: (row) =>
-      profileStore.profiles.find((p) => p.id === row.profile_id)?.name ?? `#${row.profile_id}`,
-  },
-  {
-    title: 'Proxy',
-    key: 'proxy_id',
-    width: 100,
-    render: (row) =>
-      proxyStore.proxies.find((p) => p.id === row.proxy_id)?.name ?? `#${row.proxy_id}`,
-  },
-  { title: 'Priority', key: 'priority', width: 80 },
-  { title: 'Group', key: 'group_name', width: 100, render: (row) => row.group_name ?? '-' },
-  {
-    title: t('common.enabled'),
-    key: 'enabled',
-    width: 90,
-    render(row) {
-      return h(NSwitch, {
-        value: row.enabled,
-        size: 'small',
-        onUpdateValue: (val: boolean) => handleToggle(row, val),
-      })
-    },
-  },
-  {
-    title: 'Status',
-    key: 'status',
-    width: 120,
-    render(row) {
-      const status = getStatus(row)
-      return h(
-        NTag,
-        {
-          color: { color: statusColor[status], textColor: '#fff' },
-          size: 'small',
-          round: true,
-        },
-        { default: () => `${statusIcon[status]} ${t(`binding.status.${status}`)}` },
-      )
-    },
-  },
-  {
-    title: t('common.actions'),
-    key: 'actions',
-    width: 180,
-    render(row) {
-      const status = getStatus(row)
-      const children: any[] = []
-
-      // Start button (for standby bindings)
-      if (status === 'standby') {
-        children.push(
-          h(
-            NButton,
-            {
-              size: 'tiny',
-              type: 'success',
-              loading: actionLoading.value === row.id,
-              disabled: actionLoading.value !== null,
-              onClick: () => handleStart(row),
-            },
-            { default: () => t('binding.start') },
-          ),
-        )
-      }
-
-      // Stop button (for running bindings)
-      if (status === 'running') {
-        children.push(
-          h(
-            NButton,
-            {
-              size: 'tiny',
-              type: 'warning',
-              loading: actionLoading.value === row.id,
-              disabled: actionLoading.value !== null,
-              onClick: () => handleStop(row),
-            },
-            { default: () => t('binding.stop') },
-          ),
-        )
-      }
-
-      // Delete button
-      children.push(
-        h(
-          NButton,
-          {
-            size: 'tiny',
-            type: 'error',
-            style: children.length > 0 ? { marginLeft: '6px' } : undefined,
-            onClick: () => (deleting.value = row),
-          },
-          { default: () => t('common.delete') },
-        ),
-      )
-
-      return h(NSpace, { size: 4 }, { default: () => children })
-    },
-  },
-]
-
-// ── Handlers ──
-
-async function handleToggle(binding: BindingRule, enabled: boolean) {
-  if (!binding.id) return
+async function saveAssignment() {
+  const profileId = activeProfile.value?.id
+  if (!profileId) return
+  saving.value = profileId
   try {
-    await store.toggle(binding.id, enabled)
-    // If disabling a running binding, the API auto-stops it.
-    // Re-fetch to get the correct running state from the server.
-    if (!enabled && binding.running) {
-      await store.fetchAll()
-    }
-    message.success(enabled ? t('binding.toggleOn') : t('binding.toggleOff'))
-  } catch (e: any) {
-    message.error(t(resolveErrorMessage(e?.code)))
-  }
-}
-
-async function handleStart(binding: BindingRule) {
-  if (!binding.id) return
-  actionLoading.value = binding.id
-  try {
-    await store.startBinding(binding.id)
-    message.success(t('binding.startSuccess'))
-    // Refresh to get accurate state from server
-    await store.fetchAll()
-  } catch (e: any) {
-    message.error(t(resolveErrorMessage(e?.code)))
+    const wasRunning = profileStore.runtimes[profileId]?.running ?? false
+    await profileStore.replaceProxies(profileId, draftSelection.value)
+    await Promise.all([bindingStore.fetchAll(), profileStore.fetchRuntime(profileId)])
+    message.success(wasRunning && profileStore.runtimes[profileId]?.config_pending ? t('binding.assignmentSavedPending') : t('binding.assignmentSaved'))
+    closeAssignment()
+  } catch (error) {
+    message.error(extractApiError(error).message)
   } finally {
-    actionLoading.value = null
+    saving.value = null
   }
 }
 
-async function handleStop(binding: BindingRule) {
-  if (!binding.id) return
-  actionLoading.value = binding.id
+async function start(profileId: number) {
+  controlling.value = profileId
   try {
-    await store.stopBinding(binding.id)
-    message.success(t('binding.stopSuccess'))
-    // Refresh to get accurate state from server
-    await store.fetchAll()
-  } catch (e: any) {
-    message.error(t(resolveErrorMessage(e?.code)))
+    await profileStore.start(profileId)
+    message.success(t('binding.profileStarted'))
+  } catch (error) {
+    message.error(extractApiError(error).message)
   } finally {
-    actionLoading.value = null
+    controlling.value = null
   }
 }
 
-async function handleCreate() {
-  if (!newBinding.value.profile_id || !newBinding.value.proxy_id) {
-    message.error('Please select both profile and proxy')
-    return
-  }
+async function stop(profileId: number) {
+  controlling.value = profileId
   try {
-    await store.create(newBinding.value as BindingRule)
-    message.success(t('binding.createSuccess'))
-    showCreate.value = false
-    newBinding.value = {
-      profile_id: 0,
-      proxy_id: 0,
-      enabled: true,
-      running: false,
-      priority: 100,
-      group_name: null,
-      group_key: null,
-    }
-  } catch (e: any) {
-    message.error(t(resolveErrorMessage(e?.code)))
-  }
-}
-
-async function confirmDelete() {
-  if (!deleting.value?.id) return
-  deleteLoading.value = true
-  try {
-    await store.remove(deleting.value.id)
-    message.success(t('binding.deleteSuccess'))
-    deleting.value = null
-  } catch (e: any) {
-    message.error(t(resolveErrorMessage(e?.code)))
+    await profileStore.stop(profileId)
+    message.success(t('binding.profileStopped'))
+  } catch (error) {
+    message.error(extractApiError(error).message)
   } finally {
-    deleteLoading.value = false
+    controlling.value = null
   }
+}
+
+async function reload(profileId: number) {
+  controlling.value = profileId
+  try {
+    await profileStore.start(profileId)
+    message.success(t('binding.profileReloaded'))
+  } catch (error) {
+    message.error(extractApiError(error).message)
+  } finally {
+    controlling.value = null
+  }
+}
+
+async function refreshRuntime(profileId: number) {
+  refreshing.value = profileId
+  try { await profileStore.fetchRuntime(profileId) }
+  catch (error) { message.error(extractApiError(error).message) }
+  finally { refreshing.value = null }
+}
+
+function statusFor(profileId: number) {
+  const runtime = profileStore.runtimes[profileId]
+  if (runtime?.running) return { status: 'running' as const, label: t('binding.profileRunning') }
+  if (runtime?.desired_running) return { status: 'offline' as const, label: t('binding.profileOffline') }
+  if (!assignedProxyIds(profileId).length) return { status: 'idle' as const, label: t('binding.profileUnconfigured') }
+  return { status: 'stopped' as const, label: t('binding.profileStoppedState') }
 }
 
 onMounted(async () => {
-  await Promise.all([store.fetchAll(), profileStore.fetchAll(), proxyStore.fetchAll()])
+  await Promise.all([bindingStore.fetchAll(), profileStore.fetchAll(), proxyStore.fetchAll()])
+  await Promise.all(profileStore.profiles.filter((profile) => profile.id).map((profile) => profileStore.fetchRuntime(profile.id!)))
 })
 </script>
 
 <template>
   <div>
-    <ErrorAlert :error="store.error" @dismiss="store.error = null" />
+    <PageHeader :title="t('binding.assignments')" :description="t('binding.assignmentsDescription')">
+      <template #icon><span class="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary"><AppIcon name="bindings" :size="21" /></span></template>
+    </PageHeader>
+    <ErrorAlert :error="bindingStore.error || profileStore.error || proxyStore.error" />
 
-    <NSpace justify="space-between" style="margin-bottom: 16px">
-      <span></span>
-      <NButton type="primary" @click="showCreate = !showCreate">
-        {{ t('binding.create') }}
-      </NButton>
-    </NSpace>
+    <div v-if="loading && !profileStore.profiles.length" class="grid gap-4 lg:grid-cols-2">
+      <NCard v-for="index in 4" :key="index"><NSkeleton text :repeat="4" /></NCard>
+    </div>
+    <NEmpty v-else-if="!profileStore.profiles.length" :description="t('binding.noProfiles')" />
+    <div v-else class="grid gap-4 lg:grid-cols-2">
+      <NCard v-for="profile in profileStore.profiles" :key="profile.id" class="shadow-card">
+        <template #header>
+          <div class="flex items-center gap-2">
+            <span>{{ profile.name }}</span>
+            <StatusBadge
+              :status="statusFor(profile.id!).status"
+              :label="statusFor(profile.id!).label"
+            />
+            <NTag v-if="profileStore.runtimes[profile.id!]?.config_pending" size="small" type="warning" :bordered="false">{{ t('binding.updateRequired') }}</NTag>
+          </div>
+        </template>
+        <template #header-extra>
+          <div class="flex items-center gap-1">
+            <NTag size="small" :bordered="false">{{ assignedProxyIds(profile.id!).length }} / {{ proxyStore.proxies.length }}</NTag>
+            <NTooltip>
+              <template #trigger><NButton quaternary circle size="small" :aria-label="t('binding.configure')" @click="openAssignment(profile)"><template #icon><AppIcon name="settings" :size="16" /></template></NButton></template>
+              {{ t('binding.configure') }}
+            </NTooltip>
+          </div>
+        </template>
 
-    <!-- Create form -->
-    <div
-      v-if="showCreate"
-      style="margin-bottom: 16px; padding: 12px; border: 1px solid var(--n-border-color); border-radius: 4px"
-    >
-      <NSpace align="center">
-        <NSelect
-          v-model:value="newBinding.profile_id"
-          :options="profileStore.profiles.map((p) => ({ label: p.name, value: p.id! }))"
-          placeholder="Profile"
-          style="width: 180px"
-        />
-        <NSelect
-          v-model:value="newBinding.proxy_id"
-          :options="proxyStore.proxies.map((p) => ({ label: p.name, value: p.id! }))"
-          placeholder="Proxy"
-          style="width: 180px"
-        />
-        <NSwitch v-model:value="newBinding.enabled" />
-        <NButton type="primary" size="small" @click="handleCreate">
-          {{ t('common.save') }}
-        </NButton>
-        <NButton size="small" @click="showCreate = false">
-          {{ t('common.cancel') }}
-        </NButton>
-      </NSpace>
+        <div class="grid grid-cols-2 gap-3 text-sm">
+          <div><div class="text-xs text-foreground-muted">{{ t('binding.server') }}</div><div class="mt-1 font-medium">{{ profile.server_addr }}:{{ profile.server_port }}</div></div>
+          <div><div class="text-xs text-foreground-muted">{{ t('binding.transport') }}</div><div class="mt-1 font-medium uppercase">{{ profile.transport_protocol }}</div></div>
+        </div>
+        <NAlert v-if="profileStore.runtimes[profile.id!]?.config_pending" type="warning" class="mt-4" :title="t('binding.updateRequired')">
+          {{ t('binding.updateRequiredDescription') }}
+        </NAlert>
+        <div class="mt-4 border-t border-border pt-4">
+          <div class="mb-2 text-xs text-foreground-muted">{{ t('binding.assignedProxies') }}</div>
+          <div v-if="assignedProxies(profile.id!).length" class="flex flex-wrap gap-2">
+            <NTag v-for="proxy in assignedProxies(profile.id!)" :key="proxy.id" size="small" :bordered="false">{{ proxy.name }} · {{ proxy.proxy_type.toUpperCase() }}</NTag>
+          </div>
+          <NEmpty v-else size="small" :description="t('binding.noAssignedProxies')" />
+        </div>
+
+        <template #footer>
+          <div class="flex items-center justify-between gap-2">
+            <NButton quaternary :loading="refreshing === profile.id" @click="refreshRuntime(profile.id!)"><template #icon><AppIcon name="refresh" /></template>{{ t('common.refresh') }}</NButton>
+            <div class="flex gap-2">
+              <NButton v-if="profileStore.runtimes[profile.id!]?.running || profileStore.runtimes[profile.id!]?.desired_running" type="warning" :loading="controlling === profile.id" :disabled="controlling !== null" @click="stop(profile.id!)">{{ t('binding.stopProfile') }}</NButton>
+              <NButton v-if="profileStore.runtimes[profile.id!]?.running" :type="profileStore.runtimes[profile.id!]?.config_pending ? 'primary' : 'default'" :loading="controlling === profile.id" :disabled="controlling !== null" @click="reload(profile.id!)"><template #icon><AppIcon name="reload" /></template>{{ profileStore.runtimes[profile.id!]?.config_pending ? t('binding.applyUpdate') : t('app.reload') }}</NButton>
+              <NButton v-else type="primary" :loading="controlling === profile.id" :disabled="controlling !== null || !assignedProxyIds(profile.id!).length" @click="start(profile.id!)">{{ t('binding.startProfile') }}</NButton>
+            </div>
+          </div>
+        </template>
+      </NCard>
     </div>
 
-    <NDataTable
-      :columns="columns"
-      :data="store.bindings"
-      :loading="store.loading"
-      :bordered="false"
-    />
-
-    <ConfirmDialog
-      :show="!!deleting"
-      :title="t('binding.delete')"
-      :content="t('binding.deleteConfirm')"
-      :loading="deleteLoading"
-      @confirm="confirmDelete"
-      @cancel="deleting = null"
-    />
+    <NModal :show="!!activeProfile" :mask-closable="false" @update:show="value => { if (!value) closeAssignment() }">
+      <NCard
+        :title="t('binding.configureTitle', { name: activeProfile?.name ?? '' })"
+        :bordered="false"
+        closable
+        role="dialog"
+        aria-modal="true"
+        style="width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 48px)"
+        content-style="overflow-y: auto"
+        @close="closeAssignment"
+      >
+        <NInput v-model:value="proxySearch" clearable :placeholder="t('binding.searchProxies')" class="mb-4"><template #prefix><AppIcon name="search" :size="16" /></template></NInput>
+        <NCheckboxGroup v-model:value="draftSelection">
+          <div v-if="filteredProxies.length" class="grid gap-2 sm:grid-cols-2">
+            <NCheckbox v-for="proxy in filteredProxies" :key="proxy.id" :value="proxy.id!" class="items-start rounded-lg border border-border p-3 transition-colors hover:bg-surface-subtle">
+              <span class="min-w-0"><span class="block truncate text-sm font-medium">{{ proxy.name }}</span><span class="mt-1 block text-xs text-foreground-muted">{{ proxy.proxy_type.toUpperCase() }} · {{ proxy.local_ip }}:{{ proxy.local_port }}</span></span>
+            </NCheckbox>
+          </div>
+          <NEmpty v-else :description="t('binding.noMatchingProxies')" />
+        </NCheckboxGroup>
+        <template #footer>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-xs text-foreground-muted">{{ t('binding.selectedCount', { count: draftSelection.length }) }}</span>
+            <div class="flex gap-2"><NButton @click="closeAssignment">{{ t('common.cancel') }}</NButton><NButton type="primary" :loading="saving === activeProfile?.id" @click="saveAssignment">{{ t('common.save') }}</NButton></div>
+          </div>
+        </template>
+      </NCard>
+    </NModal>
   </div>
 </template>

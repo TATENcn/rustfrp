@@ -1,35 +1,35 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
 import {
   NConfigProvider,
   NMessageProvider,
   NDialogProvider,
   NNotificationProvider,
+  NLoadingBarProvider,
   darkTheme,
 } from 'naive-ui'
 import { createAppI18n } from '@/i18n'
+import { useThemeStore } from '@/stores/theme'
 
 const i18n = createAppI18n()
 const { naiveLocale, naiveDateLocale } = i18n
-
-const isDark = ref(localStorage.getItem('rustfrp-theme') === 'dark')
-watch(isDark, (v) =>
-  localStorage.setItem('rustfrp-theme', v ? 'dark' : 'light'),
-)
+const themeStore = useThemeStore()
 </script>
 
 <template>
   <NConfigProvider
     :locale="naiveLocale"
     :date-locale="naiveDateLocale"
-    :theme="isDark ? darkTheme : undefined"
+    :theme="themeStore.isDark ? darkTheme : undefined"
+    :theme-overrides="themeStore.naiveThemeOverrides"
   >
-    <NMessageProvider>
+    <NLoadingBarProvider>
       <NDialogProvider>
         <NNotificationProvider>
-          <RouterView />
+          <NMessageProvider>
+            <RouterView />
+          </NMessageProvider>
         </NNotificationProvider>
       </NDialogProvider>
-    </NMessageProvider>
+    </NLoadingBarProvider>
   </NConfigProvider>
 </template>
