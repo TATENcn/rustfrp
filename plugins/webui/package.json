@@ -13,6 +13,7 @@
     "check:icons": "bun scripts/check-ui-icons.ts"
   },
   "dependencies": {
+    "ansi_up": "^6.0.6",
     "echarts": "^6.1.0",
     "naive-ui": "^2.40.0",
     "ofetch": "^1.4.0",

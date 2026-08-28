@@ -34,7 +34,7 @@ function sampleTime(index: number): number {
     const parsed = Date.parse(timestamp)
     if (Number.isFinite(parsed)) return parsed
   }
-  return Date.now() - (props.values.length - 1 - index) * 10_000
+  return Date.now() - (props.values.length - 1 - index) * 3_000
 }
 
 function renderChart() {

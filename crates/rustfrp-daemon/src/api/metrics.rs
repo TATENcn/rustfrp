@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use super::auth::AuthIdentity;
 use super::response::{ApiError, ApiResponse};
 use super::state::ApiState;
-use crate::metrics::{ResourceSample, TrafficSample};
+use crate::metrics::{ResourceSample, TrafficSample, METRICS_HISTORY_CAPACITY};
 
 #[derive(Debug, Default, Deserialize)]
 pub struct HistoryQuery {
@@ -28,7 +28,10 @@ pub async fn history(
     State(state): State<ApiState>,
     Query(query): Query<HistoryQuery>,
 ) -> Json<ApiResponse<HistoryResponse>> {
-    let limit = query.limit.unwrap_or(360).clamp(1, 360);
+    let limit = query
+        .limit
+        .unwrap_or(METRICS_HISTORY_CAPACITY)
+        .clamp(1, METRICS_HISTORY_CAPACITY);
     let resources = state.metrics.resources(limit).await;
     let traffic = state
         .metrics

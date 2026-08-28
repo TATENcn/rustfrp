@@ -5,6 +5,7 @@ import { extractApiError } from '@/api/errors'
 import type { MetricsHistory } from '@/api/types'
 
 const emptyHistory = (): MetricsHistory => ({ resources: [], traffic: [] })
+const METRICS_POLL_INTERVAL_MS = 3_000
 
 export const useMetricsStore = defineStore('metrics', () => {
   const history = ref<MetricsHistory>(emptyHistory())
@@ -40,7 +41,7 @@ export const useMetricsStore = defineStore('metrics', () => {
     return inFlight
   }
 
-  function nextDelay() { return failureCount.value ? Math.min(120_000, 5_000 * 2 ** Math.min(failureCount.value, 4)) : 10_000 }
+  function nextDelay() { return failureCount.value ? Math.min(120_000, 5_000 * 2 ** Math.min(failureCount.value, 4)) : METRICS_POLL_INTERVAL_MS }
   async function tick() { if (!document.hidden) await refresh(); if (polling) timer = setTimeout(tick, document.hidden ? 60_000 : nextDelay()) }
   function startPolling() { if (polling) return; polling = true; void tick() }
   function stopPolling() { polling = false; if (timer) clearTimeout(timer); timer = null }
