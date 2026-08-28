@@ -70,7 +70,7 @@ async function handleReload() {
 }
 function handleLogout() { localStorage.removeItem('api_token'); void router.push({ name: 'login' }) }
 const activeCount = computed(() => systemStore.status?.active_frpc_instances ?? 0)
-const uptimeText = computed(() => systemStore.status ? formatDuration(systemStore.status.uptime_secs, i18n.locale.value, { style: 'narrow', includeSeconds: false }) : '—')
+const uptimeText = computed(() => systemStore.currentUptimeSecs !== null ? formatDuration(systemStore.currentUptimeSecs, i18n.locale.value, { style: 'narrow', includeSeconds: false }) : '—')
 onMounted(() => { systemStore.startPolling(); void environmentStore.fetchAll() })
 onUnmounted(() => systemStore.stopPolling())
 </script>

@@ -347,7 +347,7 @@ async function handleExport() {
         </NGi>
         <NGi>
           <NCard size="small" :bordered="false" class="shadow-card">
-            <NStatistic label="Uptime" :value="formatUptime(systemStore.status.uptime_secs)" />
+            <NStatistic label="Uptime" :value="formatUptime(systemStore.currentUptimeSecs ?? systemStore.status.uptime_secs)" />
           </NCard>
         </NGi>
         <NGi>

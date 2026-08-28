@@ -27,6 +27,8 @@ const cpuValues = computed(() => history.value.resources.map(sample => sample.sy
 const memoryValues = computed(() => history.value.resources.map(sample => sample.system_memory_used_bytes))
 const receivedValues = computed(() => history.value.traffic.map(sample => sample.received_bytes))
 const sentValues = computed(() => history.value.traffic.map(sample => sample.sent_bytes))
+const resourceTimestamps = computed(() => history.value.resources.map(sample => sample.timestamp))
+const trafficTimestamps = computed(() => history.value.traffic.map(sample => sample.timestamp))
 const memoryPercentage = computed(() => latestResource.value?.system_memory_total_bytes ? Math.round(latestResource.value.system_memory_used_bytes / latestResource.value.system_memory_total_bytes * 100) : 0)
 const refresh = () => Promise.all([systemStore.fetchStatus(), metricsStore.refresh()])
 watch(() => environmentStore.activeId, id => { void metricsStore.selectEnvironment(id) })
@@ -43,17 +45,17 @@ onUnmounted(() => metricsStore.stopPolling())
 
   <DataState :phase="systemStore.phase" :error="systemStore.error" @retry="refresh">
     <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <MetricCard :label="isZh ? '运行时间' : 'Uptime'" :value="systemStore.status ? formatDuration(systemStore.status.uptime_secs, locale) : '—'" icon="clock" />
+      <MetricCard :label="isZh ? '运行时间' : 'Uptime'" :value="systemStore.currentUptimeSecs !== null ? formatDuration(systemStore.currentUptimeSecs, locale) : '—'" icon="clock" />
       <MetricCard :label="isZh ? '运行中的 frpc' : 'Active frpc'" :value="systemStore.status?.active_frpc_instances ?? 0" icon="running" :detail="`${systemStore.status?.total_profiles ?? 0} ${isZh ? '个配置' : 'profiles'}`" />
       <MetricCard :label="isZh ? '系统 CPU' : 'System CPU'" :value="latestResource ? formatPercent(latestResource.system_cpu_percent, locale) : '—'" icon="cpu" :percentage="latestResource?.system_cpu_percent ?? 0" />
       <MetricCard :label="isZh ? '系统内存' : 'System memory'" :value="latestResource ? formatBytes(latestResource.system_memory_used_bytes, locale) : '—'" icon="memory" :percentage="memoryPercentage" />
     </div>
 
     <div class="mt-4 grid gap-4 lg:grid-cols-2">
-      <NCard size="small" :bordered="false" class="shadow-card"><template #header><div class="flex items-center gap-2"><AppIcon name="cpu" class="text-primary" />{{ isZh ? 'CPU 历史' : 'CPU history' }}</div></template><MetricChart :values="cpuValues" :format-value="value => formatPercent(value, locale)" /></NCard>
-      <NCard size="small" :bordered="false" class="shadow-card"><template #header><div class="flex items-center gap-2"><AppIcon name="memory" class="text-primary" />{{ isZh ? '内存历史' : 'Memory history' }}</div></template><MetricChart :values="memoryValues" color="var(--ui-primary)" :format-value="value => formatBytes(value, locale)" /></NCard>
-      <NCard size="small" :bordered="false" class="shadow-card"><template #header><div class="flex items-center gap-2"><AppIcon name="arrow-down" class="text-success" />{{ isZh ? '接收流量' : 'Traffic received' }}</div></template><MetricChart :values="receivedValues" color="var(--ui-success)" :format-value="value => formatBytes(value, locale)" :empty-text="isZh ? '暂无流量样本' : 'No traffic samples yet'" /></NCard>
-      <NCard size="small" :bordered="false" class="shadow-card"><template #header><div class="flex items-center gap-2"><AppIcon name="arrow-up" class="text-warning" />{{ isZh ? '发送流量' : 'Traffic sent' }}</div></template><MetricChart :values="sentValues" color="var(--ui-warning)" :format-value="value => formatBytes(value, locale)" :empty-text="isZh ? '暂无流量样本' : 'No traffic samples yet'" /></NCard>
+      <NCard size="small" :bordered="false" class="shadow-card"><template #header><div class="flex items-center gap-2"><AppIcon name="cpu" class="text-primary" />{{ isZh ? '主机 CPU 历史' : 'Host CPU history' }}</div></template><MetricChart :values="cpuValues" :timestamps="resourceTimestamps" :format-value="value => formatPercent(value, locale)" /></NCard>
+      <NCard size="small" :bordered="false" class="shadow-card"><template #header><div class="flex items-center gap-2"><AppIcon name="memory" class="text-primary" />{{ isZh ? '主机内存历史' : 'Host memory history' }}</div></template><MetricChart :values="memoryValues" :timestamps="resourceTimestamps" color="var(--ui-primary)" :format-value="value => formatBytes(value, locale)" /></NCard>
+      <NCard size="small" :bordered="false" class="shadow-card"><template #header><div class="flex items-center gap-2"><AppIcon name="arrow-down" class="text-success" />{{ isZh ? '接收流量' : 'Traffic received' }}</div></template><MetricChart :values="receivedValues" :timestamps="trafficTimestamps" color="var(--ui-success)" :format-value="value => formatBytes(value, locale)" :empty-text="isZh ? '暂无流量样本' : 'No traffic samples yet'" /></NCard>
+      <NCard size="small" :bordered="false" class="shadow-card"><template #header><div class="flex items-center gap-2"><AppIcon name="arrow-up" class="text-warning" />{{ isZh ? '发送流量' : 'Traffic sent' }}</div></template><MetricChart :values="sentValues" :timestamps="trafficTimestamps" color="var(--ui-warning)" :format-value="value => formatBytes(value, locale)" :empty-text="isZh ? '暂无流量样本' : 'No traffic samples yet'" /></NCard>
     </div>
 
     <NCard class="mt-4 shadow-card" :bordered="false" :title="isZh ? 'FRP 进程' : 'FRP processes'">
