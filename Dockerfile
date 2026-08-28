@@ -7,7 +7,7 @@ RUN bun install --frozen-lockfile
 COPY plugins/webui/ ./
 RUN bun run build
 
-FROM rust:1.88-bookworm AS builder
+FROM rust:1.95-bookworm AS builder
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/

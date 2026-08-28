@@ -15,7 +15,7 @@ version = "0.3.0"
 edition = "2021"
 license = "AGPL-3.0-only"
 repository = "https://github.com/taten/rustfrp"
-rust-version = "1.88"
+rust-version = "1.95"
 
 [workspace.dependencies]
 # === 异步运行时 ===
