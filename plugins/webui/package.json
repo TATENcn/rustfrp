@@ -29,7 +29,7 @@
     "@vitejs/plugin-vue": "^6.0.7",
     "@vue/tsconfig": "^0.9.1",
     "tailwindcss": "^4.3.3",
-    "typescript": "~6.0.0",
+    "typescript": "~7.0.2",
     "unplugin-icons": "^23.0.1",
     "vite": "^8.0.16",
     "vue-tsc": "^3.3.5"
