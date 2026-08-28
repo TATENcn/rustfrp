@@ -218,7 +218,7 @@ onMounted(() => Promise.all([store.fetchAll(), bindingStore.fetchAll(), profileS
     <PageHeader :title="t('nav.proxies')">
       <template #icon><span class="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary"><AppIcon name="proxies" :size="21" /></span></template>
       <template #actions>
-        <NInput v-model:value="search" :placeholder="t('common.search')" clearable class="w-60"><template #prefix><AppIcon name="search" :size="16" /></template></NInput>
+        <NInput v-model:value="search" :placeholder="t('common.search')" clearable style="width: min(240px, 100%)"><template #prefix><AppIcon name="search" :size="16" /></template></NInput>
         <NButton @click="batchVisible = true">{{ t('proxy.batchCreate') }}</NButton>
         <NButton type="primary" @click="router.push({ name: 'proxy-new' })">{{ t('proxy.create') }}</NButton>
       </template>

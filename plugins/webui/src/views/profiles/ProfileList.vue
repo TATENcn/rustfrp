@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref, computed, h } from 'vue'
-import { useRouter } from 'vue-router'
 import {
   NDataTable,
   NButton,
-  NSpace,
   NInput,
   NSelect,
+  NModal,
+  NCard,
   useMessage,
   type DataTableColumns,
 } from 'naive-ui'
@@ -19,8 +19,8 @@ import ErrorAlert from '@/components/ErrorAlert.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import PageHeader from '@/components/common/PageHeader.vue'
 import AppIcon from '@/components/icon/AppIcon.vue'
+import ProfileForm from './ProfileForm.vue'
 
-const router = useRouter()
 const { t } = useI18n()
 const message = useMessage()
 const store = useProfileStore()
@@ -29,6 +29,8 @@ const environmentStore = useEnvironmentStore()
 const search = ref('')
 const deleting = ref<FrpsProfile | null>(null)
 const deleteLoading = ref(false)
+const formVisible = ref(false)
+const editingProfile = ref<FrpsProfile | null>(null)
 
 const columns: DataTableColumns<FrpsProfile> = [
   { title: t('common.name'), key: 'name', sorter: true },
@@ -56,12 +58,27 @@ const columns: DataTableColumns<FrpsProfile> = [
     width: 160,
     render(row) {
       return [
-        h(NButton, { size: 'small', onClick: () => router.push({ name: 'profile-edit', params: { id: row.id } }) }, { default: () => t('common.edit') }),
+        h(NButton, { size: 'small', onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
         h(NButton, { size: 'small', type: 'error', style: { marginLeft: '8px' }, onClick: () => (deleting.value = row) }, { default: () => t('common.delete') }),
       ]
     },
   },
 ]
+
+function openCreate() {
+  editingProfile.value = null
+  formVisible.value = true
+}
+
+function openEdit(profile: FrpsProfile) {
+  editingProfile.value = profile
+  formVisible.value = true
+}
+
+function closeForm() {
+  formVisible.value = false
+  editingProfile.value = null
+}
 
 const filtered = computed(() => {
   const scoped = environmentStore.active
@@ -98,8 +115,8 @@ onMounted(() => Promise.all([store.fetchAll(), environmentStore.fetchAll()]))
     <PageHeader :title="t('nav.profiles')">
       <template #icon><span class="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary"><AppIcon name="profiles" :size="21" /></span></template>
       <template #actions>
-        <NInput v-model:value="search" :placeholder="t('common.search')" clearable class="w-60"><template #prefix><AppIcon name="search" :size="16" /></template></NInput>
-        <NButton type="primary" @click="router.push({ name: 'profile-new' })">{{ t('profile.create') }}</NButton>
+        <NInput v-model:value="search" :placeholder="t('common.search')" clearable style="width: min(240px, 100%)"><template #prefix><AppIcon name="search" :size="16" /></template></NInput>
+        <NButton type="primary" @click="openCreate">{{ t('profile.create') }}</NButton>
       </template>
     </PageHeader>
     <ErrorAlert :error="store.error" @dismiss="store.error = null" />
@@ -119,5 +136,26 @@ onMounted(() => Promise.all([store.fetchAll(), environmentStore.fetchAll()]))
       @confirm="confirmDelete"
       @cancel="deleting = null"
     />
+
+    <NModal v-model:show="formVisible" :mask-closable="false">
+      <NCard
+        :title="editingProfile ? t('profile.edit') : t('profile.create')"
+        :bordered="false"
+        closable
+        role="dialog"
+        aria-modal="true"
+        style="width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 48px)"
+        content-style="overflow-y: auto"
+        @close="closeForm"
+      >
+        <ProfileForm
+          v-if="formVisible"
+          embedded
+          :profile="editingProfile"
+          @saved="closeForm"
+          @cancel="closeForm"
+        />
+      </NCard>
+    </NModal>
   </div>
 </template>

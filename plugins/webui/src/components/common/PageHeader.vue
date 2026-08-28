@@ -12,6 +12,6 @@ defineProps<{ title: string; description?: string }>()
       </div>
       <p v-if="description" class="mt-1.5 mb-0 max-w-3xl text-sm leading-6 text-foreground-muted">{{ description }}</p>
     </div>
-    <div class="flex shrink-0 flex-wrap items-center gap-2"><slot name="actions" /></div>
+    <div class="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap"><slot name="actions" /></div>
   </header>
 </template>

@@ -150,7 +150,7 @@ onMounted(async () => {
   <div>
     <PageHeader :title="t('nav.visitors')">
       <template #icon><span class="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary"><AppIcon name="visitors" :size="21" /></span></template>
-      <template #actions><NInput v-model:value="search" :placeholder="t('common.search')" clearable class="w-60"><template #prefix><AppIcon name="search" :size="16" /></template></NInput><NButton type="primary" @click="showCreate = !showCreate">{{ t('visitor.create') }}</NButton></template>
+      <template #actions><NInput v-model:value="search" :placeholder="t('common.search')" clearable style="width: min(240px, 100%)"><template #prefix><AppIcon name="search" :size="16" /></template></NInput><NButton type="primary" @click="showCreate = !showCreate">{{ t('visitor.create') }}</NButton></template>
     </PageHeader>
     <ErrorAlert :error="store.error" @dismiss="store.error = null" />
 
