@@ -44,6 +44,12 @@ help:
       just infra down           停止 Compose 服务
       just infra status         查看服务状态
       just infra logs [服务]    持续查看日志
+      just infra docker-build   只构建本地 daemon 容器
+      just infra docker-up      只启动本地 daemon 容器
+      just infra docker-rebuild 重建并启动本地 daemon 容器
+      just infra docker-logs    查看本地 daemon 容器日志
+      just infra docker-check   检查容器与网页健康状态
+      just infra docker-shell   进入本地 daemon 容器
 
     测试
       just test                 查看测试命令
