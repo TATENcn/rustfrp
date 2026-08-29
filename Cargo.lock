@@ -1942,7 +1942,7 @@ dependencies = [
 
 [[package]]
 name = "rustfrp-agent"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1965,7 +1965,7 @@ dependencies = [
 
 [[package]]
 name = "rustfrp-bin"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "dirs",
  "flate2",
@@ -1983,7 +1983,7 @@ dependencies = [
 
 [[package]]
 name = "rustfrp-client"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2015,7 +2015,7 @@ dependencies = [
 
 [[package]]
 name = "rustfrp-common"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "chrono",
  "dirs",
@@ -2035,7 +2035,7 @@ dependencies = [
 
 [[package]]
 name = "rustfrp-control"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -2058,7 +2058,7 @@ dependencies = [
 
 [[package]]
 name = "rustfrp-daemon"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -2087,7 +2087,7 @@ dependencies = [
 
 [[package]]
 name = "rustfrp-sdk"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "rustfrp-common",
  "serde",
