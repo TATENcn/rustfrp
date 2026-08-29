@@ -6,6 +6,7 @@
 use clap::Parser;
 use rustfrp_client::core::ClientCore;
 use rustfrp_client::db::default_db_path;
+use std::path::PathBuf;
 
 /// RustFRP daemon — frpc wrapper with optional HTTP API
 #[derive(Parser, Debug)]
@@ -33,6 +34,14 @@ struct Cli {
     #[cfg(feature = "http-api")]
     #[arg(long, env = "RUSTFRP_AUTH_POLICY_FILE")]
     auth_policy_file: Option<String>,
+
+    /// Use this frpc binary instead of a managed version.
+    #[arg(long, env = "RUSTFRP_FRPC_PATH")]
+    frpc_path: Option<PathBuf>,
+
+    /// Start the API without downloading frpc when no version is installed.
+    #[arg(long, env = "RUSTFRP_NO_AUTO_DOWNLOAD", default_value_t = false)]
+    no_auto_download: bool,
 }
 
 #[tokio::main]
@@ -57,7 +66,13 @@ async fn main() -> anyhow::Result<()> {
         "RustFRP daemon starting"
     );
 
-    let core = ClientCore::new(&db_path, &cli.config_dir).await?;
+    let core = ClientCore::new_with_frpc(
+        &db_path,
+        &cli.config_dir,
+        cli.frpc_path,
+        !cli.no_auto_download,
+    )
+    .await?;
 
     #[cfg(feature = "http-api")]
     {

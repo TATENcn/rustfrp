@@ -37,3 +37,37 @@ config:
 [no-cd]
 pull:
     docker compose pull
+
+# 只构建本地 daemon 镜像（不启动整套监控基础设施）
+[no-cd]
+docker-build:
+    GRAFANA_ADMIN_PASSWORD=local-dev RUSTFRP_API_TOKEN_FILE=/dev/null docker compose build daemon
+
+# 只启动本地 daemon，网页默认位于 http://localhost:7900
+[no-cd]
+docker-up:
+    GRAFANA_ADMIN_PASSWORD=local-dev RUSTFRP_API_TOKEN_FILE=/dev/null docker compose up -d --no-deps daemon
+
+# 重新构建并启动本地 daemon
+[no-cd]
+docker-rebuild:
+    GRAFANA_ADMIN_PASSWORD=local-dev RUSTFRP_API_TOKEN_FILE=/dev/null docker compose up -d --no-deps --build daemon
+
+# 查看本地 daemon 日志
+[no-cd]
+docker-logs:
+    GRAFANA_ADMIN_PASSWORD=local-dev RUSTFRP_API_TOKEN_FILE=/dev/null docker compose logs -f daemon
+
+# 检查本地 daemon 容器状态和 HTTP 健康端点
+[no-cd]
+docker-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GRAFANA_ADMIN_PASSWORD=local-dev RUSTFRP_API_TOKEN_FILE=/dev/null docker compose ps daemon
+    curl --fail --silent "http://127.0.0.1:${RUSTFRP_PORT:-7900}/api/v1/health"
+    printf '\n'
+
+# 在本地 daemon 容器中打开 shell
+[no-cd]
+docker-shell:
+    GRAFANA_ADMIN_PASSWORD=local-dev RUSTFRP_API_TOKEN_FILE=/dev/null docker compose exec daemon /bin/sh

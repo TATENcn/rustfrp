@@ -35,4 +35,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD curl --fail --silent http://127.0.0.1:7900/api/v1/health >/dev/null || exit 1
 
 ENTRYPOINT ["rustfrp-daemon"]
-CMD ["--db-path", "/data/config.db", "--config-dir", "/data/runtime", "--api-listen", "0.0.0.0:7900"]
+CMD ["--db-path", "/data/config.db", "--config-dir", "/data/runtime", "--api-listen", "0.0.0.0:7900", "--no-auto-download"]
