@@ -31,6 +31,20 @@ impl ClientCore {
     ///
     /// Opens (or creates) the SQLite database, runs migrations,
     pub async fn new(db_path: &str, config_dir: &str) -> Result<Self> {
+        Self::new_with_frpc(db_path, config_dir, None, true).await
+    }
+
+    /// Create a ClientCore with explicit control over FRP binary discovery.
+    ///
+    /// When `auto_download` is false, initialization never accesses the
+    /// network. The API remains available and an FRP version can be installed
+    /// and activated later through the version management endpoints.
+    pub async fn new_with_frpc(
+        db_path: &str,
+        config_dir: &str,
+        frpc_path: Option<PathBuf>,
+        auto_download: bool,
+    ) -> Result<Self> {
         let config_dir = expand_tilde(config_dir);
 
         // Ensure config directory exists
@@ -45,21 +59,37 @@ impl ClientCore {
             migrate::run(&conn)?;
         }
 
-        // Ensure rustfrp-managed frpc binary is present (download/verify/extract
-        // on first run; idempotent thereafter). Fails loudly if unavailable.
         let version_manager = rustfrp_bin::manager::VersionManager::default();
-        let selected_version = std::env::var("RUSTFRP_FRP_VERSION")
-            .ok()
-            .or(version_manager.active_version().await)
-            .unwrap_or_else(|| rustfrp_bin::ensure::DEFAULT_FRP_VERSION.to_owned());
-        let frpc_path =
-            rustfrp_bin::ensure::ensure_binary("frpc", Some(&selected_version), None, None)
+        let frpc_path = if let Some(path) = frpc_path {
+            path
+        } else if auto_download {
+            // Ensure the managed binary is present. This may access the
+            // network on first run and intentionally preserves the historical
+            // behavior for non-container callers.
+            let selected_version = std::env::var("RUSTFRP_FRP_VERSION")
+                .ok()
+                .or(version_manager.active_version().await)
+                .unwrap_or_else(|| rustfrp_bin::ensure::DEFAULT_FRP_VERSION.to_owned());
+            let path =
+                rustfrp_bin::ensure::ensure_binary("frpc", Some(&selected_version), None, None)
+                    .await
+                    .map_err(|e| ClientError::ProcessStart(format!("frpc unavailable: {e}")))?;
+            version_manager
+                .activate(&selected_version)
                 .await
-                .map_err(|e| ClientError::ProcessStart(format!("frpc unavailable: {e}")))?;
-        version_manager
-            .activate(&selected_version)
-            .await
-            .map_err(|e| ClientError::ProcessStart(format!("frpc activation failed: {e}")))?;
+                .map_err(|e| ClientError::ProcessStart(format!("frpc activation failed: {e}")))?;
+            path
+        } else if let Some(active) = version_manager.active_version().await {
+            version_manager
+                .activate(&active)
+                .await
+                .map_err(|e| ClientError::ProcessStart(format!("active frpc unavailable: {e}")))?
+        } else {
+            tracing::warn!(
+                "FRP auto-download is disabled and no active version is installed; the Web API will remain available until FRP is installed and activated"
+            );
+            PathBuf::from("frpc")
+        };
 
         let plugin_manager = PluginManager::with_default_dir();
         let signal_handler = SignalHandler::new();
