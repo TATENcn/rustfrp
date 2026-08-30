@@ -19,7 +19,7 @@
     "ofetch": "^1.4.0",
     "pinia": "^2.2.0",
     "vue": "^3.5.38",
-    "vue-router": "^4.4.0"
+    "vue-router": "^5.3.0"
   },
   "devDependencies": {
     "@iconify-json/lucide": "^1.2.126",
