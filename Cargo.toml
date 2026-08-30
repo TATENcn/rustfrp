@@ -56,7 +56,7 @@ clap = { version = "4", features = ["derive", "env"] }
 
 # === HTTP 客户端（仅 monitor 和 frp 管理 crate 使用） ===
 reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
-wasmtime = { version = "=36.0.14", default-features = false, features = ["std", "runtime", "cranelift", "wat"] }
+wasmtime = { version = "=48.0.1", default-features = false, features = ["std", "runtime", "cranelift", "wat"] }
 sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
 
 # === 开发 / 测试（各 crate 通过 dev-dependencies 继承） ===
