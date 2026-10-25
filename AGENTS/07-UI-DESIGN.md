@@ -237,3 +237,31 @@ IP、端口、PID、版本号、SHA256、Token、配置文件、日志原文和 
 | 大型图表库 | 当前指标图由内联 SVG 满足，避免增加前端包体 |
 | vue-i18n | 当前仅支持中英文，内置 typed message map 已满足需求 |
 | Axios | `ofetch` 已提供统一 HTTP 客户端能力 |
+
+
+## 八、React / shadcn/ui 迁移（2026-10）
+
+当前实现以本节为准，前文 Vue / Pinia / Naive UI 相关内容为历史设计。
+用户已明确选择迁移至 React 并使用原版 shadcn/ui。
+
+- 框架：React 19 + TypeScript strict；路由：React Router 的 HashRouter，保留现有 URL。
+- 组件：仓库内 `plugins/webui/src/components/ui/` 的原版 shadcn/ui React 源码，Radix 提供焦点、键盘和弹层交互。Naive UI 已移除。
+- 状态：TanStack Query 管理 API 数据、轮询和缓存失效；React Context 管理语言、主题与环境选择。保留既有 localStorage 键。
+- 主题：Tailwind CSS 4 + shadcn 语义变量，支持浅色/深色/系统及五种强调色。
+- 图标：离线打包的 Lucide React；应用图标经 `components/icon/AppIcon.tsx` 使用。shadcn 基础组件允许直接使用同一图标集。
+- 图表：保留轻量 SVG 数据可视化；移除未使用的 ECharts。
+- 日志：TanStack Virtual + 既有 ANSI 转换及 HTML 转义，保留筛选、复制、下载。
+- 验证：`bun run type-check` 检查实际 TSX；Playwright 覆盖主要页面流程，单元测试继续验证时间与日志格式化。
+
+业务接口、模型、FRP 语义和 SQLite 约束不随 UI 框架迁移改变。
+
+## 九、shadcn/ui 全面重建设计（2026-10）
+
+用户明确要求清理旧前端并重新设计页面，同时使用成熟图表库。当前实现以本节为准：
+
+- 页面与布局在 `src/app/`、`src/features/` 重新实现，移除上一版 `src/pages/` 和自定义布局、表单、提示及表格封装。
+- 官方 shadcn Sidebar（inset 布局）、Sheet（移动端）、Field（分组表单）、Table、Dialog、Alert 和 Tabs 构成界面，采用官方 neutral 语义变量。
+- 固定中性配色，支持浅色、深色和系统模式；移除多强调色定制。
+- 指标改为 shadcn Chart + Recharts 3，具备坐标轴、图例、悬停信息、键盘访问及时间范围选择，取代手绘 SVG。
+- 系统页面划分运行状态、版本管理、导入导出；资源列表提供筛选、排序和分页。
+- 接口契约、认证、FRP 字段语义和中英文支持保持兼容。

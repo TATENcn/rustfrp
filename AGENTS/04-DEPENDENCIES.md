@@ -318,3 +318,25 @@ loom = "0.7"                  # 并发 bug 检测（可选，编译慢）
 | `validator` | 为 HTTP 表单校验设计，拖入 Web 框架依赖链。FRP 配置校验手写解决 |
 | `anyhow`（核心层） | 核心层需要结构化错误。`anyhow` 仅在应用层（monitor/gui）使用 |
 | UI 组件库（Element Plus / Ant Design Vue / Vuetify 等） | 自带设计系统，强制风格一致性但破坏自主视觉。用 Headless UI + TailwindCSS |
+
+
+## WebUI React 迁移依赖（2026-10）
+
+WebUI 按用户要求迁移到原版 shadcn/ui，当前依赖以
+`plugins/webui/package.json` 和 `bun.lock` 为准。React / React DOM、React Router
+替代 Vue / Vue Router；TanStack Query 替代 Pinia 的服务端数据缓存与轮询；
+shadcn/ui 仓库源码与 Radix、Sonner、class-variance-authority、clsx、tailwind-merge
+替代 Naive UI；TanStack Virtual 保留日志虚拟列表；Lucide React 替代 Vue 专用
+Iconify 插件。保留 Tailwind CSS 4、ofetch、ansi_up 和 Intl 格式化。
+移除未使用的 ECharts，不增加图表运行时依赖。
+
+构建使用 `@vitejs/plugin-react`、React 类型包及 TSX 检查；Playwright 仅用于开发回归测试。
+新增依赖不进入 Rust 核心层，也不改变后端网络或持久化模型。
+
+### WebUI 重建补充（2026-10）
+
+用户明确要求使用成熟折线图库，新增 Recharts 3（由官方 shadcn Chart registry 安装）。图表随仪表盘路由懒加载。移除手绘指标图；UI 保持 React + shadcn/ui 单一组件体系，未引入第二套组件库。
+
+### Linux 流量采集（2026-10）
+
+守护进程增加仅 Linux 目标的 `libc` 直接依赖（锁文件已有该版本），用于只读 TCP SOCK_DIAG 查询。无需 eBPF 工具、额外后台进程或新的核心层依赖。

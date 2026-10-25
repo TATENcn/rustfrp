@@ -11,10 +11,7 @@ export const apiClient = ofetch.create({
   onRequest({ options }) {
     const token = localStorage.getItem('api_token')
     if (token) {
-      options.headers = {
-        ...options.headers,
-        Authorization: `Bearer ${token}`,
-      }
+      options.headers.set('Authorization', `Bearer ${token}`)
     }
   },
   onResponseError({ response }) {
@@ -31,15 +28,15 @@ export async function apiGet<T>(path: string): Promise<ApiEnvelope<T>> {
 }
 
 export async function apiPost<T>(path: string, body?: unknown): Promise<ApiEnvelope<T>> {
-  return apiClient<ApiEnvelope<T>>(path, { method: 'POST', body })
+  return apiClient<ApiEnvelope<T>>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) })
 }
 
 export async function apiPut<T>(path: string, body?: unknown): Promise<ApiEnvelope<T>> {
-  return apiClient<ApiEnvelope<T>>(path, { method: 'PUT', body })
+  return apiClient<ApiEnvelope<T>>(path, { method: 'PUT', body: body === undefined ? undefined : JSON.stringify(body) })
 }
 
 export async function apiPatch<T>(path: string, body?: unknown): Promise<ApiEnvelope<T>> {
-  return apiClient<ApiEnvelope<T>>(path, { method: 'PATCH', body })
+  return apiClient<ApiEnvelope<T>>(path, { method: 'PATCH', body: body === undefined ? undefined : JSON.stringify(body) })
 }
 
 export async function apiDelete(path: string): Promise<ApiEnvelope<null>> {

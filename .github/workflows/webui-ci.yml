@@ -29,13 +29,19 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Type check
-        run: bun x tsc --noEmit
+        run: bun run type-check
 
       - name: Check i18n keys
         run: bun scripts/check-i18n-keys.ts
 
       - name: Unit tests
         run: bun test
+
+      - name: Install browser
+        run: bun x playwright install --with-deps chromium
+
+      - name: Browser regression tests
+        run: bun run test:e2e
 
       - name: Build
         run: bun run build

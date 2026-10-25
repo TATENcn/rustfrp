@@ -82,7 +82,7 @@ jobs:
 
       - name: Type check
         working-directory: plugins/webui
-        run: bun x tsc --noEmit
+        run: bun run type-check
 
       - name: Check translations
         working-directory: plugins/webui

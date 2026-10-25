@@ -59,7 +59,7 @@ function collectFiles(dir: string): string[] {
     const stat = statSync(full)
     if (stat.isDirectory()) {
       result.push(...collectFiles(full))
-    } else if (['.vue', '.ts'].includes(extname(entry))) {
+    } else if (['.tsx', '.ts'].includes(extname(entry))) {
       result.push(full)
     }
   }
