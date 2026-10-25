@@ -27,6 +27,11 @@
 - Delete confirmations now close on successful responses without a data payload.
 - Corrected form alignment and TLS option placement in server configuration.
 
+### Security
+
+- Updated Wasmtime 36 LTS, rustls, WebPKI, root certificates, Tokio, and ZIP
+  dependencies to versions addressing the release-time RustSec advisories.
+
 ### Upgrade notes
 
 - Back up the SQLite database before upgrading. Schema migration V15 adds per-server

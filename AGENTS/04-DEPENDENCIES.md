@@ -340,3 +340,9 @@ Iconify 插件。保留 Tailwind CSS 4、ofetch、ansi_up 和 Intl 格式化。
 ### Linux 流量采集（2026-10）
 
 守护进程增加仅 Linux 目标的 `libc` 直接依赖（锁文件已有该版本），用于只读 TCP SOCK_DIAG 查询。无需 eBPF 工具、额外后台进程或新的核心层依赖。
+
+### v0.4.0 发布依赖修复
+
+发布供应链检查要求更新 Wasmtime 36 LTS 至 36.0.19、ZIP 至 9.x，并更新
+rustls、rustls-webpki、webpki-roots 与 Tokio 锁定版本，修复 RustSec 报告的问题。
+ZIP 使用方式保持单文件读取，不调用归档整体解压；继续使用官方校验和验证。
