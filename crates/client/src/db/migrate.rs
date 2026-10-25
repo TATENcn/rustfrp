@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
 /// 当前最新的 schema 版本
-const LATEST_VERSION: i32 = 14;
+const LATEST_VERSION: i32 = 15;
 
 /// 运行所有待执行的迁移
 ///
@@ -97,6 +97,7 @@ fn apply_migration(conn: &Connection, version: i32) -> Result<()> {
         12 => migrate_v12(&tx)?,
         13 => migrate_v13(&tx)?,
         14 => migrate_v14(&tx)?,
+        15 => migrate_v15(&tx)?,
         _ => {
             return Err(ClientError::DatabaseMigration(format!(
                 "Unknown migration version: {version}"
@@ -781,6 +782,16 @@ fn compute_schema_hash(conn: &Connection) -> Result<String> {
     let result = hasher.finalize();
 
     Ok(format!("{:x}", result))
+}
+
+// Runtime policy belongs to profile_runtime, never to generated FRP TOML.
+fn migrate_v15(tx: &rusqlite::Transaction) -> Result<()> {
+    tx.execute(
+        "ALTER TABLE profile_runtime ADD COLUMN frpc_version TEXT",
+        [],
+    )
+    .map_err(|e| ClientError::DatabaseMigration(format!("Failed to add runtime version: {e}")))?;
+    Ok(())
 }
 
 #[cfg(test)]

@@ -166,6 +166,32 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest
 
+      - name: Build container for offline startup check
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: rustfrp:release-smoke
+          cache-from: type=gha
+
+      - name: Verify empty offline container serves API and frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'docker logs rustfrp-offline-smoke; docker rm -f -v rustfrp-offline-smoke' EXIT
+          # Override CMD intentionally: offline startup must be the binary default.
+          docker run -d --name rustfrp-offline-smoke --network none \
+            rustfrp:release-smoke --db-path /data/config.db \
+            --config-dir /data/runtime --api-listen 0.0.0.0:7900
+          for attempt in $(seq 1 20); do
+            if docker exec rustfrp-offline-smoke curl -fsS http://127.0.0.1:7900/api/v1/health; then break; fi
+            sleep 1
+          done
+          docker exec rustfrp-offline-smoke curl -fsS http://127.0.0.1:7900/api/v1/health
+          docker exec rustfrp-offline-smoke sh -c \
+            'curl -fsS http://127.0.0.1:7900/ -o /tmp/index.html && grep -q "<html" /tmp/index.html'
+
       - name: Build and push linux/amd64 and linux/arm64
         uses: docker/build-push-action@v7
         with:
@@ -178,7 +204,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   release:
-    needs: build
+    needs: [build, container]
     runs-on: ubuntu-latest
     permissions:
       contents: write

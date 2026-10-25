@@ -77,9 +77,9 @@ fn extract_zip(archive_path: &Path, output_dir: &Path) -> Result<(), FrpError> {
         let mut entry = archive
             .by_index(index)
             .map_err(|error| FrpError::Extract(format!("Invalid zip entry: {error}")))?;
-        let relative = entry.enclosed_name().ok_or_else(|| {
-            FrpError::Extract(format!("Unsafe path in zip archive: {}", entry.name()))
-        })?;
+        let relative = entry
+            .enclosed_name()
+            .ok_or_else(|| FrpError::Extract("Unsafe or invalid path in zip archive".to_owned()))?;
         let output = output_dir.join(relative);
         if entry.is_dir() {
             std::fs::create_dir_all(&output)?;

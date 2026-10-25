@@ -66,6 +66,24 @@ impl VersionManager {
         .await
     }
 
+    pub async fn install_with_progress(
+        &self,
+        version: &str,
+        base: &str,
+        progress: crate::download::ProgressCallback,
+    ) -> Result<PathBuf, FrpError> {
+        validate_version(version)?;
+        crate::ensure::ensure_binary_with_progress(
+            "frpc",
+            Some(version),
+            Some(&self.root),
+            None,
+            base,
+            Some(progress),
+        )
+        .await
+    }
+
     pub async fn list_installed(&self) -> Result<Vec<InstalledVersion>, FrpError> {
         let platform = crate::platform::Platform::detect()
             .ok_or_else(|| FrpError::Download("Unsupported platform".into()))?;
@@ -107,6 +125,36 @@ impl VersionManager {
                 .cmp(&semver::Version::parse(&left.version).ok())
         });
         Ok(installed)
+    }
+
+    pub fn version_path(&self, version: &str) -> Result<PathBuf, FrpError> {
+        validate_version(version)?;
+        let platform = crate::platform::Platform::detect()
+            .ok_or_else(|| FrpError::Download("Unsupported platform".into()))?;
+        Ok(self
+            .root
+            .join("versions")
+            .join(version.trim_start_matches('v'))
+            .join(platform.slug)
+            .join(binary_name("frpc")))
+    }
+    pub fn version_for_path(&self, path: &Path) -> Option<String> {
+        let relative = path.strip_prefix(self.root.join("versions")).ok()?;
+        let version = relative.components().next()?.as_os_str().to_str()?;
+        (self.version_path(version).ok()?.as_path() == path).then(|| version.to_string())
+    }
+    pub async fn installed_path(&self, version: &str) -> Result<PathBuf, FrpError> {
+        let version = version.trim_start_matches('v');
+        let path = self.version_path(version)?;
+        let platform = crate::platform::Platform::detect()
+            .ok_or_else(|| FrpError::Download("Unsupported platform".into()))?;
+        if verify_installation(&path, version, &platform.slug).await {
+            Ok(path)
+        } else {
+            Err(FrpError::Verify(format!(
+                "FRP {version} is not installed or failed integrity verification"
+            )))
+        }
     }
 
     pub async fn activate(&self, version: &str) -> Result<PathBuf, FrpError> {
@@ -247,5 +295,34 @@ mod tests {
             .unwrap();
         manager.delete("0.70.1").await.unwrap();
         assert!(manager.list_installed().await.unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod network_tests {
+    use super::*;
+    #[tokio::test]
+    #[ignore = "downloads a public FRP release via GHFast and verifies official GitHub checksum"]
+    async fn install_via_ghfast_with_official_verification() {
+        let root = tempfile::tempdir().unwrap();
+        let manager = VersionManager::new(root.path().into());
+        let base = crate::download::release_base(Some("ghfast"), None).unwrap();
+        let progress: crate::download::ProgressCallback = std::sync::Arc::new(|p| {
+            if p.stage != "downloading" {
+                eprintln!("Stage: {}", p.stage);
+            }
+        });
+        let path = manager
+            .install_with_progress("0.70.1", &base, progress)
+            .await
+            .unwrap();
+        assert_eq!(manager.installed_path("0.70.1").await.unwrap(), path);
+        assert_eq!(
+            tokio::fs::read_to_string(path.with_extension("source"))
+                .await
+                .unwrap(),
+            base
+        );
+        assert!(manager.active_version().await.is_none());
     }
 }

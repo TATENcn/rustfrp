@@ -1,57 +1,51 @@
 # RustFRP WebUI
 
-The daemon-embedded WebUI uses Vue 3, TypeScript, Vite, Bun, Pinia, Vue Router,
-and Naive UI. User-facing text uses the typed message maps under `src/i18n`,
-while locale-sensitive data formatting is centralized in `src/i18n/format.ts`
-using the standard ECMA-402 `Intl` APIs.
+The daemon-embedded WebUI uses **React 19, TypeScript, Vite 8 and the original shadcn/ui React components**. Vue, Vue Router, Pinia, Naive UI and the unused ECharts dependency have been removed.
 
-`Intl.DurationFormat` has a built-in fallback for older browsers. Byte values
-remain IEC/base-1024 (KiB, MiB, GiB); `Intl` formats only their numeric portion.
+## Development
 
-## Recommended IDE Setup
+From the repository root, `bun run mode:reload` builds the UI and daemon and updates the managed HTTPS preview. See [the development manager guide](../../docs/development-mode.md).
 
-[VS Code](https://code.visualstudio.com/) + [Vue (Official)](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
+For frontend HMR:
 
-## Recommended Browser Setup
-
-- Chromium-based browsers (Chrome, Edge, Brave, etc.):
-  - [Vue.js devtools](https://chromewebstore.google.com/detail/vuejs-devtools/nhdogjmejiglipccpnnnanhbledajbpd)
-  - [Turn on Custom Object Formatter in Chrome DevTools](http://bit.ly/object-formatters)
-- Firefox:
-  - [Vue.js devtools](https://addons.mozilla.org/en-US/firefox/addon/vue-js-devtools/)
-  - [Turn on Custom Object Formatter in Firefox DevTools](https://fxdx.dev/firefox-devtools-custom-object-formatters/)
-
-## Type Support for `.vue` Imports in TS
-
-TypeScript cannot handle type information for `.vue` imports by default, so we replace the `tsc` CLI with `vue-tsc` for type checking. In editors, we need [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) to make the TypeScript language service aware of `.vue` types.
-
-## Customize configuration
-
-See [Vite Configuration Reference](https://vite.dev/config/).
-
-## Project Setup
-
-```sh
-bun install
+```bash
+cd plugins/webui
+bun install --frozen-lockfile
+bun run dev
 ```
 
-### Compile and Hot-Reload for Development
+The Vite development server proxies `/api` to `http://127.0.0.1:7900`; run the existing `just dev-daemon` workflow alongside it. The managed mode preview uses its own isolated backend port and built assets instead of HMR.
 
-```sh
-bun dev
-```
+## UI structure
 
-### Type-Check, Compile and Minify for Production
+The UI was rebuilt around the official shadcn/ui neutral theme. The previous application layout, pages, form renderer, shared UI wrappers, and hand-drawn charts have been removed.
 
-```sh
-bun run build
-```
+- `src/app/`: hash routing, lazy page loading, and official shadcn Sidebar with mobile Sheet navigation.
+- `src/features/`: overview, resource management, assignments, logs, system settings, and login.
+- `src/components/ui/`: original shadcn registry components (`new-york`, Radix). Sidebar, Field, Chart, Alert, Dialog, Table, Tabs, and other primitives share the standard semantic tokens.
+- `src/components/common/`: page states, paginated tables, confirmation dialogs, and process tables composed from those primitives.
+- `src/features/overview/metrics-chart.tsx`: shadcn Chart + Recharts 3, with time axes, legends, hover tooltips, keyboard accessibility, CPU/memory switching, and time-window selection. Charts are loaded only with the overview route.
+- `src/lib/fields.ts`: field definitions for the existing FRP API. Editors group connection settings and security options; undisplayed server fields are retained on save.
+- `src/hooks/`: TanStack Query requests and persistent light/dark/system mode. The redesign uses one neutral theme; existing mode and environment selections survive the migration.
+- `src/api/`, `src/lib/entities.ts`, and `src/i18n/`: API contracts, domain helpers, and English/Chinese messages.
+- `src/components/logs/format.ts`: ANSI conversion with HTML escaping, consumed by the virtualized log viewer.
 
-### Unit Tests
+Hash URLs are preserved, including `/profiles/new`, `/profiles/:id`, `/proxies/new`, and `/proxies/:id`. Authentication validates the protected `/status` endpoint. No remote fonts, icon services, or production demo data are used.
 
-```sh
+System management separates runtime, FRP versions, and import/export into tabs. Resource lists offer protocol filters, sorting, and pagination. Desktop and mobile use the same accessible shadcn controls.
+
+## Validation
+
+```bash
+bun run type-check
+bun run check:icons
+bun scripts/check-i18n-keys.ts
 bun test
+bun run build
+bun x playwright install chromium
+bun run test:e2e
 ```
 
-Both the main CI workflow and WebUI CI run the unit tests, translation-key
-check, TypeScript check, and production build.
+The browser tests start a local Vite server and mock **all** `/api/v1` requests. They exercise protected login, CRUD payloads, confirmation dialogs, assignment/start/stop, ANSI/HTML log handling, import/export, themes, language and responsive navigation without changing a real daemon's configuration. Browser screenshots and failure traces are written to ignored `test-results/`.
+
+Dependency installation uses `bun.lock`; production output is written to `dist/` for Rust's embedded WebUI. The API client never logs authentication tokens.

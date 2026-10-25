@@ -21,7 +21,7 @@ webui:
 # 构建 WebUI 与 release daemon 二进制
 [no-cd]
 webui-release:
-    cd plugins/webui && bun install --frozen-lockfile && bun x tsc --noEmit && bun run build
+    cd plugins/webui && bun install --frozen-lockfile && bun run type-check && bun run build
     @test -f plugins/webui/dist/index.html || (echo "ERROR: webui/dist/index.html not found!" && exit 1)
     cargo build -p rustfrp-daemon --release
     @echo "Binary: target/release/rustfrp-daemon"

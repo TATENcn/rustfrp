@@ -6,3 +6,4 @@ plugins/webui/dist
 .env
 *.db
 *.log
+.local

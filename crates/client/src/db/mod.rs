@@ -16,6 +16,7 @@ pub mod environment;
 pub mod migrate;
 pub mod profile;
 pub mod proxy;
+pub mod runtime_version;
 pub mod visitor;
 
 use crate::error::{ClientError, Result};

@@ -405,9 +405,14 @@ mod tests {
     async fn test_delete_profile() {
         let db = setup_db().await;
         let id = db.insert_profile(&sample_profile("待删除")).await.unwrap();
+        let other = db.insert_profile(&sample_profile("保留")).await.unwrap();
         db.delete_profile(id).await.unwrap();
 
         let result = db.get_profile(id).await;
         assert!(result.is_err());
+        assert_eq!(db.get_profile(other).await.unwrap().name, "保留");
+        // Repeating a stale deletion must never affect a different profile.
+        assert!(db.delete_profile(id).await.is_err());
+        assert_eq!(db.get_profile(other).await.unwrap().name, "保留");
     }
 }

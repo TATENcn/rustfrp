@@ -8,9 +8,9 @@ rust-version.workspace = true
 description = "RustFRP daemon — HTTP API server for frpc configuration management"
 
 [dependencies]
-rustfrp-client = { version = "0.3.0", path = "../client" }
-rustfrp-bin = { version = "0.3.0", path = "../rustfrp-bin" }
-rustfrp-common = { version = "0.3.0", path = "../common" }
+rustfrp-client = { version = "0.4.0", path = "../client" }
+rustfrp-bin = { version = "0.4.0", path = "../rustfrp-bin" }
+rustfrp-common = { version = "0.4.0", path = "../common" }
 tokio = { workspace = true, features = ["process", "sync", "time", "signal", "net"] }
 serde.workspace = true
 serde_json.workspace = true
@@ -48,3 +48,6 @@ tempfile.workspace = true
 tokio-test.workspace = true
 serde_json.workspace = true
 rusqlite.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"

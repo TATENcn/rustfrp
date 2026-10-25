@@ -184,6 +184,8 @@ export interface ProcessInfo {
 }
 
 export interface InstalledFrpVersion {
+  in_use?: boolean
+  source?: string | null
   version: string
   platform: string
   active: boolean
@@ -235,6 +237,10 @@ export interface ResourceSample {
 }
 
 export interface TrafficSample {
+  proxy_id?: number | null
+  interface?: string | null
+  source?: string
+  counter_epoch?: string
   timestamp: string
   environment_id: number
   profile_id: number
@@ -246,6 +252,9 @@ export interface TrafficSample {
 export interface MetricsHistory {
   resources: ResourceSample[]
   traffic: TrafficSample[]
+  proxy_traffic?: TrafficSample[]
+  host_traffic?: TrafficSample[]
+  traffic_collection?: TrafficCollection
 }
 
 export interface ReloadResponse {
@@ -275,4 +284,14 @@ export interface LogResponse {
   stdout_path: string | null
   stderr_path: string | null
   exists: boolean
+}
+
+// Automatic transport collector health, distinct from an empty history window.
+export interface TrafficCollection {
+  source: string
+  state: string
+  updated_at: string | null
+  host_state?: string
+  proxies?: { profile_id: number; environment_id: number; proxy_id: number; name: string; state: string }[]
+  profiles: { profile_id: number; environment_id: number; state: string }[]
 }

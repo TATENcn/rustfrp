@@ -39,7 +39,12 @@ struct Cli {
     #[arg(long, env = "RUSTFRP_FRPC_PATH")]
     frpc_path: Option<PathBuf>,
 
-    /// Start the API without downloading frpc when no version is installed.
+    /// Explicitly install frpc during startup (may block on network access).
+    /// By default, start offline and install versions through the Web UI.
+    #[arg(long, env = "RUSTFRP_AUTO_DOWNLOAD", default_value_t = false)]
+    auto_download: bool,
+
+    /// Disable startup downloads (legacy flag; offline startup is now the default).
     #[arg(long, env = "RUSTFRP_NO_AUTO_DOWNLOAD", default_value_t = false)]
     no_auto_download: bool,
 }
@@ -70,7 +75,7 @@ async fn main() -> anyhow::Result<()> {
         &db_path,
         &cli.config_dir,
         cli.frpc_path,
-        !cli.no_auto_download,
+        cli.auto_download && !cli.no_auto_download,
     )
     .await?;
 
@@ -115,4 +120,20 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn startup_download_requires_explicit_opt_in() {
+        let cli = Cli::try_parse_from(["rustfrp-daemon"]).unwrap();
+        assert!(!cli.auto_download);
+        let cli = Cli::try_parse_from(["rustfrp-daemon", "--auto-download"]).unwrap();
+        assert!(cli.auto_download && !cli.no_auto_download);
+        let cli = Cli::try_parse_from(["rustfrp-daemon", "--auto-download", "--no-auto-download"])
+            .unwrap();
+        assert!(!(cli.auto_download && !cli.no_auto_download));
+    }
 }

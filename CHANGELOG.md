@@ -2,6 +2,44 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-25
+
+### Added
+
+- Per-server frpc version selection, with installed/default/running version visibility
+  and explicit application of pending version changes.
+- Background frpc installation with progress, official SHA256 verification, GitHub
+  direct downloads, GHFast, gh-proxy, and custom HTTPS download channels.
+- One-second Linux traffic sampling by upstream server, local proxy, and host
+  interface, with time-window totals and independent scope filters.
+- Repository-isolated Bun development commands with self-signed HTTPS and readable
+  status, help, health, and lifecycle controls.
+
+### Changed
+
+- Rebuilt the WebUI using React, shadcn/ui, and Recharts; moved running processes
+  into the dashboard sidebar and made version suggestions searchable and bounded.
+- Daemon startup is offline by default. The management UI remains available before
+  frpc is installed; startup downloads now require explicit `--auto-download`.
+
+### Fixed
+
+- Delete confirmations now close on successful responses without a data payload.
+- Corrected form alignment and TLS option placement in server configuration.
+
+### Security
+
+- Updated Wasmtime 36 LTS, rustls, WebPKI, root certificates, Tokio, and ZIP
+  dependencies to versions addressing the release-time RustSec advisories.
+
+### Upgrade notes
+
+- Back up the SQLite database before upgrading. Schema migration V15 adds per-server
+  runtime version preferences; existing servers continue following the default.
+- Traffic history remains bounded and in memory, resets on restart, and is not
+  suitable for billing. Linux TCP collection can miss short-lived connections.
+- Update the container image to receive the new startup defaults.
+
 ## [0.3.0] - 2026-08-28
 
 ### Added

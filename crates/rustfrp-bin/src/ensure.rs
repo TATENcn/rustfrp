@@ -9,7 +9,10 @@
 //! 1. 校验目标二进制的版本、平台和本地完整性标记，匹配时直接返回。
 //! 2. 否则下载官方发布包，强制校验 SHA256，再解压并原子安装。
 
-use crate::download::{asset_filename, download_from, official_checksum, OFFICIAL_RELEASE_BASE};
+use crate::download::{
+    asset_filename, download_with_progress, official_checksum, report, ProgressCallback,
+    OFFICIAL_RELEASE_BASE,
+};
 use crate::extract::extract;
 use crate::verify::{sha256_file, verify_sha256};
 use crate::{default_frp_dir, FrpError, FrpVersion};
@@ -65,6 +68,17 @@ pub async fn ensure_binary_from(
     sha256: Option<&str>,
     release_base: &str,
 ) -> Result<PathBuf, FrpError> {
+    ensure_binary_with_progress(bin, version, frp_dir, sha256, release_base, None).await
+}
+pub async fn ensure_binary_with_progress(
+    bin: &str,
+    version: Option<&str>,
+    frp_dir: Option<&Path>,
+    sha256: Option<&str>,
+    release_base: &str,
+    progress: Option<ProgressCallback>,
+) -> Result<PathBuf, FrpError> {
+    report(&progress, "checking", 0, None);
     let frp_dir = frp_dir
         .map(Path::to_path_buf)
         .unwrap_or_else(default_frp_dir);
@@ -102,7 +116,16 @@ pub async fn ensure_binary_from(
 
     // 下载 tar.gz 到临时 staging 目录，避免污染 frp_dir
     let staging = frp_dir.join("downloads");
-    let archive = download_from(&ver, &staging, &platform.slug, release_base).await?;
+    report(&progress, "downloading", 0, None);
+    let archive = download_with_progress(
+        &ver,
+        &staging,
+        &platform.slug,
+        release_base,
+        progress.clone(),
+    )
+    .await?;
+    report(&progress, "verifying", 0, None);
 
     let asset = asset_filename(&ver, &platform.slug);
     let expected_hash = match sha256 {
@@ -115,6 +138,7 @@ pub async fn ensure_binary_from(
     }
 
     // 解压到独立解包目录，再定位二进制
+    report(&progress, "extracting", 0, None);
     let unpack = install_dir.join("unpacked");
     extract(&archive, &unpack)?;
 
@@ -124,6 +148,7 @@ pub async fn ensure_binary_from(
     })?;
 
     // Install atomically and store the installed binary's own hash.
+    report(&progress, "installing", 0, None);
     let target_tmp = target.with_extension("installing");
     tokio::fs::copy(&found, &target_tmp)
         .await
@@ -143,6 +168,10 @@ pub async fn ensure_binary_from(
     tokio::fs::write(&marker_tmp, marker.serialize()).await?;
     tokio::fs::rename(marker_tmp, &integrity_marker).await?;
 
+    let source_path = target.with_extension("source");
+    let temporary = source_path.with_extension("source.pending");
+    tokio::fs::write(&temporary, release_base).await?;
+    tokio::fs::rename(temporary, source_path).await?;
     tracing::info!(path = %target.display(), "FRP binary ready");
     Ok(target)
 }

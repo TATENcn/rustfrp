@@ -14,6 +14,7 @@
           const mode = value?.mode ?? 'system'
           const dark = mode === 'dark' || (mode === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
           document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+          document.documentElement.classList.toggle('dark', dark)
           document.documentElement.dataset.accent = value?.accent ?? 'blue'
         } catch {
           document.documentElement.dataset.theme = 'light'
@@ -24,6 +25,6 @@
   </head>
   <body>
     <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

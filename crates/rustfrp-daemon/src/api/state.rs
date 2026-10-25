@@ -49,6 +49,7 @@ pub struct ApiState {
     pub frp_versions: VersionManager,
     pub frp_version_operation: Arc<tokio::sync::Mutex<()>>,
     pub metrics: MetricsStore,
+    pub frp_install: Arc<std::sync::RwLock<Option<super::frp_versions::InstallTask>>>,
 }
 
 impl ApiState {
@@ -60,8 +61,8 @@ impl ApiState {
         app_state: Arc<RwLock<ClientState>>,
     ) -> Self {
         Self {
+            process_manager: process_manager.with_database(db.clone()),
             db,
-            process_manager,
             config_dir,
             start_time: Instant::now(),
             app_state,
@@ -69,6 +70,7 @@ impl ApiState {
             frp_versions: VersionManager::default(),
             frp_version_operation: Arc::new(tokio::sync::Mutex::new(())),
             metrics: MetricsStore::new(METRICS_HISTORY_CAPACITY),
+            frp_install: Arc::new(std::sync::RwLock::new(None)),
         }
     }
 }

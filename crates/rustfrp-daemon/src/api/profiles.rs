@@ -215,6 +215,7 @@ pub async fn replace_proxies(
     Json<ApiResponse<Vec<rustfrp_client::config::model::BindingRule>>>,
     (axum::http::StatusCode, Json<ApiResponse<()>>),
 > {
+    let _version_operation = state.frp_version_operation.lock().await;
     ensure_profile_tenant(&state, id, &identity.tenant).await?;
     let mut requested = body.proxy_ids;
     requested.sort_unstable();
@@ -341,6 +342,7 @@ pub async fn start(
     Json<ApiResponse<ProfileRuntimeResponse>>,
     (axum::http::StatusCode, Json<ApiResponse<()>>),
 > {
+    let _version_operation = state.frp_version_operation.lock().await;
     ensure_profile_tenant(&state, id, &identity.tenant).await?;
     let profile = state.db.get_profile(id).await.map_err(api_error)?;
     let enabled = state
@@ -444,7 +446,7 @@ fn api_error(
     )
 }
 
-async fn ensure_profile_tenant(
+pub(super) async fn ensure_profile_tenant(
     state: &ApiState,
     id: i64,
     tenant: &str,

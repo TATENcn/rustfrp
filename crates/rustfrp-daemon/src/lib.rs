@@ -7,6 +7,7 @@
 #[cfg(feature = "http-api")]
 pub mod api;
 pub mod metrics;
+pub mod traffic;
 
 #[cfg(feature = "http-api")]
 pub mod web;
