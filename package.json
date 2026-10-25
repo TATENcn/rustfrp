@@ -1,0 +1,17 @@
+{
+  "name": "rustfrp-dev",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "mode:start": "bun scripts/mode/cli.mjs start",
+    "mode:stop": "bun scripts/mode/cli.mjs stop",
+    "mode:reload": "bun scripts/mode/cli.mjs reload",
+    "mode:restart": "bun scripts/mode/cli.mjs restart",
+    "mode:build": "bun scripts/mode/cli.mjs build",
+    "mode:status": "bun scripts/mode/cli.mjs status",
+    "mode:health": "bun scripts/mode/cli.mjs health",
+    "mode:logs": "bun scripts/mode/cli.mjs logs",
+    "mode:help": "bun scripts/mode/cli.mjs help",
+    "mode:test": "bun scripts/mode/cli.mjs test"
+  }
+}

@@ -35,3 +35,10 @@ dist/
 # 环境文件
 .env
 .env.local
+
+# Repository-isolated development manager
+/.local/mode/
+
+# Browser regression artifacts
+plugins/webui/test-results/
+plugins/webui/playwright-report/
