@@ -157,7 +157,7 @@ function Navigation() {
         <div className="flex items-center gap-2 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
           <AppIcon name="shield" />
           <span>
-            RustFRP <span className="ml-1">v0.3.0</span>
+            RustFRP <span className="ml-1">v0.4.0</span>
           </span>
         </div>
       </SidebarFooter>

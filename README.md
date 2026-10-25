@@ -156,11 +156,23 @@ crates/
     ├── control/      # 指标拉取和 Agent 配置模板 API
     └── agent/        # frps 配置拉取、校验、缓存与进程守护
 plugins/
-├── webui/            # Vue 3 + Vite 管理界面
+├── webui/            # React + shadcn/ui + Vite 管理界面
 └── official/         # 官方参考 WASM 插件
 ```
 
 ## 开发与测试
+
+Linux 下可使用统一的 Bun 开发管理入口，自动构建 WebUI / daemon 并提供本机及局域网 HTTPS 预览：
+
+```bash
+bun run mode:start    # 构建并后台启动
+bun run mode:status   # 查看真实地址与健康状态
+bun run mode:reload   # 重新构建并重启
+bun run mode:stop     # 停止，保留数据
+bun run mode:help     # 中文分组帮助
+```
+
+首次访问需要信任本地自签证书，并在界面填写 `.local/mode/api-token` 中的 Token。管理器使用独立开发数据库；完整命令、隔离边界及证书信任说明见 [Bun 开发管理指南](docs/development-mode.md)。
 
 ```bash
 just test-fast             # 快速单元测试
@@ -186,3 +198,13 @@ bash scripts/e2e-local.sh  # 双 frps + 双 frpc 本地闭环测试
 ## 许可证
 
 [AGPL-3.0-only](LICENSE) © RustFRP contributors
+
+### 首次启动与 frpc 安装
+
+管理服务默认离线启动：未安装 frpc 时也可以打开 WebUI 和使用管理 API。
+在「系统状态 → FRP 版本」中安装版本，并设为系统默认，或在服务器配置中指定版本，之后再启动代理实例。
+Docker 自定义 `command` 时也无需额外添加禁用下载参数。
+
+`--no-auto-download` / `RUSTFRP_NO_AUTO_DOWNLOAD=true` 继续兼容旧部署。
+仅在确实需要启动时下载的场景使用 `--auto-download` / `RUSTFRP_AUTO_DOWNLOAD=true`；该选项可能等待网络。
+旧镜像不会自动获得此行为，请重新构建或更新镜像；尚未更新时可在原启动命令末尾追加 `--no-auto-download`。
