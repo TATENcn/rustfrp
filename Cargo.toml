@@ -24,7 +24,7 @@ tokio = { version = "1", features = ["full"] }
 # === 序列化 ===
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "0.8"
+toml = "1.1"
 
 # === 数据库 ===
 rusqlite = { version = "0.31", features = ["bundled", "vtab"] }
