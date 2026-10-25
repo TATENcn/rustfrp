@@ -27,7 +27,7 @@ serde_json = "1"
 toml = "0.8"
 
 # === 数据库 ===
-rusqlite = { version = "0.31", features = ["bundled", "vtab"] }
+rusqlite = { version = "0.40", features = ["bundled", "vtab"] }
 
 # === 错误处理 ===
 thiserror = "2"
