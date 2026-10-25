@@ -16,6 +16,7 @@ pub mod environments;
 pub mod frp_versions;
 pub mod logs;
 pub mod metrics;
+pub mod profile_version;
 pub mod profiles;
 pub mod proxies;
 pub mod system;
@@ -299,6 +300,14 @@ pub fn create_router(state: ApiState, auth: impl AuthMiddleware) -> Router {
             axum::routing::get(frp_versions::list).post(frp_versions::install),
         )
         .route(
+            "/api/v1/profiles/:id/frpc-version",
+            axum::routing::get(profile_version::get).put(profile_version::set),
+        )
+        .route(
+            "/api/v1/frp/installations",
+            axum::routing::get(frp_versions::installation).post(frp_versions::begin_install),
+        )
+        .route(
             "/api/v1/frp/releases",
             axum::routing::get(frp_versions::available),
         )
@@ -360,6 +369,11 @@ pub async fn serve(core: ClientCore, listen_addr: &str) -> anyhow::Result<()> {
         core.state().clone(),
     );
     state.metrics.spawn_sampler(core.process_manager().clone());
+    crate::traffic::spawn(
+        state.metrics.clone(),
+        state.db.clone(),
+        state.process_manager.clone(),
+    );
 
     let router = create_router(state, NoAuth);
 
@@ -402,6 +416,11 @@ pub async fn serve_with_auth(
         core.state().clone(),
     );
     state.metrics.spawn_sampler(core.process_manager().clone());
+    crate::traffic::spawn(
+        state.metrics.clone(),
+        state.db.clone(),
+        state.process_manager.clone(),
+    );
 
     let router = create_router(state, BearerToken::new(api_token.to_string()));
 
@@ -441,6 +460,11 @@ pub async fn serve_with_policy(
         core.state().clone(),
     );
     state.metrics.spawn_sampler(core.process_manager().clone());
+    crate::traffic::spawn(
+        state.metrics.clone(),
+        state.db.clone(),
+        state.process_manager.clone(),
+    );
     let router = create_router(state, ScopedBearerToken::new(policy));
     let addr: SocketAddr = listen_addr.parse()?;
     tracing::info!(%addr, "HTTP API server starting (auth: scoped bearer policy)");

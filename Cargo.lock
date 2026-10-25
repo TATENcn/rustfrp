@@ -2064,6 +2064,7 @@ dependencies = [
  "axum",
  "chrono",
  "clap",
+ "libc",
  "mime_guess",
  "rusqlite",
  "rust-embed",

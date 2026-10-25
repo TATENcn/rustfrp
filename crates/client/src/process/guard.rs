@@ -53,6 +53,10 @@ pub struct ProcessGuard {
     profile_name: String,
 }
 impl ProcessGuard {
+    pub fn binary_path(&self) -> &std::path::Path {
+        &self.frpc_path
+    }
+
     /// 创建新的 ProcessGuard
     ///
     /// 注意：此时尚未启动子进程，需调用 `start()`。

@@ -7,8 +7,8 @@ use std::sync::Arc;
 use sysinfo::{Pid, ProcessesToUpdate, System};
 use tokio::sync::RwLock;
 
-pub const RESOURCE_SAMPLE_INTERVAL_SECS: u64 = 3;
-pub const METRICS_HISTORY_CAPACITY: usize = 1_200;
+pub const RESOURCE_SAMPLE_INTERVAL_SECS: u64 = 1;
+pub const METRICS_HISTORY_CAPACITY: usize = 3_600;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ProcessResourceSample {
@@ -48,11 +48,26 @@ pub struct TrafficSample {
     pub sent_bytes: u64,
     #[serde(default)]
     pub active_connections: u64,
+    #[serde(default = "external_source")]
+    pub source: String,
+    #[serde(default)]
+    pub counter_epoch: String,
+    #[serde(default)]
+    pub proxy_id: Option<i64>,
+    #[serde(default)]
+    pub interface: Option<String>,
+}
+
+fn external_source() -> String {
+    "external".into()
 }
 
 #[derive(Clone)]
 pub struct MetricsStore {
     capacity: usize,
+    host_traffic: Arc<RwLock<VecDeque<TrafficSample>>>,
+    proxy_traffic: Arc<RwLock<VecDeque<TrafficSample>>>,
+    collection: Arc<RwLock<crate::traffic::CollectionStatus>>,
     resources: Arc<RwLock<VecDeque<ResourceSample>>>,
     traffic: Arc<RwLock<VecDeque<TrafficSample>>>,
 }
@@ -61,9 +76,19 @@ impl MetricsStore {
     pub fn new(capacity: usize) -> Self {
         Self {
             capacity: capacity.max(1),
+            host_traffic: Arc::new(RwLock::new(VecDeque::new())),
+            proxy_traffic: Arc::new(RwLock::new(VecDeque::new())),
+            collection: Arc::new(RwLock::new(Default::default())),
             resources: Arc::new(RwLock::new(VecDeque::with_capacity(capacity))),
             traffic: Arc::new(RwLock::new(VecDeque::with_capacity(capacity))),
         }
+    }
+
+    pub async fn set_collection(&self, status: crate::traffic::CollectionStatus) {
+        *self.collection.write().await = status;
+    }
+    pub async fn collection(&self) -> crate::traffic::CollectionStatus {
+        self.collection.read().await.clone()
     }
 
     pub fn spawn_sampler(&self, process_manager: ProcessManager) {
@@ -121,8 +146,26 @@ impl MetricsStore {
     }
 
     pub async fn push_traffic(&self, sample: TrafficSample) {
-        let mut traffic = self.traffic.write().await;
-        push_bounded(&mut traffic, sample, self.capacity);
+        let buffer = if sample.interface.is_some() {
+            &self.host_traffic
+        } else if sample.proxy_id.is_some() {
+            &self.proxy_traffic
+        } else {
+            &self.traffic
+        };
+        let mut traffic = buffer.write().await;
+        let cutoff = sample.timestamp - chrono::Duration::hours(1);
+        while traffic.front().is_some_and(|s| s.timestamp < cutoff) {
+            traffic.pop_front();
+        }
+        push_bounded(&mut traffic, sample, self.capacity.saturating_mul(10));
+    }
+
+    pub async fn host_traffic(&self) -> Vec<TrafficSample> {
+        self.host_traffic.read().await.iter().cloned().collect()
+    }
+    pub async fn proxy_traffic(&self) -> Vec<TrafficSample> {
+        self.proxy_traffic.read().await.iter().cloned().collect()
     }
 
     pub async fn resources(&self, limit: usize) -> Vec<ResourceSample> {
@@ -154,7 +197,7 @@ impl MetricsStore {
                 environment_id.is_none_or(|id| sample.environment_id == id)
                     && profile_id.is_none_or(|id| sample.profile_id == id)
             })
-            .take(limit.min(self.capacity))
+            .take(limit.min(self.capacity.saturating_mul(10)))
             .cloned()
             .collect::<Vec<_>>()
             .into_iter()
@@ -203,7 +246,7 @@ mod tests {
     #[tokio::test]
     async fn traffic_history_is_bounded_and_filterable() {
         let store = MetricsStore::new(2);
-        for profile_id in [1, 2, 1] {
+        for profile_id in (0..21).map(|i| i % 2 + 1) {
             store
                 .push_traffic(TrafficSample {
                     timestamp: chrono::Utc::now(),
@@ -212,11 +255,16 @@ mod tests {
                     received_bytes: 1,
                     sent_bytes: 2,
                     active_connections: 0,
+                    source: "external".into(),
+                    counter_epoch: String::new(),
+                    proxy_id: None,
+                    interface: None,
                 })
                 .await;
         }
-        assert_eq!(store.traffic(None, None, 10).await.len(), 2);
-        assert_eq!(store.traffic(Some(7), Some(1), 10).await.len(), 1);
+        assert_eq!(store.traffic(None, None, 100).await.len(), 20);
+        assert_eq!(store.traffic(Some(7), Some(1), 100).await.len(), 10);
+        assert!(store.traffic(Some(8), None, 100).await.is_empty());
     }
 
     #[test]

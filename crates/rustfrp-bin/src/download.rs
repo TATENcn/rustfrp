@@ -8,6 +8,58 @@ use tokio::io::AsyncWriteExt;
 
 pub const OFFICIAL_RELEASE_BASE: &str = "https://github.com/fatedier/frp/releases/download";
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct InstallProgress {
+    pub stage: &'static str,
+    pub downloaded_bytes: u64,
+    pub total_bytes: Option<u64>,
+}
+pub type ProgressCallback = std::sync::Arc<dyn Fn(InstallProgress) + Send + Sync>;
+pub fn report(
+    callback: &Option<ProgressCallback>,
+    stage: &'static str,
+    downloaded_bytes: u64,
+    total_bytes: Option<u64>,
+) {
+    if let Some(callback) = callback {
+        callback(InstallProgress {
+            stage,
+            downloaded_bytes,
+            total_bytes,
+        });
+    }
+}
+pub fn release_base(channel: Option<&str>, custom: Option<&str>) -> Result<String, FrpError> {
+    let base = match channel.unwrap_or(if custom.is_some() {
+        "custom"
+    } else {
+        "official"
+    }) {
+        "official" => OFFICIAL_RELEASE_BASE.to_owned(),
+        "ghfast" => format!("https://ghfast.top/{OFFICIAL_RELEASE_BASE}"),
+        "gh-proxy" => format!("https://gh-proxy.com/{OFFICIAL_RELEASE_BASE}"),
+        "custom" => custom
+            .ok_or_else(|| FrpError::Download("Custom HTTPS release base is required".into()))?
+            .trim()
+            .trim_end_matches('/')
+            .to_owned(),
+        _ => return Err(FrpError::Download("Unknown download channel".into())),
+    };
+    let parsed = reqwest::Url::parse(&base).map_err(|e| FrpError::Download(e.to_string()))?;
+    if parsed.scheme() != "https"
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return Err(FrpError::Download(
+            "Release base must be HTTPS without credentials, query, or fragment".into(),
+        ));
+    }
+    Ok(base)
+}
+
 pub fn asset_filename(version: &FrpVersion, platform: &str) -> String {
     let extension = if platform.starts_with("windows_") {
         "zip"
@@ -18,6 +70,43 @@ pub fn asset_filename(version: &FrpVersion, platform: &str) -> String {
 }
 
 pub async fn official_checksum(version: &FrpVersion, asset: &str) -> Result<String, FrpError> {
+    // GitHub API asset digests provide an independent official path when release downloads are blocked.
+    #[derive(serde::Deserialize)]
+    struct Asset {
+        name: String,
+        digest: Option<String>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Release {
+        assets: Vec<Asset>,
+    }
+    let api = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()?;
+    if let Ok(response) = api
+        .get(format!(
+            "https://api.github.com/repos/fatedier/frp/releases/tags/{}",
+            version.tag_name
+        ))
+        .header(reqwest::header::USER_AGENT, "rustfrp-version-manager")
+        .send()
+        .await
+    {
+        if response.status().is_success() {
+            if let Ok(release) = response.json::<Release>().await {
+                if let Some(hash) = release
+                    .assets
+                    .into_iter()
+                    .find(|a| a.name == asset)
+                    .and_then(|a| a.digest)
+                    .and_then(|d| d.strip_prefix("sha256:").map(str::to_owned))
+                    .filter(|h| h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit()))
+                {
+                    return Ok(hash);
+                }
+            }
+        }
+    }
     let url = format!(
         "{OFFICIAL_RELEASE_BASE}/{}/frp_sha256_checksums.txt",
         version.tag_name
@@ -76,6 +165,15 @@ pub async fn download_from(
     platform: &str,
     release_base: &str,
 ) -> Result<PathBuf, FrpError> {
+    download_with_progress(version, download_dir, platform, release_base, None).await
+}
+pub async fn download_with_progress(
+    version: &FrpVersion,
+    download_dir: &Path,
+    platform: &str,
+    release_base: &str,
+    progress: Option<ProgressCallback>,
+) -> Result<PathBuf, FrpError> {
     let filename = asset_filename(version, platform);
     let url = format!(
         "{}/{}/{}",
@@ -109,26 +207,38 @@ pub async fn download_from(
         )));
     }
 
-    let bytes = response.bytes().await?;
-
-    // 写入临时文件，成功后重命名
-    let tmp_path = output_path.with_file_name(format!(
-        "{}.tmp",
-        output_path
-            .file_name()
-            .ok_or_else(|| FrpError::Download("Invalid filename".into()))?
-            .to_string_lossy()
-    ));
+    let mut response = response;
+    let total = response.content_length();
+    const MAX_ARCHIVE: u64 = 256 * 1024 * 1024;
+    if total.is_some_and(|n| n > MAX_ARCHIVE) {
+        return Err(FrpError::Download("Archive exceeds 256 MiB limit".into()));
+    }
+    let tmp_path = output_path.with_extension("download.tmp");
     let mut file = tokio::fs::File::create(&tmp_path).await?;
-    file.write_all(&bytes).await?;
-    file.flush().await?;
+    let mut downloaded = 0u64;
+    let transfer = async {
+        while let Some(chunk) = response.chunk().await? {
+            downloaded = downloaded.saturating_add(chunk.len() as u64);
+            if downloaded > MAX_ARCHIVE {
+                return Err(FrpError::Download("Archive exceeds 256 MiB limit".into()));
+            }
+            file.write_all(&chunk).await?;
+            report(&progress, "downloading", downloaded, total);
+        }
+        file.flush().await?;
+        Ok::<_, FrpError>(())
+    }
+    .await;
     drop(file);
-
+    if let Err(e) = transfer {
+        let _ = tokio::fs::remove_file(&tmp_path).await;
+        return Err(e);
+    }
     tokio::fs::rename(&tmp_path, &output_path).await?;
 
     tracing::info!(
         path = %output_path.display(),
-        size_mb = bytes.len() as f64 / 1_048_576.0,
+        size_mb = downloaded as f64 / 1_048_576.0,
         "FRP download completed"
     );
 
@@ -161,5 +271,35 @@ mod tests {
         let version = FrpVersion::from_tag("0.70.1");
         assert!(asset_filename(&version, "linux_amd64").ends_with(".tar.gz"));
         assert!(asset_filename(&version, "windows_amd64").ends_with(".zip"));
+    }
+}
+
+#[cfg(test)]
+mod channel_tests {
+    use super::*;
+    #[test]
+    fn channel_urls_preserve_official_asset_paths_and_reject_unsafe_custom_bases() {
+        assert_eq!(
+            release_base(Some("official"), None).unwrap(),
+            OFFICIAL_RELEASE_BASE
+        );
+        assert_eq!(
+            release_base(Some("ghfast"), None).unwrap(),
+            format!("https://ghfast.top/{OFFICIAL_RELEASE_BASE}")
+        );
+        assert_eq!(
+            release_base(Some("gh-proxy"), None).unwrap(),
+            format!("https://gh-proxy.com/{OFFICIAL_RELEASE_BASE}")
+        );
+        for base in [
+            "http://example.com",
+            "https://user:pass@example.com",
+            "https://example.com?q=1",
+            "https://example.com/#fragment",
+        ] {
+            assert!(release_base(Some("custom"), Some(base)).is_err());
+        }
+        assert!(release_base(Some("unknown"), None).is_err());
+        assert!(release_base(Some("custom"), None).is_err());
     }
 }

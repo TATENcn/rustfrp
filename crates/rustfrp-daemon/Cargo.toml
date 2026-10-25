@@ -48,3 +48,6 @@ tempfile.workspace = true
 tokio-test.workspace = true
 serde_json.workspace = true
 rusqlite.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"

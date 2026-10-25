@@ -31,7 +31,7 @@ impl ClientCore {
     ///
     /// Opens (or creates) the SQLite database, runs migrations,
     pub async fn new(db_path: &str, config_dir: &str) -> Result<Self> {
-        Self::new_with_frpc(db_path, config_dir, None, true).await
+        Self::new_with_frpc(db_path, config_dir, None, false).await
     }
 
     /// Create a ClientCore with explicit control over FRP binary discovery.
@@ -44,6 +44,23 @@ impl ClientCore {
         config_dir: &str,
         frpc_path: Option<PathBuf>,
         auto_download: bool,
+    ) -> Result<Self> {
+        Self::new_with_manager(
+            db_path,
+            config_dir,
+            frpc_path,
+            auto_download,
+            rustfrp_bin::manager::VersionManager::default(),
+        )
+        .await
+    }
+
+    async fn new_with_manager(
+        db_path: &str,
+        config_dir: &str,
+        frpc_path: Option<PathBuf>,
+        auto_download: bool,
+        version_manager: rustfrp_bin::manager::VersionManager,
     ) -> Result<Self> {
         let config_dir = expand_tilde(config_dir);
 
@@ -59,13 +76,11 @@ impl ClientCore {
             migrate::run(&conn)?;
         }
 
-        let version_manager = rustfrp_bin::manager::VersionManager::default();
         let frpc_path = if let Some(path) = frpc_path {
             path
         } else if auto_download {
             // Ensure the managed binary is present. This may access the
-            // network on first run and intentionally preserves the historical
-            // behavior for non-container callers.
+            // network only when the caller explicitly opts in.
             let selected_version = std::env::var("RUSTFRP_FRP_VERSION")
                 .ok()
                 .or(version_manager.active_version().await)
@@ -97,7 +112,8 @@ impl ClientCore {
             config_dir.clone(),
             frpc_path.clone(),
             signal_handler.clone(),
-        );
+        )
+        .with_database(db.clone());
         let state = Arc::new(RwLock::new(ClientState::Uninitialized));
 
         tracing::info!(
@@ -178,8 +194,12 @@ impl ClientCore {
             let toml_path = self.config_dir.join(format!("{safe_name}.toml"));
             if toml_path.exists() {
                 if let Some(id) = profile.id {
-                    self.process_manager.start(id, &profile.name).await?;
-                    started += 1;
+                    match self.process_manager.start(id, &profile.name).await {
+                        Ok(()) => started += 1,
+                        Err(error) => {
+                            tracing::warn!(profile_id=id, %error, "frpc unavailable; keep management API available for repair")
+                        }
+                    }
                 }
             }
         }
@@ -288,6 +308,26 @@ fn expand_tilde(path: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn offline_initialization_without_frpc() {
+        let temp = tempfile::tempdir().unwrap();
+        let versions = temp.path().join("versions");
+        let core = ClientCore::new_with_manager(
+            temp.path().join("config.db").to_str().unwrap(),
+            temp.path().join("runtime").to_str().unwrap(),
+            None,
+            false,
+            rustfrp_bin::manager::VersionManager::new(versions.clone()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(core.frpc_path(), &PathBuf::from("frpc"));
+        assert!(
+            !versions.exists(),
+            "startup must not install any FRP binary"
+        );
+    }
 
     #[test]
     fn test_expand_tilde() {
