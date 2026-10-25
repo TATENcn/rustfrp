@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "type-check": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit",
     "check:icons": "bun scripts/check-ui-icons.ts",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "screenshots": "playwright test --config playwright.screenshots.config.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.0",

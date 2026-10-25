@@ -14,20 +14,59 @@ RustFRP 不修改 FRP 协议，也不接管流量转发。已有的现代格式 
 
 ## 界面预览
 
-| 仪表盘 | 代理分配 |
-| --- | --- |
-| ![RustFRP 仪表盘](docs/images/webui-dashboard.png) | ![RustFRP 代理分配](docs/images/webui-proxy-assignments.png) |
+界面基于 React、shadcn/ui 和 Recharts，支持中文 / English、浅色 / 深色主题。
 
-日志控制台支持实例切换、stdout/stderr 筛选、搜索、行数调整、复制和下载，并保留终端颜色。
+以下截图来自真实前端页面，使用隔离的演示数据：**3 台服务器、6 条代理规则、8 条分配关系**。流量曲线、运行状态和日志均为模拟内容，不代表性能测试结果。
 
-![RustFRP 日志控制台](docs/images/webui-logs.png)
+![仪表盘：资源趋势、运行进程与分服务器流量汇总](docs/images/webui-dashboard.png)
+
+<details>
+<summary>服务器配置与代理规则</summary>
+
+服务器可以分别固定 frpc 版本，或跟随系统默认。
+
+![服务器配置](docs/images/webui-servers.png)
+
+![代理规则](docs/images/webui-proxies.png)
+
+</details>
+
+<details>
+<summary>代理分配与实例管理</summary>
+
+按服务器查看代理、运行状态和 frpc 版本，执行启动、停止、重启或热重载。
+
+![代理分配](docs/images/webui-proxy-assignments.png)
+
+</details>
+
+<details>
+<summary>frpc 安装与多版本管理</summary>
+
+安装与启用分开，支持官方源、GHFast、GH-Proxy 和自定义 HTTPS 渠道。
+
+![FRP 版本管理](docs/images/webui-versions.png)
+
+</details>
+
+<details>
+<summary>日志控制台</summary>
+
+支持实例切换、stdout/stderr 筛选、搜索、行数调整、复制和下载，并保留终端颜色。
+
+![日志控制台](docs/images/webui-logs.png)
+
+</details>
+
+截图可通过[演示截图脚本](plugins/webui/README.md#readme-screenshots)重新生成，不向真实管理服务写入数据。
 
 ## 为什么使用 RustFRP
 
 - **集中管理配置**：在中英文 WebUI 中维护服务器、代理、绑定关系和 Visitor，SQLite 是唯一配置来源。
 - **同时运行多个 frpc**：每个服务器配置对应独立进程；单个连接故障不会影响其他实例。
 - **兼容原生 FRP**：生成标准 TOML，支持导入现有配置，不引入私有隧道协议。
-- **自动管理 FRP 二进制**：按平台下载 frpc/frps，强制校验官方 SHA256，支持多版本安装、切换与失败回滚。
+- **按需安装与选择版本**：管理台无需 frpc 即可启动；安装时校验官方 SHA256，每台服务器可固定版本或跟随系统默认。
+- **查看流量去向**：每秒采样，按上游服务器、本地代理或系统网卡查看速率与缓存区间汇总。
 - **面向长期运行**：支持热重载、优雅退出、崩溃恢复、指数退避和结构化故障诊断。
 - **可选集中运维**：可通过 Control/Agent 管理远端 frps，并接入 Prometheus、Grafana 和 Alertmanager。
 - **安全地扩展**：提供 REST API、租户与权限策略，以及受权限、时间、计算量和内存限制的无 WASI 插件沙箱。
@@ -39,10 +78,10 @@ RustFRP 不修改 FRP 协议，也不接管流量转发。已有的现代格式 
 | 配置管理 | Profile、Proxy、Binding、Visitor 与多环境管理；批量创建 TCP/UDP 映射；端口冲突检查 |
 | FRP 协议 | TCP、UDP、HTTP、HTTPS、STCP、XTCP、SUDP、TCPMUX；Token、OIDC、`user`、`serverUser` |
 | 进程守护 | 启动、停止、重启、热重载、优雅退出、崩溃恢复、重复故障归并 |
-| 版本管理 | Linux、Windows、macOS 的 x86_64/arm64；官方源或自定义 HTTPS 镜像；官方校验和验证 |
+| 版本管理 | Linux、Windows、macOS 的 x86_64/arm64；后台安装；官方源、GHFast、GH-Proxy 或自定义 HTTPS 镜像；按服务器选择版本；官方校验和验证 |
 | 迁移备份 | 事务化导入现代 `frpc.toml`；一致性 SQLite 备份导出 |
 | 服务端管理 | Agent 主动拉取配置，ETag 缓存，`frps verify` 校验，原子切换与失败回滚 |
-| 可观测性 | 流量、CPU、内存、进程和节点状态；Prometheus 指标及预配置 Grafana 仪表盘 |
+| 可观测性 | 资源趋势与运行进程侧栏；三种口径的流量统计；日志筛选；可选 Prometheus / Grafana |
 | API 与扩展 | REST API、Token/策略鉴权、租户隔离、WASM 插件及参考插件 |
 
 ## 系统架构
@@ -55,9 +94,34 @@ RustFRP 的核心链路是：**SQLite 保存期望状态 → 生成并校验 TOM
 
 ## 快速开始
 
-### Docker Compose
+### Docker 单容器
 
-准备 API Token 和 Grafana 管理员密码，然后启动完整部署：
+使用 [v0.4.0](https://github.com/TATENcn/rustfrp/releases/tag/v0.4.0) 镜像（Linux amd64 / arm64）：
+
+```bash
+export RUSTFRP_API_TOKEN="$(openssl rand -hex 32)"
+# 保存这个 Token，稍后用于登录管理台
+printf '%s\n' "$RUSTFRP_API_TOKEN"
+
+docker run -d --name rustfrp --restart unless-stopped \
+  -p 127.0.0.1:7900:7900 \
+  -v rustfrp-data:/data \
+  -e RUSTFRP_API_TOKEN \
+  ghcr.io/tatencn/rustfrp:0.4.0
+```
+
+打开 <http://127.0.0.1:7900/>，输入上面的 Token。容器默认不下载 frpc，即使尚未安装 frpc，也能打开前端、编辑配置和使用管理 API。数据保存在 `rustfrp-data` 卷中。
+
+1. 在「系统状态 → FRP 版本」选择版本和下载渠道，安装后设为系统默认。
+2. 在「服务器配置」添加 frps 连接；需要时为该服务器固定 frpc 版本。
+3. 在「代理规则」创建本地服务映射，再到「代理分配」将代理分配给服务器。
+4. 启动实例，查看日志和流量，验证映射地址。
+
+上面的端口仅绑定本机；远程部署可通过 SSH 转发或 TLS 反向代理访问。容器内的 `127.0.0.1` 指向容器自身，代理宿主机服务时应填写容器可达的宿主机地址。
+
+### Docker Compose（含监控组件）
+
+需要 frps、Control、Prometheus、Grafana 和 Alertmanager 的完整部署时，在仓库根目录执行：
 
 ```bash
 mkdir -p deploy/compose/secrets
@@ -79,7 +143,7 @@ Compose 会启动 daemon、frps、control 及监控组件。数据库、运行�
 
 ### 从源码运行
 
-需要 Rust 1.95+、Bun、一个可用的 frps，以及首次启动时可访问的 FRP Release 下载源。
+构建需要 Rust 1.95+、Bun 和 Just。管理服务启动不依赖 frpc 或下载源；实际建立隧道时才需要安装 frpc，并准备可用的 frps。
 
 ```bash
 # 终端一：运行内嵌 WebUI 和 HTTP API 的 daemon
@@ -99,12 +163,7 @@ cargo run -p rustfrp-daemon -- \
   --api-token <token>
 ```
 
-打开 <http://127.0.0.1:7900/>，依次完成以下操作：
-
-1. 添加 frps 服务器配置。
-2. 创建本地代理或 Visitor。
-3. 建立并启用绑定关系。
-4. 启动对应 frpc，使用映射地址验证连接。
+启动后打开 <http://127.0.0.1:7900/>，按上述安装版本、配置服务器和分配代理的顺序操作。
 
 ## 配置迁移与备份
 
@@ -119,9 +178,30 @@ GET  /api/v1/config/export
 
 ## FRP 二进制与版本管理
 
-首次启动时，RustFRP 会下载当前平台对应的 frpc，无需依赖系统 `PATH`。版本按 `versions/<version>/<platform>/` 隔离，可以共存、切换和删除。自定义 HTTPS 镜像只提供发布归档，校验和仍取自 fatedier/frp 官方发布清单。
+在「系统状态 → FRP 版本」按需安装。下载在后台运行，页面显示进度和错误；安装本身不会切换默认版本或重启实例。版本按 `versions/<version>/<platform>/` 隔离存放。
 
-切换版本时，RustFRP 会重启切换前正在运行的 frpc；如果新版本启动失败，则恢复原版本和原有进程。也可以通过 `RUSTFRP_FRP_VERSION` 指定 daemon 的启动版本。
+- **下载渠道**：GitHub 官方、GHFast（`ghfast.top`）、GH-Proxy 或自定义 HTTPS 地址。第三方仅提供发布归档，SHA256 校验信息仍来自官方；获取失败或校验不符时停止安装。
+- **服务器版本**：每个服务器配置对应一个 frpc 进程，该服务器下的代理共用版本。在服务器列表点击版本按钮，选择固定版本或跟随系统默认；保存后点击「重启并应用版本」生效。
+- **系统默认**：切换默认版本仅重启跟随默认的运行实例，固定版本实例不受影响。切换失败会恢复原默认并尝试恢复相关进程。
+- **删除保护**：被配置引用、当前默认或仍有进程运行的版本不能删除。
+
+默认离线启动管理服务。旧参数 `--no-auto-download` / `RUSTFRP_NO_AUTO_DOWNLOAD=true` 继续兼容；只有显式设置 `--auto-download` / `RUSTFRP_AUTO_DOWNLOAD=true` 才在启动时下载，此时可通过 `RUSTFRP_FRP_VERSION` 指定下载版本，启动可能等待网络。
+
+详见 [frpc 版本与安装渠道](docs/frpc-versions.md)。
+
+## 流量与资源监控
+
+仪表盘展示 CPU / 内存趋势，右侧集中展示运行实例与最近异常。网络流量**后台每 1 秒采样，页面每 5 秒刷新**，可切换三种统计口径：
+
+| 口径 | 查看内容 |
+| --- | --- |
+| 上游服务器 | 当前环境全部或单个服务器的 TCP 收发速率、区间汇总，包含心跳与加密开销 |
+| 本地代理 | 按服务器及代理分别统计，可汇总同一代理在不同服务器上的流量 |
+| 系统网卡 | 守护进程所在网络命名空间的收发量，可筛选出口网卡；容器内不一定等同于物理宿主机 |
+
+三种口径不能相加。历史仅保存在内存中，最多保留最近一小时，每类上限 36,000 条样本，多对象共享容量；服务重启后清空。区间汇总只包含有效采样，不是日/月账单。
+
+上游流量采集当前支持 Linux 上直连的 TCP / WebSocket / WSS；短连接可能漏采，UDP、QUIC 等不适用。完整支持范围、统计方向和排查方法见 [网络流量监控](docs/traffic-monitoring.md)。
 
 ## 可选的 frps Agent
 
@@ -187,6 +267,10 @@ bash scripts/e2e-local.sh  # 双 frps + 双 frpc 本地闭环测试
 
 ## 文档
 
+- [frpc 版本与安装渠道](docs/frpc-versions.md)
+- [网络流量监控](docs/traffic-monitoring.md)
+- [Bun 开发管理指南](docs/development-mode.md)
+
 - [架构与 ADR](AGENTS/01-ARCHITECTURE.md)
 - [硬性约束](AGENTS/02-CONSTRAINTS.md)
 - [开发规范](AGENTS/03-DEVELOPMENT.md)
@@ -198,13 +282,3 @@ bash scripts/e2e-local.sh  # 双 frps + 双 frpc 本地闭环测试
 ## 许可证
 
 [AGPL-3.0-only](LICENSE) © RustFRP contributors
-
-### 首次启动与 frpc 安装
-
-管理服务默认离线启动：未安装 frpc 时也可以打开 WebUI 和使用管理 API。
-在「系统状态 → FRP 版本」中安装版本，并设为系统默认，或在服务器配置中指定版本，之后再启动代理实例。
-Docker 自定义 `command` 时也无需额外添加禁用下载参数。
-
-`--no-auto-download` / `RUSTFRP_NO_AUTO_DOWNLOAD=true` 继续兼容旧部署。
-仅在确实需要启动时下载的场景使用 `--auto-download` / `RUSTFRP_AUTO_DOWNLOAD=true`；该选项可能等待网络。
-旧镜像不会自动获得此行为，请重新构建或更新镜像；尚未更新时可在原启动命令末尾追加 `--no-auto-download`。
