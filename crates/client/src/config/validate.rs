@@ -271,6 +271,38 @@ impl LocalVisitor {
                     ));
                 }
             }
+            if self.max_retries_an_hour.is_some_and(|value| value < 1) {
+                return Err(ClientError::ConfigValidation(
+                    "max_retries_an_hour must be >= 1".into(),
+                ));
+            }
+            if self.min_retry_interval.is_some_and(|value| value < 1) {
+                return Err(ClientError::ConfigValidation(
+                    "min_retry_interval must be >= 1".into(),
+                ));
+            }
+            if self.fallback_timeout_ms.is_some_and(|value| value < 1) {
+                return Err(ClientError::ConfigValidation(
+                    "fallback_timeout_ms must be >= 1".into(),
+                ));
+            }
+        } else if self.xtcp_protocol.is_some()
+            || self.keep_tunnel_open.is_some()
+            || self.max_retries_an_hour.is_some()
+            || self.min_retry_interval.is_some()
+            || self.fallback_to.is_some()
+            || self.fallback_timeout_ms.is_some()
+        {
+            return Err(ClientError::ConfigValidation(
+                "XTCP-only fields are not valid for stcp/sudp visitors".into(),
+            ));
+        }
+
+        // SUDP visitors cannot skip the bind port (frp rejects bindPort < 0).
+        if matches!(self.visitor_type, VisitorType::Sudp) && self.bind_port < 0 {
+            return Err(ClientError::ConfigValidation(
+                "sudp visitor requires a non-negative bind_port".into(),
+            ));
         }
         // Profile ID must be valid
         if self.profile_id <= 0 {
@@ -531,5 +563,52 @@ mod tests {
         p.wire_protocol = Some("v2".into());
         p.auth_additional_scopes = Some(vec!["HeartBeats".into(), "NewWorkConns".into()]);
         assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn xtcp_only_fields_rejected_on_stcp_visitor() {
+        use crate::config::model::VisitorType;
+        let base = LocalVisitor {
+            name: "v".into(),
+            visitor_type: VisitorType::Stcp,
+            server_name: "svc".into(),
+            bind_port: 9000,
+            secret_key: Some("k".into()),
+            profile_id: 1,
+            ..Default::default()
+        };
+        assert!(base.validate().is_ok());
+
+        let mut with_xtcp_field = base.clone();
+        with_xtcp_field.keep_tunnel_open = Some(true);
+        assert!(with_xtcp_field.validate().is_err());
+
+        let mut sudp_without_port = base;
+        sudp_without_port.visitor_type = VisitorType::Sudp;
+        sudp_without_port.bind_port = -1;
+        assert!(sudp_without_port.validate().is_err());
+    }
+
+    #[test]
+    fn xtcp_visitor_accepts_and_bounds_retry_settings() {
+        use crate::config::model::VisitorType;
+        let mut visitor = LocalVisitor {
+            name: "v".into(),
+            visitor_type: VisitorType::Xtcp,
+            server_name: "svc".into(),
+            bind_port: 9000,
+            secret_key: Some("k".into()),
+            profile_id: 1,
+            xtcp_protocol: Some("kcp".into()),
+            keep_tunnel_open: Some(true),
+            max_retries_an_hour: Some(8),
+            min_retry_interval: Some(90),
+            fallback_timeout_ms: Some(1000),
+            ..Default::default()
+        };
+        assert!(visitor.validate().is_ok());
+
+        visitor.min_retry_interval = Some(0);
+        assert!(visitor.validate().is_err());
     }
 }
