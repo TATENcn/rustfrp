@@ -38,6 +38,13 @@
 - Profile and proxy validation is enforced on create/update, including wire
   protocol, auth scopes, log level, `VirtualNet` feature-gate consistency, and
   tcpmux multiplexer rules.
+- `GET /api/v1/profiles/{id}/proxy-status` reports each proxy's real state from
+  frpc's admin API, so a proxy rejected by frps is visible instead of appearing
+  healthy because its process is alive.
+- The WebUI exposes the remaining frpc fields: bandwidth limit and mode, proxy
+  protocol version, health check settings, `allowUsers`, XTCP NAT traversal,
+  `routeByHTTPUser`, request/response headers, annotations, metadatas, the FRP
+  client plugin blob, and the XTCP visitor fields.
 
 ## [0.4.0] - 2026-10-25
 

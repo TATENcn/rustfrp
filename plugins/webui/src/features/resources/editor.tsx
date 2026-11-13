@@ -75,6 +75,28 @@ const chinese: Record<string, string> = {
   virtual_net_address: "虚拟网络地址",
   log_level: "日志级别",
   log_max_days: "日志保留天数",
+  xtcp_protocol: "XTCP 协议",
+  keep_tunnel_open: "保持隧道常开",
+  max_retries_an_hour: "每小时最大重试",
+  min_retry_interval: "最小重试间隔（秒）",
+  fallback_to: "回退访问者",
+  fallback_timeout_ms: "回退超时（毫秒）",
+  bandwidth_limit: "带宽限制",
+  bandwidth_limit_mode: "限速位置",
+  proxy_protocol_version: "Proxy Protocol 版本",
+  health_check_type: "健康检查类型",
+  health_check_interval_s: "健康检查间隔（秒）",
+  health_check_timeout_s: "健康检查超时（秒）",
+  health_check_max_failed: "健康检查失败上限",
+  health_check_path: "健康检查路径",
+  allow_users: "允许的用户",
+  nat_traversal_disable_assisted_addrs: "禁用辅助地址（XTCP）",
+  route_by_http_user: "按 HTTP 用户路由",
+  request_headers: "请求头（JSON）",
+  response_headers: "响应头（JSON）",
+  annotations: "注解（JSON）",
+  metadatas: "元数据（JSON）",
+  plugin_config: "FRP 原生插件（JSON）",
 };
 export function ResourceEditor({
   kind,
@@ -247,6 +269,18 @@ export function ResourceEditor({
         e.preventDefault();
         if (busy) return;
         const payload = { ...form };
+        // Optional select fields emit "" for "not set"; the API models absence
+        // as null, and "" would be treated as a configured value downstream.
+        for (const key of [
+          "health_check_type",
+          "proxy_protocol_version",
+          "bandwidth_limit_mode",
+          "wire_protocol",
+          "log_level",
+          "xtcp_protocol",
+        ])
+          if (typeof payload[key] === "string" && !payload[key]!.trim())
+            payload[key] = null;
         for (const key of [
           "custom_domains",
           "locations",

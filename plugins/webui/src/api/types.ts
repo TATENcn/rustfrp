@@ -155,6 +155,23 @@ export interface ProfileRuntimeResponse {
   config_pending: boolean
 }
 
+// ── Per-proxy live status from the frpc admin API ──
+export interface ProxyStatus {
+  proxy_type: string
+  name: string
+  status: string
+  error?: string
+  local_addr: string
+  remote_addr: string
+}
+
+export interface ProxyStatusReport {
+  profile_id: number
+  available: boolean
+  error?: string
+  proxies: ProxyStatus[]
+}
+
 // ── LocalVisitor (matches Rust LocalVisitor 1:1) ──
 export interface LocalVisitor {
   id?: number

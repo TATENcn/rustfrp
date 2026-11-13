@@ -1,5 +1,11 @@
 import { apiGet, apiPost, apiPut, apiDelete } from '@/api/client'
-import type { ApiEnvelope, BindingRule, FrpsProfile, ProfileRuntimeResponse } from '@/api/types'
+import type {
+  ApiEnvelope,
+  BindingRule,
+  FrpsProfile,
+  ProfileRuntimeResponse,
+  ProxyStatusReport,
+} from '@/api/types'
 
 export function listProfiles(): Promise<ApiEnvelope<FrpsProfile[]>> {
   return apiGet<FrpsProfile[]>('/profiles')
@@ -36,3 +42,6 @@ export function startProfile(id: number): Promise<ApiEnvelope<ProfileRuntimeResp
 export function stopProfile(id: number): Promise<ApiEnvelope<ProfileRuntimeResponse>> {
   return apiPost<ProfileRuntimeResponse>(`/profiles/${id}/stop`)
 }
+
+export const getProxyStatus = (id: number) =>
+  apiGet<ProxyStatusReport>(`/profiles/${id}/proxy-status`)

@@ -19,6 +19,7 @@ pub mod metrics;
 pub mod profile_version;
 pub mod profiles;
 pub mod proxies;
+pub mod proxy_status;
 pub mod system;
 pub mod visitors;
 
@@ -205,6 +206,10 @@ pub fn create_router(state: ApiState, auth: impl AuthMiddleware) -> Router {
         .route(
             "/api/v1/profiles/:id/runtime",
             axum::routing::get(profiles::runtime),
+        )
+        .route(
+            "/api/v1/profiles/:id/proxy-status",
+            axum::routing::get(proxy_status::profile_proxy_status),
         )
         .route(
             "/api/v1/profiles/:id/start",

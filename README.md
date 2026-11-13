@@ -268,6 +268,7 @@ bash scripts/e2e-local.sh  # 双 frps + 双 frpc 本地闭环测试
 ## 文档
 
 - [frpc 版本与安装渠道](docs/frpc-versions.md)
+- [热重载与逐代理状态](docs/hot-reload.md)
 - [网络流量监控](docs/traffic-monitoring.md)
 - [Bun 开发管理指南](docs/development-mode.md)
 
