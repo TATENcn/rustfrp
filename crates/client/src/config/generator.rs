@@ -4,9 +4,9 @@
 //! 原子写入：tmp → rename（PERF-003）。
 
 use crate::config::model::{
-    AuthConfig, FrpcConfig, HealthCheckConfig, LoadBalancerConfig, NatTraversalConfig,
+    AuthConfig, FrpcConfig, HealthCheckConfig, LoadBalancerConfig, LogConfig, NatTraversalConfig,
     OidcClientConfig, ProxyEntry, ProxyTransportConfig, QuicConfig, TlsConfig, TransportConfig,
-    VisitorEntry, VisitorTransportConfig, WebServerConfig,
+    VirtualNetConfig, VisitorEntry, VisitorTransportConfig, WebServerConfig,
 };
 use crate::db::Database;
 use crate::error::{ClientError, Result};
@@ -140,12 +140,17 @@ async fn build_frpc_config(
     bindings: &[&crate::config::model::BindingRule],
     db: &Database,
 ) -> Result<FrpcConfig> {
-    let tls = if profile.tls_enable {
+    let tls = if profile.tls_enable
+        || profile.tls_server_name.is_some()
+        || profile.tls_disable_custom_first_byte.is_some()
+    {
         Some(TlsConfig {
-            enable: true,
+            enable: profile.tls_enable,
             cert_file: profile.tls_cert_file.clone(),
             key_file: profile.tls_key_file.clone(),
             trusted_ca_file: profile.tls_trusted_ca_file.clone(),
+            server_name: profile.tls_server_name.clone(),
+            disable_custom_first_byte: profile.tls_disable_custom_first_byte,
         })
     } else {
         None
@@ -153,6 +158,7 @@ async fn build_frpc_config(
 
     let transport = Some(TransportConfig {
         protocol: profile.transport_protocol.clone(),
+        wire_protocol: profile.wire_protocol.clone(),
         tls,
         heartbeat_interval: Some(profile.heartbeat_interval),
         heartbeat_timeout: Some(profile.heartbeat_timeout),
@@ -256,12 +262,21 @@ async fn build_frpc_config(
             Some(AuthConfig {
                 method: Some("oidc".into()),
                 token: None,
+                additional_scopes: profile.auth_additional_scopes.clone(),
                 oidc: Some(OidcClientConfig {
                     client_id: client_id.clone(),
                     client_secret: client_secret.clone(),
                     audience: profile.oidc_audience.clone(),
                     scope: profile.oidc_scope.clone(),
                     token_endpoint_url: token_url.clone(),
+                    additional_endpoint_params: parse_json_field(
+                        &profile.name,
+                        "oidc_additional_params",
+                        &profile.oidc_additional_params,
+                    ),
+                    trusted_ca_file: profile.oidc_trusted_ca_file.clone(),
+                    insecure_skip_verify: profile.oidc_insecure_skip_verify,
+                    proxy_url: profile.oidc_proxy_url.clone(),
                 }),
             })
         } else {
@@ -270,18 +285,14 @@ async fn build_frpc_config(
             ));
         }
     } else if profile.auth_method.as_deref() == Some("token") || profile.auth_method.is_none() {
-        match token.clone() {
-            Some(token) => Some(AuthConfig {
-                method: Some("token".into()),
-                token: Some(token),
-                oidc: None,
-            }),
-            None => {
-                return Err(ClientError::ConfigValidation(
-                    "Token is required when token authentication is selected".into(),
-                ));
-            }
-        }
+        // An empty token means frps has no `auth.token`; omit the block and let
+        // frpc use its default (token auth with an empty secret).
+        token.clone().map(|token| AuthConfig {
+            method: Some("token".into()),
+            token: Some(token),
+            additional_scopes: profile.auth_additional_scopes.clone(),
+            oidc: None,
+        })
     } else {
         return Err(ClientError::ConfigValidation(format!(
             "Unsupported authentication method: {}",
@@ -311,6 +322,16 @@ async fn build_frpc_config(
         udp_packet_size: profile.udp_packet_size,
         includes: profile.includes.clone(),
         feature_gates: parse_json_field(&profile.name, "feature_gates", &profile.feature_gates),
+        client_id: profile.client_id.clone(),
+        start: profile.start.clone().filter(|names| !names.is_empty()),
+        log: build_log_config(profile),
+        virtual_net: profile
+            .virtual_net_address
+            .as_ref()
+            .filter(|address| !address.trim().is_empty())
+            .map(|address| VirtualNetConfig {
+                address: address.clone(),
+            }),
         proxies,
         visitors,
     })
@@ -384,6 +405,21 @@ fn build_proxy_entries(proxy: &crate::config::model::LocalProxy) -> Vec<ProxyEnt
     };
 
     vec![entry]
+}
+
+/// Build the `[log]` section only when the user configured log options.
+///
+/// RustFRP always redirects frpc stdout/stderr into its own log files, so
+/// emitting the section is optional and left to explicit user settings.
+fn build_log_config(profile: &crate::config::model::FrpsProfile) -> Option<LogConfig> {
+    if profile.log_to.is_none() && profile.log_level.is_none() && profile.log_max_days.is_none() {
+        return None;
+    }
+    Some(LogConfig {
+        to: profile.log_to.clone(),
+        level: profile.log_level.clone(),
+        max_days: profile.log_max_days,
+    })
 }
 
 /// Build QuicConfig from FrpsProfile, returning None if no QUIC fields are set.
@@ -587,6 +623,65 @@ mod tests {
             .unwrap()
             .to_string_lossy()
             .contains("Test_Server"));
+    }
+
+    /// Fields that only matter for advanced deployments must still round-trip
+    /// from SQLite into the generated TOML.
+    #[tokio::test]
+    async fn advanced_common_config_round_trips_into_toml() {
+        let db = setup_db().await;
+        let profile_id = db
+            .insert_profile(&FrpsProfile {
+                name: "advanced".into(),
+                server_addr: "frp.example.com".into(),
+                token: "t".into(),
+                client_id: Some("edge-1".into()),
+                wire_protocol: Some("v2".into()),
+                auth_additional_scopes: Some(vec!["HeartBeats".into()]),
+                start: Some(vec!["svc".into()]),
+                log_level: Some("warn".into()),
+                tls_server_name: Some("frps.example.com".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let proxy_id = db
+            .insert_proxy(&LocalProxy {
+                name: "svc".into(),
+                local_port: 8080,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        db.insert_binding(&BindingRule {
+            profile_id,
+            proxy_id,
+            enabled: true,
+            running: true,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+        let output_dir = TempDir::new().unwrap();
+        let paths = generate_all_frpc_tomls(&db, output_dir.path())
+            .await
+            .unwrap();
+        let content = std::fs::read_to_string(&paths[0]).unwrap();
+
+        for expected in [
+            "clientID = \"edge-1\"",
+            "wireProtocol = \"v2\"",
+            "additionalScopes = [\"HeartBeats\"]",
+            "start = [\"svc\"]",
+            "level = \"warn\"",
+            "serverName = \"frps.example.com\"",
+        ] {
+            assert!(
+                content.contains(expected),
+                "missing {expected} in:\n{content}"
+            );
+        }
     }
 
     #[tokio::test]

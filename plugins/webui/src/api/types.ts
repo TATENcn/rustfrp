@@ -69,6 +69,19 @@ export interface FrpsProfile {
   includes?: string[] | null
   store_path?: string | null
   feature_gates?: string | null
+  client_id?: string | null
+  wire_protocol?: string | null
+  auth_additional_scopes?: string[] | null
+  oidc_additional_params?: string | null
+  oidc_trusted_ca_file?: string | null
+  oidc_insecure_skip_verify?: boolean | null
+  oidc_proxy_url?: string | null
+  tls_server_name?: string | null
+  tls_disable_custom_first_byte?: boolean | null
+  log_to?: string | null
+  log_level?: string | null
+  log_max_days?: number | null
+  virtual_net_address?: string | null
   created_at: string
   updated_at: string
 }

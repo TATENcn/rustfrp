@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
 /// 当前最新的 schema 版本
-const LATEST_VERSION: i32 = 16;
+const LATEST_VERSION: i32 = 17;
 
 /// 运行所有待执行的迁移
 ///
@@ -99,6 +99,7 @@ fn apply_migration(conn: &Connection, version: i32) -> Result<()> {
         14 => migrate_v14(&tx)?,
         15 => migrate_v15(&tx)?,
         16 => migrate_v16(&tx)?,
+        17 => migrate_v17(&tx)?,
         _ => {
             return Err(ClientError::DatabaseMigration(format!(
                 "Unknown migration version: {version}"
@@ -815,6 +816,58 @@ fn migrate_v16(tx: &rusqlite::Transaction) -> Result<()> {
         }
     }
     tracing::info!("V16 Migration: Add tcpmux multiplexer and frpc admin port");
+    Ok(())
+}
+
+/// V17: remaining frpc common-config fields that were modelled but never
+/// persisted, so they could not survive a restart.
+fn migrate_v17(tx: &rusqlite::Transaction) -> Result<()> {
+    let columns = [
+        ("client_id", "TEXT"),
+        ("wire_protocol", "TEXT"),
+        ("auth_additional_scopes", "TEXT"),
+        ("oidc_additional_params", "TEXT"),
+        ("oidc_trusted_ca_file", "TEXT"),
+        ("oidc_proxy_url", "TEXT"),
+        ("tls_server_name", "TEXT"),
+        ("log_to", "TEXT"),
+        ("log_level", "TEXT"),
+        ("log_max_days", "INTEGER"),
+        ("virtual_net_address", "TEXT"),
+    ];
+    for (column, kind) in columns {
+        match tx.execute(
+            &format!("ALTER TABLE frps_profile ADD COLUMN {column} {kind} DEFAULT NULL"),
+            [],
+        ) {
+            Ok(_) => {}
+            Err(error) if error.to_string().contains("duplicate column") => {
+                tracing::info!(column, "V17 column already exists, skipping");
+            }
+            Err(error) => {
+                return Err(ClientError::DatabaseMigration(format!(
+                    "Failed to add {column} column: {error}"
+                )));
+            }
+        }
+    }
+    for column in ["oidc_insecure_skip_verify", "tls_disable_custom_first_byte"] {
+        match tx.execute(
+            &format!("ALTER TABLE frps_profile ADD COLUMN {column} INTEGER DEFAULT NULL"),
+            [],
+        ) {
+            Ok(_) => {}
+            Err(error) if error.to_string().contains("duplicate column") => {
+                tracing::info!(column, "V17 column already exists, skipping");
+            }
+            Err(error) => {
+                return Err(ClientError::DatabaseMigration(format!(
+                    "Failed to add {column} column: {error}"
+                )));
+            }
+        }
+    }
+    tracing::info!("V17 Migration: Add remaining frpc common config columns");
     Ok(())
 }
 

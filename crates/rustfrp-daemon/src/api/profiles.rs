@@ -80,6 +80,8 @@ pub async fn create(
     (axum::http::StatusCode, Json<ApiResponse<FrpsProfile>>),
     (axum::http::StatusCode, Json<ApiResponse<()>>),
 > {
+    profile.validate().map_err(api_error)?;
+
     // Server-managed timestamps
     let now = Utc::now().to_rfc3339();
     profile.created_at = now.clone();
@@ -129,6 +131,7 @@ pub async fn update(
     if let Ok(existing) = state.db.get_profile(id).await {
         profile.created_at = existing.created_at;
     }
+    profile.validate().map_err(api_error)?;
 
     state.db.update_profile(&profile).await.map_err(|e| {
         (

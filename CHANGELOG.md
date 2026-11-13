@@ -24,6 +24,20 @@
 - `profile_runtime.admin_port` / `admin_password` and `local_proxy.multiplexer`
   (schema V16). Existing profiles get a loopback admin port on their next
   configuration generation.
+- Client common-config coverage (schema V17): `clientID`, `transport.wireProtocol`,
+  `auth.additionalScopes`, `start`, `log.to`/`log.level`/`log.maxDays`,
+  `virtualNet.address`, `transport.tls.serverName`,
+  `transport.tls.disableCustomTLSFirstByte`, and the OIDC
+  `additionalEndpointParams`/`trustedCaFile`/`insecureSkipVerify`/`proxyURL`
+  fields are now modelled, persisted, imported, and emitted.
+- `frpc.toml` import honours frp's initialism keys (`clientID`, `localIP`,
+  `proxyURL`, `tokenEndpointURL`, `routeByHTTPUser`, `tcpMux*`, `bandwidthLimit*`,
+  `proxyProtocolVersion`, `httpHeaders`, `groupKey`, `maxDays`, `wireProtocol`).
+  They previously did not match and were silently dropped — `localIP` fell back
+  to `127.0.0.1`.
+- Profile and proxy validation is enforced on create/update, including wire
+  protocol, auth scopes, log level, `VirtualNet` feature-gate consistency, and
+  tcpmux multiplexer rules.
 
 ## [0.4.0] - 2026-10-25
 

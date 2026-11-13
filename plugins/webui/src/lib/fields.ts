@@ -71,6 +71,62 @@ export const profileFields: Field[] = [
   },
   { key: "user", label: "User (prefix)" },
   { key: "login_fail_exit", label: "Login Fail Exit", kind: "switch" },
+  { key: "client_id", label: "Client ID" },
+  {
+    key: "wire_protocol",
+    label: "Wire Protocol",
+    kind: "select",
+    options: ["v1", "v2"],
+  },
+  {
+    key: "auth_additional_scopes",
+    label: "Auth Additional Scopes",
+    kind: "list",
+    when: (f) => f.auth_method !== "none",
+  },
+  {
+    key: "tls_server_name",
+    label: "TLS Server Name",
+    when: (f) => !!f.tls_enable,
+  },
+  {
+    key: "tls_disable_custom_first_byte",
+    label: "TLS Disable Custom First Byte",
+    kind: "switch",
+    when: (f) => !!f.tls_enable,
+  },
+  {
+    key: "oidc_additional_params",
+    label: "OIDC Additional Endpoint Params (JSON)",
+    when: (f) => f.auth_method === "oidc",
+  },
+  {
+    key: "oidc_trusted_ca_file",
+    label: "OIDC Trusted CA File",
+    when: (f) => f.auth_method === "oidc",
+  },
+  {
+    key: "oidc_insecure_skip_verify",
+    label: "OIDC Insecure Skip Verify",
+    kind: "switch",
+    when: (f) => f.auth_method === "oidc",
+  },
+  {
+    key: "oidc_proxy_url",
+    label: "OIDC Proxy URL",
+    when: (f) => f.auth_method === "oidc",
+  },
+  { key: "start", label: "Start (proxy allowlist)", kind: "list" },
+  { key: "dns_server", label: "DNS Server" },
+  { key: "nat_hole_stun_server", label: "NAT Hole STUN Server" },
+  { key: "virtual_net_address", label: "Virtual Net Address" },
+  {
+    key: "log_level",
+    label: "Log Level",
+    kind: "select",
+    options: ["trace", "debug", "info", "warn", "error"],
+  },
+  { key: "log_max_days", label: "Log Max Days", kind: "number", min: 1 },
 ];
 export const proxyFields: Field[] = [
   { key: "name", label: "Name", required: true },

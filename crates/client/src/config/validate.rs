@@ -49,13 +49,9 @@ impl FrpsProfile {
                     ));
                 }
             }
-            Some("token") | None => {
-                if self.token.trim().is_empty() {
-                    return Err(ClientError::MissingRequiredField(
-                        "token is required for FRP authentication".into(),
-                    ));
-                }
-            }
+            // An empty token is legitimate: frp accepts it when frps has no
+            // `auth.token` configured (`auth.method = "token"` on both sides).
+            Some("token") | None => {}
             Some(method) => {
                 return Err(ClientError::ConfigValidation(format!(
                     "Unsupported authentication method: {method}"
@@ -73,6 +69,54 @@ impl FrpsProfile {
             return Err(ClientError::ConfigValidation(
                 "heartbeat_timeout must be >= heartbeat_interval".into(),
             ));
+        }
+
+        // Wire protocol (FRP `transport.wireProtocol`)
+        if let Some(ref wire) = self.wire_protocol {
+            if !["v1", "v2"].contains(&wire.as_str()) {
+                return Err(ClientError::ConfigValidation(format!(
+                    "wire_protocol must be 'v1' or 'v2', got: {wire}"
+                )));
+            }
+        }
+
+        // Additional auth scopes (FRP `auth.additionalScopes`)
+        if let Some(ref scopes) = self.auth_additional_scopes {
+            for scope in scopes {
+                if !["HeartBeats", "NewWorkConns"].contains(&scope.as_str()) {
+                    return Err(ClientError::ConfigValidation(format!(
+                        "auth additional scope must be 'HeartBeats' or 'NewWorkConns', got: {scope}"
+                    )));
+                }
+            }
+        }
+
+        // frpc log level (FRP `log.level`)
+        if let Some(ref level) = self.log_level {
+            if !["trace", "debug", "info", "warn", "error"].contains(&level.as_str()) {
+                return Err(ClientError::ConfigValidation(format!(
+                    "log_level must be trace/debug/info/warn/error, got: {level}"
+                )));
+            }
+        }
+
+        // VirtualNet requires the matching feature gate, frpc refuses otherwise.
+        if self
+            .virtual_net_address
+            .as_ref()
+            .is_some_and(|address| !address.trim().is_empty())
+        {
+            let enabled = self
+                .feature_gates
+                .as_deref()
+                .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+                .and_then(|value| value.get("VirtualNet").and_then(|v| v.as_bool()))
+                .unwrap_or(false);
+            if !enabled {
+                return Err(ClientError::ConfigValidation(
+                    "virtual_net_address requires the VirtualNet feature gate".into(),
+                ));
+            }
         }
 
         // 传输协议
@@ -407,6 +451,85 @@ mod tests {
             local_port: 3389,
             ..Default::default()
         };
+        assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn tcpmux_requires_httpconnect_multiplexer() {
+        let mut p = LocalProxy {
+            name: "mux".into(),
+            proxy_type: ProxyType::Tcpmux,
+            local_ip: "127.0.0.1".into(),
+            local_port: 22,
+            custom_domains: Some(vec!["mux.example.com".into()]),
+            ..Default::default()
+        };
+        assert!(
+            p.validate().is_err(),
+            "missing multiplexer must be rejected"
+        );
+
+        p.multiplexer = Some("unsupported".into());
+        assert!(
+            p.validate().is_err(),
+            "unknown multiplexer must be rejected"
+        );
+
+        p.multiplexer = Some("httpconnect".into());
+        assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn multiplexer_is_tcpmux_only() {
+        let p = LocalProxy {
+            name: "tcp".into(),
+            local_ip: "127.0.0.1".into(),
+            local_port: 22,
+            remote_port: Some(6001),
+            multiplexer: Some("httpconnect".into()),
+            ..Default::default()
+        };
+        assert!(p.validate().is_err(), "multiplexer on tcp must be rejected");
+    }
+
+    #[test]
+    fn virtual_net_requires_feature_gate() {
+        let mut p = FrpsProfile {
+            name: "vn".into(),
+            server_addr: "frp.example.com".into(),
+            token: "t".into(),
+            virtual_net_address: Some("100.86.1.1/24".into()),
+            ..Default::default()
+        };
+        assert!(
+            p.validate().is_err(),
+            "VirtualNet without the gate must fail"
+        );
+
+        p.feature_gates = Some(r#"{"VirtualNet":true}"#.into());
+        assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn rejects_unknown_wire_protocol_and_auth_scope() {
+        let base = FrpsProfile {
+            name: "p".into(),
+            server_addr: "frp.example.com".into(),
+            token: "t".into(),
+            ..Default::default()
+        };
+
+        let mut p = base.clone();
+        p.wire_protocol = Some("v3".into());
+        assert!(p.validate().is_err());
+
+        let mut p = base.clone();
+        p.auth_additional_scopes = Some(vec!["Everything".into()]);
+        assert!(p.validate().is_err());
+
+        let mut p = base;
+        p.wire_protocol = Some("v2".into());
+        p.auth_additional_scopes = Some(vec!["HeartBeats".into(), "NewWorkConns".into()]);
         assert!(p.validate().is_ok());
     }
 }
