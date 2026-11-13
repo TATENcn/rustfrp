@@ -166,29 +166,44 @@ pub async fn reload(
             // Regenerate TOML configs
             let toml_files = rustfrp_client::config::generator::generate_all_frpc_tomls(&db, &config_dir).await?;
 
-            // Hot-reload all running frpc instances
+            // Hot-reload all running frpc instances. A rejected configuration keeps
+            // the previous one running, so failures are reported per profile rather
+            // than aborting the whole batch.
             let running = process_manager.list_running().await;
             let active_count = running.iter().filter(|p| p.running).count();
+            let mut errors = Vec::new();
 
             for proc in &running {
                 if proc.running {
                     if let Err(e) = process_manager.reload(proc.profile_id).await {
                         tracing::warn!(profile_id = proc.profile_id, error = %e, "reload failed for profile");
+                        errors.push(format!("profile {}: {e}", proc.profile_id));
                     }
                 }
             }
 
-            Ok::<_, rustfrp_client::error::ClientError>((toml_files.len() as u32, active_count))
+            Ok::<_, rustfrp_client::error::ClientError>((
+                toml_files.len() as u32,
+                active_count,
+                errors,
+            ))
         }.await;
 
         let mut tasks = reload_tasks.write().await;
         if let Some(status) = tasks.get_mut(&tid) {
             match result {
-                Ok((toml_count, profiles_affected)) => {
-                    status.status = ReloadPhase::Completed;
+                Ok((toml_count, profiles_affected, errors)) => {
+                    // Partial failure is a failed reload: the affected profiles keep
+                    // running with their previous configuration.
+                    status.status = if errors.is_empty() {
+                        ReloadPhase::Completed
+                    } else {
+                        ReloadPhase::Failed
+                    };
                     status.profiles_affected = profiles_affected as u32;
+                    status.errors = errors;
                     status.completed_at = Some(chrono::Utc::now());
-                    tracing::info!(task_id = %tid, toml_count, profiles_affected, "reload completed");
+                    tracing::info!(task_id = %tid, toml_count, profiles_affected, errors = status.errors.len(), "reload completed");
                 }
                 Err(e) => {
                     status.status = ReloadPhase::Failed;

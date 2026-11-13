@@ -15,6 +15,22 @@ use rustfrp_client::config::model::LocalProxy;
 use super::response::ApiResponse;
 use super::state::ApiState;
 
+/// Map a client-layer error into an API response, mirroring the inline
+/// `status_code`/`ApiError` construction used by the CRUD handlers.
+fn api_error(
+    error: rustfrp_client::error::ClientError,
+) -> (axum::http::StatusCode, Json<ApiResponse<()>>) {
+    (
+        super::response::status_code(&error),
+        Json(ApiResponse {
+            success: false,
+            data: None,
+            count: None,
+            error: Some(super::response::ApiError::from_client_error(&error)),
+        }),
+    )
+}
+
 /// List all proxies
 pub async fn list(
     State(state): State<ApiState>,
@@ -63,6 +79,10 @@ pub async fn create(
     (axum::http::StatusCode, Json<ApiResponse<LocalProxy>>),
     (axum::http::StatusCode, Json<ApiResponse<()>>),
 > {
+    // Reject structurally invalid proxies before they can break the whole
+    // profile's generated configuration (e.g. tcpmux without a multiplexer).
+    proxy.validate().map_err(api_error)?;
+
     let now = Utc::now().to_rfc3339();
     proxy.created_at = now.clone();
     proxy.updated_at = now;
@@ -97,6 +117,7 @@ pub async fn update(
     if let Ok(existing) = state.db.get_proxy(id).await {
         proxy.created_at = existing.created_at;
     }
+    proxy.validate().map_err(api_error)?;
 
     state.db.update_proxy(&proxy).await.map_err(|e| {
         (

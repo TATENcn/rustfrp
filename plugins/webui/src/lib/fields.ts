@@ -122,6 +122,14 @@ export const proxyFields: Field[] = [
     kind: "password",
     when: (f) => ["stcp", "xtcp", "sudp"].includes(String(f.proxy_type)),
   },
+  {
+    key: "multiplexer",
+    label: "Multiplexer",
+    kind: "select",
+    options: ["httpconnect"],
+    required: true,
+    when: (f) => f.proxy_type === "tcpmux",
+  },
 ];
 export const visitorFields: Field[] = [
   { key: "name", label: "Name", required: true },

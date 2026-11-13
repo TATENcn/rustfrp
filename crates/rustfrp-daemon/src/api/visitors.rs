@@ -15,6 +15,22 @@ use rustfrp_client::config::model::LocalVisitor;
 use super::response::ApiResponse;
 use super::state::ApiState;
 
+/// Map a client-layer error into an API response, mirroring the inline
+/// `status_code`/`ApiError` construction used by the CRUD handlers.
+fn api_error(
+    error: rustfrp_client::error::ClientError,
+) -> (axum::http::StatusCode, Json<ApiResponse<()>>) {
+    (
+        super::response::status_code(&error),
+        Json(ApiResponse {
+            success: false,
+            data: None,
+            count: None,
+            error: Some(super::response::ApiError::from_client_error(&error)),
+        }),
+    )
+}
+
 /// List all visitors
 pub async fn list(
     State(state): State<ApiState>,
@@ -63,6 +79,8 @@ pub async fn create(
     (axum::http::StatusCode, Json<ApiResponse<LocalVisitor>>),
     (axum::http::StatusCode, Json<ApiResponse<()>>),
 > {
+    visitor.validate().map_err(api_error)?;
+
     let now = Utc::now().to_rfc3339();
     visitor.created_at = now.clone();
     visitor.updated_at = now;
@@ -97,6 +115,7 @@ pub async fn update(
     if let Ok(existing) = state.db.get_visitor(id).await {
         visitor.created_at = existing.created_at;
     }
+    visitor.validate().map_err(api_error)?;
 
     state.db.update_visitor(&visitor).await.map_err(|e| {
         (

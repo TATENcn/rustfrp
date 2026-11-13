@@ -430,6 +430,7 @@ mod tests {
             health_check_interval_s: 10,
             health_check_path: None,
             health_check_http_headers: None,
+            multiplexer: None,
             plugin_config: None,
             created_at: String::new(),
             updated_at: String::new(),

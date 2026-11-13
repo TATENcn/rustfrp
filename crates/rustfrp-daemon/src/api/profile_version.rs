@@ -115,9 +115,15 @@ mod tests {
             tokio::fs::create_dir_all(path.parent().unwrap())
                 .await
                 .unwrap();
-            tokio::fs::write(&path, format!("#!/bin/sh\n# {version}\nexec sleep 60\n"))
-                .await
-                .unwrap();
+            // Fake frpc: `verify`/`reload` succeed instantly, otherwise stay alive.
+            tokio::fs::write(
+                &path,
+                format!(
+                    "#!/bin/sh\n# {version}\ncase \"$1\" in verify|reload) exit 0;; esac\nexec sleep 60\n"
+                ),
+            )
+            .await
+            .unwrap();
             tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
                 .await
                 .unwrap();

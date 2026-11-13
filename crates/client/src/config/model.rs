@@ -400,6 +400,8 @@ pub struct LocalProxy {
     pub health_check_path: Option<String>,
     /// HTTP health check request headers. Only effective when health_check_type = "http".
     pub health_check_http_headers: Option<Vec<HttpHeader>>,
+    /// tcpmux multiplexer ("httpconnect"). Required by frpc for `type = "tcpmux"`.
+    pub multiplexer: Option<String>,
     /// FRP 原生插件配置（对应 TOML 中的 `[proxies.plugin]` 段）
     ///
     /// None 表示不使用 FRP 原生插件。
@@ -445,6 +447,7 @@ impl Default for LocalProxy {
             health_check_interval_s: 10,
             health_check_path: None,
             health_check_http_headers: None,
+            multiplexer: None,
             plugin_config: None,
             created_at: String::new(),
             updated_at: String::new(),
@@ -611,6 +614,9 @@ pub struct FrpcConfig {
     pub transport: Option<TransportConfig>,
     #[serde(rename = "auth", skip_serializing_if = "Option::is_none")]
     pub auth: Option<AuthConfig>,
+    /// frpc admin listener. Required by `frpc reload` and `frpc status`.
+    #[serde(rename = "webServer", skip_serializing_if = "Option::is_none")]
+    pub web_server: Option<WebServerConfig>,
     #[serde(rename = "loginFailExit", skip_serializing_if = "Option::is_none")]
     pub login_fail_exit: Option<bool>,
     #[serde(rename = "metadatas", skip_serializing_if = "Option::is_none")]
@@ -629,6 +635,18 @@ pub struct FrpcConfig {
     pub proxies: Vec<ProxyEntry>,
     #[serde(rename = "visitors", skip_serializing_if = "Vec::is_empty")]
     pub visitors: Vec<VisitorEntry>,
+}
+
+/// frpc admin listener configuration
+///
+/// 对应 FRP TOML 中的 `[webServer]` 段。仅用于本地 `frpc reload` / `/api/status`，
+/// 因此绑定回环地址并要求 Basic 认证（`/api/config` 会回显完整配置含 token）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebServerConfig {
+    pub addr: String,
+    pub port: u16,
+    pub user: String,
+    pub password: String,
 }
 
 /// 传输层配置
@@ -712,6 +730,9 @@ pub struct ProxyEntry {
     pub custom_domains: Option<Vec<String>>,
     #[serde(rename = "subdomain", skip_serializing_if = "Option::is_none")]
     pub subdomain: Option<String>,
+    /// tcpmux multiplexer ("httpconnect"). Required for `type = "tcpmux"`.
+    #[serde(rename = "multiplexer", skip_serializing_if = "Option::is_none")]
+    pub multiplexer: Option<String>,
     /// Transport-level configuration (useEncryption, useCompression, bandwidth, etc.).
     /// In FRP TOML format v0.52+, these fields are nested under `transport.*` keys.
     #[serde(rename = "transport", skip_serializing_if = "Option::is_none")]

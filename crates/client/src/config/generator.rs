@@ -6,7 +6,7 @@
 use crate::config::model::{
     AuthConfig, FrpcConfig, HealthCheckConfig, LoadBalancerConfig, NatTraversalConfig,
     OidcClientConfig, ProxyEntry, ProxyTransportConfig, QuicConfig, TlsConfig, TransportConfig,
-    VisitorEntry, VisitorTransportConfig,
+    VisitorEntry, VisitorTransportConfig, WebServerConfig,
 };
 use crate::db::Database;
 use crate::error::{ClientError, Result};
@@ -172,6 +172,22 @@ async fn build_frpc_config(
         Some(profile.token.clone())
     };
 
+    // Every persisted profile needs a loopback admin endpoint: `frpc reload`
+    // (the only documented hot-reload path) and per-proxy status both require it.
+    // Unsaved profiles (unit tests, previews) have no row to attach it to.
+    let web_server = match profile.id {
+        Some(id) => {
+            let admin = db.admin_endpoint(id).await?;
+            Some(WebServerConfig {
+                addr: "127.0.0.1".into(),
+                port: admin.port,
+                user: "rustfrp".into(),
+                password: admin.password,
+            })
+        }
+        None => None,
+    };
+
     let mut proxies = Vec::new();
     for binding in bindings {
         match db.get_proxy(binding.proxy_id).await {
@@ -287,6 +303,7 @@ async fn build_frpc_config(
         token: top_level_token,
         transport,
         auth,
+        web_server,
         login_fail_exit: profile.login_fail_exit,
         metadatas: parse_json_field(&profile.name, "metadatas", &profile.metadatas),
         dns_server: profile.dns_server.clone(),
@@ -339,6 +356,7 @@ fn build_proxy_entries(proxy: &crate::config::model::LocalProxy) -> Vec<ProxyEnt
         remote_port: proxy.remote_port,
         custom_domains: proxy.custom_domains.clone(),
         subdomain: proxy.subdomain.clone(),
+        multiplexer: proxy.multiplexer.clone(),
         transport,
         secret_key: proxy.secret_key.clone(),
         locations: proxy.locations.clone(),
@@ -677,5 +695,103 @@ mod tests {
         assert_eq!(sanitize_filename("home-nas"), "home-nas");
         assert_eq!(sanitize_filename("a/b:c"), "a_b_c");
         assert_eq!(sanitize_filename("公司服务器"), "_____");
+    }
+
+    /// frpc refuses `type = "tcpmux"` without `multiplexer`; the generated TOML
+    /// must carry it or the whole profile fails to start.
+    #[tokio::test]
+    async fn tcpmux_proxy_emits_multiplexer() {
+        let db = setup_db().await;
+        let profile_id = db
+            .insert_profile(&FrpsProfile {
+                name: "mux".into(),
+                server_addr: "frp.example.com".into(),
+                token: "t".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let proxy_id = db
+            .insert_proxy(&LocalProxy {
+                name: "mux".into(),
+                proxy_type: crate::config::model::ProxyType::Tcpmux,
+                local_port: 22,
+                custom_domains: Some(vec!["mux.example.com".into()]),
+                multiplexer: Some("httpconnect".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        db.insert_binding(&BindingRule {
+            profile_id,
+            proxy_id,
+            enabled: true,
+            running: true,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+        let output_dir = TempDir::new().unwrap();
+        let paths = generate_all_frpc_tomls(&db, output_dir.path())
+            .await
+            .unwrap();
+        let content = std::fs::read_to_string(&paths[0]).unwrap();
+        assert!(
+            content.contains("multiplexer = \"httpconnect\""),
+            "generated TOML must carry the tcpmux multiplexer:\n{content}"
+        );
+    }
+
+    /// Reload and per-proxy status run through `[webServer]`, so every persisted
+    /// profile must get a loopback listener with credentials.
+    #[tokio::test]
+    async fn persisted_profile_emits_authenticated_loopback_admin_endpoint() {
+        let db = setup_db().await;
+        let profile_id = db
+            .insert_profile(&FrpsProfile {
+                name: "admin".into(),
+                server_addr: "frp.example.com".into(),
+                token: "t".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let proxy_id = db
+            .insert_proxy(&LocalProxy {
+                name: "svc".into(),
+                local_port: 8080,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        db.insert_binding(&BindingRule {
+            profile_id,
+            proxy_id,
+            enabled: true,
+            running: true,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+        let output_dir = TempDir::new().unwrap();
+        let paths = generate_all_frpc_tomls(&db, output_dir.path())
+            .await
+            .unwrap();
+        let content = std::fs::read_to_string(&paths[0]).unwrap();
+        let endpoint = db.admin_endpoint(profile_id).await.unwrap();
+
+        assert!(content.contains("[webServer]"), "{content}");
+        assert!(content.contains("addr = \"127.0.0.1\""), "{content}");
+        assert!(
+            content.contains(&format!("port = {}", endpoint.port)),
+            "{content}"
+        );
+        assert!(content.contains("user = \"rustfrp\""), "{content}");
+        assert!(
+            content.contains(&format!("password = \"{}\"", endpoint.password)),
+            "{content}"
+        );
     }
 }

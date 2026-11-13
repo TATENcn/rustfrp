@@ -11,6 +11,7 @@
 //! - `binding.rs` — BindingRule CRUD
 //! - `visitor.rs` — LocalVisitor CRUD
 
+pub mod admin_endpoint;
 pub mod binding;
 pub mod environment;
 pub mod migrate;

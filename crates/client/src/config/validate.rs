@@ -126,6 +126,27 @@ impl LocalProxy {
             ));
         }
 
+        // frpc rejects tcpmux proxies without a supported multiplexer.
+        if self.proxy_type == ProxyType::Tcpmux {
+            match self.multiplexer.as_deref() {
+                Some("httpconnect") => {}
+                Some(other) => {
+                    return Err(ClientError::ConfigValidation(format!(
+                        "tcpmux multiplexer must be 'httpconnect', got: {other}"
+                    )));
+                }
+                None => {
+                    return Err(ClientError::MissingRequiredField(
+                        "multiplexer is required for tcpmux proxy type".into(),
+                    ));
+                }
+            }
+        } else if self.multiplexer.is_some() {
+            return Err(ClientError::ConfigValidation(
+                "multiplexer is only valid for tcpmux proxy type".into(),
+            ));
+        }
+
         // proxy_protocol_version must be "v1" or "v2" when set
         if let Some(ref ver) = self.proxy_protocol_version {
             if !["v1", "v2"].contains(&ver.as_str()) {

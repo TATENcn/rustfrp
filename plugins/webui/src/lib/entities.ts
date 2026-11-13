@@ -71,6 +71,7 @@ export const defaultProxy = (): LocalProxy => ({
   health_check_interval_s: 10,
   health_check_path: null,
   health_check_http_headers: null,
+  multiplexer: null,
   plugin_config: null,
   created_at: "",
   updated_at: "",

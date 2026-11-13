@@ -28,7 +28,7 @@ pub trait ClientFacade: Send + Sync {
     /// Start frpc child process for the given profile
     async fn start_frpc(&self, profile_id: i64) -> Result<()>;
 
-    /// Hot-reload frpc for the given profile (send SIGHUP)
+    /// Hot-reload frpc for the given profile (via `frpc reload`)
     async fn reload_frpc(&self, profile_id: i64) -> Result<()>;
 
     /// Stop frpc child process for the given profile

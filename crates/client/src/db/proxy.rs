@@ -24,8 +24,8 @@ impl Database {
                  request_headers, response_headers, route_by_http_user,
                  annotations, metadatas,
                  allow_users, nat_traversal_disable_assisted_addrs,
-                 proxy_protocol_version)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31)",
+                 proxy_protocol_version, multiplexer)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32)",
             params![
                 proxy.name,
                 proxy.proxy_type.to_string(),
@@ -58,6 +58,7 @@ impl Database {
                 proxy.allow_users.as_ref().map(|v| v.join(",")),
                 proxy.nat_traversal_disable_assisted_addrs.map(|v| v as i32),
                 proxy.proxy_protocol_version,
+                proxy.multiplexer,
             ],
         )
         .map_err(ClientError::DatabaseQuery)?;
@@ -81,7 +82,7 @@ impl Database {
                         request_headers, response_headers, route_by_http_user,
                         annotations, metadatas,
                         allow_users, nat_traversal_disable_assisted_addrs,
-                        proxy_protocol_version,
+                        proxy_protocol_version, multiplexer,
                         created_at, updated_at
                  FROM local_proxy
                  ORDER BY name",
@@ -111,7 +112,7 @@ impl Database {
                     request_headers, response_headers, route_by_http_user,
                     annotations, metadatas,
                     allow_users, nat_traversal_disable_assisted_addrs,
-                    proxy_protocol_version,
+                    proxy_protocol_version, multiplexer,
                     created_at, updated_at
              FROM local_proxy WHERE id = ?1",
             params![id],
@@ -151,9 +152,9 @@ impl Database {
                     annotations = ?27, metadatas = ?28,
                     allow_users = ?29,
                     nat_traversal_disable_assisted_addrs = ?30,
-                    proxy_protocol_version = ?31,
+                    proxy_protocol_version = ?31, multiplexer = ?32,
                     updated_at = datetime('now')
-                 WHERE id = ?32",
+                 WHERE id = ?33",
                 params![
                     proxy.name,
                     proxy.proxy_type.to_string(),
@@ -193,6 +194,7 @@ impl Database {
                     proxy.allow_users.as_ref().map(|v| v.join(",")),
                     proxy.nat_traversal_disable_assisted_addrs.map(|v| v as i32),
                     proxy.proxy_protocol_version,
+                    proxy.multiplexer,
                     id,
                 ],
             )
@@ -297,6 +299,7 @@ fn row_to_proxy(row: &rusqlite::Row<'_>) -> rusqlite::Result<LocalProxy> {
             raw.map(|v| v != 0)
         },
         proxy_protocol_version: row.get(31)?,
+        multiplexer: row.get(32)?,
         health_check_type: row.get(12)?,
         health_check_timeout_s: row.get(13)?,
         health_check_max_failed: row.get(14)?,
@@ -304,8 +307,8 @@ fn row_to_proxy(row: &rusqlite::Row<'_>) -> rusqlite::Result<LocalProxy> {
         health_check_path: row.get(16)?,
         health_check_http_headers,
         plugin_config,
-        created_at: row.get(32)?,
-        updated_at: row.get(33)?,
+        created_at: row.get(33)?,
+        updated_at: row.get(34)?,
     })
 }
 
@@ -354,6 +357,7 @@ mod tests {
             health_check_interval_s: 10,
             health_check_path: None,
             health_check_http_headers: None,
+            multiplexer: None,
             plugin_config: None,
             created_at: String::new(),
             updated_at: String::new(),

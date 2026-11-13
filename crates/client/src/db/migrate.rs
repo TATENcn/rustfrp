@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
 /// 当前最新的 schema 版本
-const LATEST_VERSION: i32 = 15;
+const LATEST_VERSION: i32 = 16;
 
 /// 运行所有待执行的迁移
 ///
@@ -98,6 +98,7 @@ fn apply_migration(conn: &Connection, version: i32) -> Result<()> {
         13 => migrate_v13(&tx)?,
         14 => migrate_v14(&tx)?,
         15 => migrate_v15(&tx)?,
+        16 => migrate_v16(&tx)?,
         _ => {
             return Err(ClientError::DatabaseMigration(format!(
                 "Unknown migration version: {version}"
@@ -791,6 +792,29 @@ fn migrate_v15(tx: &rusqlite::Transaction) -> Result<()> {
         [],
     )
     .map_err(|e| ClientError::DatabaseMigration(format!("Failed to add runtime version: {e}")))?;
+    Ok(())
+}
+
+/// V16: persist the per-profile frpc admin port and the tcpmux multiplexer.
+///
+/// The admin port enables `frpc reload` / `frpc status` (the only documented
+/// hot-reload path); `multiplexer` is required for valid tcpmux proxies.
+fn migrate_v16(tx: &rusqlite::Transaction) -> Result<()> {
+    for statement in [
+        "ALTER TABLE local_proxy ADD COLUMN multiplexer TEXT DEFAULT NULL",
+        "ALTER TABLE profile_runtime ADD COLUMN admin_port INTEGER DEFAULT NULL",
+        "ALTER TABLE profile_runtime ADD COLUMN admin_password TEXT DEFAULT NULL",
+    ] {
+        if let Err(error) = tx.execute(statement, []) {
+            if !error.to_string().contains("duplicate column") {
+                return Err(ClientError::DatabaseMigration(format!(
+                    "Failed to apply V16 migration: {error}"
+                )));
+            }
+            tracing::info!("V16 column already exists, skipping: {statement}");
+        }
+    }
+    tracing::info!("V16 Migration: Add tcpmux multiplexer and frpc admin port");
     Ok(())
 }
 

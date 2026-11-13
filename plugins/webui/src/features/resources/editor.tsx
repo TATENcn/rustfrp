@@ -47,6 +47,7 @@ const chinese: Record<string, string> = {
   http_password: "HTTP 密码",
   host_header_rewrite: "重写 Host 请求头",
   secret_key: "访问密钥",
+  multiplexer: "复用器",
   visitor_type: "访问类型",
   server_name: "服务名称",
   server_user: "服务用户",

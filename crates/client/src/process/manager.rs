@@ -17,7 +17,7 @@ use tokio::sync::RwLock;
 pub enum ProcessAction {
     /// 启动了新的 frpc 进程
     Started,
-    /// 对已运行的 frpc 发送了 SIGHUP 热重载
+    /// 对已运行的 frpc 执行了 `frpc reload` 热重载
     Reloaded,
     /// frpc 进程已停止
     Stopped,
@@ -164,7 +164,7 @@ impl ProcessManager {
     /// 确保指定 Profile 的 frpc 在运行。
     ///
     /// - 未运行 → 启动新进程，返回 `ProcessAction::Started`
-    /// - 已运行 → 热重载（SIGHUP），返回 `ProcessAction::Reloaded`
+    /// - 已运行 → 热重载（`frpc reload`），返回 `ProcessAction::Reloaded`
     pub async fn ensure_running(
         &self,
         profile_id: i64,

@@ -112,6 +112,7 @@ export interface LocalProxy {
   health_check_interval_s: number
   health_check_path?: string | null
   health_check_http_headers?: HttpHeader[] | null
+  multiplexer?: string | null
   plugin_config?: Record<string, unknown> | null
   created_at: string
   updated_at: string

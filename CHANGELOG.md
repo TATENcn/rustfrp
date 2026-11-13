@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Hot reload no longer kills frpc. frpc only registers `SIGINT`/`SIGTERM`, so the
+  previous `SIGHUP` was handled by the default action and terminated the process
+  (exit 129) instead of reloading. Generated configs now carry an authenticated
+  loopback `[webServer]` per profile and reload runs `frpc reload`, which applies
+  proxy changes without dropping established connections. A rejected
+  configuration keeps the previous one running and is reported per profile.
+- tcpmux proxies are now valid: `multiplexer` is part of the proxy model, SQLite
+  schema, TOML generator, import path, and WebUI form. frpc rejects a tcpmux
+  entry without it, which previously invalidated the whole profile.
+- Proxy and visitor payloads are validated on create/update, so structurally
+  invalid entries are rejected instead of persisting and breaking TOML
+  generation later.
+- Generated configurations are checked with `frpc verify` before a process is
+  spawned, surfacing structural errors as a startup error.
+
+### Added
+
+- `profile_runtime.admin_port` / `admin_password` and `local_proxy.multiplexer`
+  (schema V16). Existing profiles get a loopback admin port on their next
+  configuration generation.
+
 ## [0.4.0] - 2026-10-25
 
 ### Added
