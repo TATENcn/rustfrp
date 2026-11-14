@@ -1,4 +1,3 @@
-import { ProfileVersionButton } from "../resources/profile-version";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -265,11 +264,6 @@ function Assignment({
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-2">
             <CardTitle className="text-base">{profile.name}</CardTitle>
-            <ProfileVersionButton
-              id={profile.id!}
-              name={profile.name}
-              readonly
-            />
             <CardDescription className="font-mono text-xs">
               {profile.server_addr}:{profile.server_port}
             </CardDescription>

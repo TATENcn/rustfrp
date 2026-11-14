@@ -16,7 +16,6 @@ pub mod environments;
 pub mod frp_versions;
 pub mod logs;
 pub mod metrics;
-pub mod profile_version;
 pub mod profiles;
 pub mod proxies;
 pub mod proxy_status;
@@ -303,10 +302,6 @@ pub fn create_router(state: ApiState, auth: impl AuthMiddleware) -> Router {
         .route(
             "/api/v1/frp/versions",
             axum::routing::get(frp_versions::list).post(frp_versions::install),
-        )
-        .route(
-            "/api/v1/profiles/:id/frpc-version",
-            axum::routing::get(profile_version::get).put(profile_version::set),
         )
         .route(
             "/api/v1/frp/installations",

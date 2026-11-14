@@ -61,7 +61,6 @@ pub struct ProcessManager {
     /// Profile ID → ProcessGuard
     guards: Arc<RwLock<HashMap<i64, ProcessGuard>>>,
     database: Option<crate::db::Database>,
-    versions: rustfrp_bin::manager::VersionManager,
     /// TOML 配置文件输出目录
     config_dir: PathBuf,
     /// rustfrp 托管的 frpc 二进制绝对路径
@@ -76,7 +75,6 @@ impl ProcessManager {
         Self {
             guards: Arc::new(RwLock::new(HashMap::new())),
             database: None,
-            versions: Default::default(),
             config_dir,
             frpc_path: Arc::new(RwLock::new(frpc_path)),
             signal_handler,
@@ -87,20 +85,12 @@ impl ProcessManager {
         self.database = Some(database);
         self
     }
-    pub fn with_version_manager(mut self, versions: rustfrp_bin::manager::VersionManager) -> Self {
-        self.versions = versions;
-        self
-    }
-    pub async fn selected_binary(&self, profile_id: i64) -> Result<PathBuf> {
-        if let Some(db) = &self.database {
-            if let Some(version) = db.profile_frpc_version(profile_id).await? {
-                return self
-                    .versions
-                    .installed_path(&version)
-                    .await
-                    .map_err(|e| ClientError::ProcessStart(e.to_string()));
-            }
-        }
+    /// Binary used for every profile.
+    ///
+    /// RustFRP runs one fixed frp version: per-profile pinning was removed
+    /// because a single daemon cannot validate generated TOML against several
+    /// binary versions at once.
+    pub async fn selected_binary(&self, _profile_id: i64) -> Result<PathBuf> {
         Ok(self.frpc_path.read().await.clone())
     }
     pub async fn running_binary(&self, profile_id: i64) -> Option<PathBuf> {
@@ -169,8 +159,7 @@ impl ProcessManager {
         profile_id: i64,
         profile_name: &str,
     ) -> Result<ProcessAction> {
-        let selected = self.selected_binary(profile_id).await?;
-        if self.running_binary(profile_id).await.as_ref() == Some(&selected) {
+        if self.running_binary(profile_id).await.is_some() {
             self.reload(profile_id).await?;
             Ok(ProcessAction::Reloaded)
         } else {

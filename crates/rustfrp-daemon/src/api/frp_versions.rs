@@ -70,12 +70,6 @@ pub async fn list(State(state): State<ApiState>) -> ApiResult<VersionListRespons
         .ok();
         item.in_use =
             state.process_manager.frpc_path().await == std::path::Path::new(&item.frpc_path);
-        item.in_use |= !state
-            .db
-            .profiles_using_version(&item.version)
-            .await
-            .map_err(client_error)?
-            .is_empty();
         for process in state
             .process_manager
             .list_running()
@@ -187,19 +181,13 @@ pub async fn activate(
         .installed_path(&version)
         .await
         .map_err(binary_error)?;
-    let mut running = Vec::new();
-    for process in state.process_manager.list_running().await {
-        if process.running
-            && state
-                .db
-                .profile_frpc_version(process.profile_id)
-                .await
-                .map_err(client_error)?
-                .is_none()
-        {
-            running.push(process);
-        }
-    }
+    let running: Vec<_> = state
+        .process_manager
+        .list_running()
+        .await
+        .into_iter()
+        .filter(|process| process.running)
+        .collect();
     for process in &running {
         if let Err(error) = state.process_manager.stop(process.profile_id).await {
             restart_processes(&state, &running).await;
@@ -236,19 +224,6 @@ pub async fn activate(
 
 pub async fn remove(State(state): State<ApiState>, Path(version): Path<String>) -> ApiResult<()> {
     let _operation = state.frp_version_operation.lock().await;
-    if !state
-        .db
-        .profiles_using_version(&version)
-        .await
-        .map_err(client_error)?
-        .is_empty()
-    {
-        return Err(api_error(
-            StatusCode::CONFLICT,
-            "FRP_VERSION_IN_USE",
-            "Version is referenced by server configurations",
-        ));
-    }
     let target = state
         .frp_versions
         .version_path(&version)

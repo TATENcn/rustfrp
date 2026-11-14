@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- RustFRP runs one fixed frp version. Per-profile version pinning and its
+  "restart required" state are removed (schema V19 drops `frpc_version`): a
+  single daemon cannot validate generated TOML against several binary versions
+  at once, so a pin could only produce configurations that older frpc builds
+  reject. Switch the active version through the FRP version registry instead;
+  `PUT /api/v1/profiles/{id}/frpc-version` is gone.
+
 ### Fixed
 
 - Profile names are unique (schema V18). Existing duplicates are renamed with a

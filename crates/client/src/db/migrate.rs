@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
 /// 当前最新的 schema 版本
-const LATEST_VERSION: i32 = 18;
+const LATEST_VERSION: i32 = 19;
 
 /// 运行所有待执行的迁移
 ///
@@ -101,6 +101,7 @@ fn apply_migration(conn: &Connection, version: i32) -> Result<()> {
         16 => migrate_v16(&tx)?,
         17 => migrate_v17(&tx)?,
         18 => migrate_v18(&tx)?,
+        19 => migrate_v19(&tx)?,
         _ => {
             return Err(ClientError::DatabaseMigration(format!(
                 "Unknown migration version: {version}"
@@ -936,6 +937,32 @@ fn migrate_v18(tx: &rusqlite::Transaction) -> Result<()> {
         ClientError::DatabaseMigration(format!("Failed to add profile name uniqueness: {e}"))
     })?;
     tracing::info!("V18 Migration: Enforce unique profile names");
+    Ok(())
+}
+
+/// V19: RustFRP runs a single fixed frp version, so the per-profile pin is gone.
+///
+/// The column is dropped rather than left unused: a stale per-profile version
+/// would suggest a capability the daemon no longer has.
+fn migrate_v19(tx: &rusqlite::Transaction) -> Result<()> {
+    if let Err(error) = tx.execute("ALTER TABLE profile_runtime DROP COLUMN frpc_version", []) {
+        // SQLite older than 3.35 cannot drop columns; clearing the values keeps
+        // the stale policy from being read.
+        if error.to_string().contains("syntax") || error.to_string().contains("near \"DROP\"") {
+            tx.execute("UPDATE profile_runtime SET frpc_version = NULL", [])
+                .map_err(|e| {
+                    ClientError::DatabaseMigration(format!(
+                        "Failed to clear per-profile frp version: {e}"
+                    ))
+                })?;
+            tracing::warn!("V19: SQLite cannot drop columns; cleared frpc_version instead");
+        } else {
+            return Err(ClientError::DatabaseMigration(format!(
+                "Failed to drop per-profile frp version: {error}"
+            )));
+        }
+    }
+    tracing::info!("V19 Migration: Remove per-profile frp version pinning");
     Ok(())
 }
 
