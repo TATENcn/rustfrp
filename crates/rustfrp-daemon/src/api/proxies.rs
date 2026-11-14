@@ -12,25 +12,11 @@ use axum::Json;
 use chrono::Utc;
 use rustfrp_client::config::model::LocalProxy;
 
-use super::response::ApiResponse;
+use super::response::{api_error, ApiResponse};
 use super::state::ApiState;
 
 /// Map a client-layer error into an API response, mirroring the inline
 /// `status_code`/`ApiError` construction used by the CRUD handlers.
-fn api_error(
-    error: rustfrp_client::error::ClientError,
-) -> (axum::http::StatusCode, Json<ApiResponse<()>>) {
-    (
-        super::response::status_code(&error),
-        Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&error)),
-        }),
-    )
-}
-
 /// List all proxies
 pub async fn list(
     State(state): State<ApiState>,

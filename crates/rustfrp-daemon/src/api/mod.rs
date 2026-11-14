@@ -363,10 +363,18 @@ pub fn create_router(state: ApiState, auth: impl AuthMiddleware) -> Router {
 
 /// Start the HTTP API server.
 ///
-/// Launches the axum server on the given listen address and runs
-/// the client core lifecycle concurrently. Either process exiting
-/// triggers graceful shutdown of the other via `tokio::select!`.
-pub async fn serve(core: ClientCore, listen_addr: &str) -> anyhow::Result<()> {
+/// Launches the axum server on the given listen address and runs the client core
+/// lifecycle concurrently. Either side exiting triggers graceful shutdown of the
+/// other via `tokio::select!`.
+///
+/// `auth` selects the credential check; every other detail is identical, so the
+/// entry points below differ only in this argument.
+pub async fn serve_with(
+    core: ClientCore,
+    listen_addr: &str,
+    auth: impl AuthMiddleware,
+    auth_description: &str,
+) -> anyhow::Result<()> {
     let state = ApiState::new(
         core.db().clone(),
         core.process_manager().clone(),
@@ -380,16 +388,14 @@ pub async fn serve(core: ClientCore, listen_addr: &str) -> anyhow::Result<()> {
         state.process_manager.clone(),
     );
 
-    let router = create_router(state, NoAuth);
+    let router = create_router(state, auth);
 
     let addr: SocketAddr = listen_addr.parse()?;
-    tracing::info!(%addr, "HTTP API server starting");
+    tracing::info!(%addr, auth = auth_description, "HTTP API server starting");
 
     let listener = TcpListener::bind(addr).await?;
-
     let api_server = axum::serve(listener, router.into_make_service());
 
-    // Concurrent: API server + client core lifecycle
     tokio::select! {
         result = api_server => {
             if let Err(e) = result {
@@ -407,79 +413,40 @@ pub async fn serve(core: ClientCore, listen_addr: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Start the HTTP API server with bearer token authentication.
+/// Serve without authentication.
+pub async fn serve(core: ClientCore, listen_addr: &str) -> anyhow::Result<()> {
+    serve_with(core, listen_addr, NoAuth, "none").await
+}
+
+/// Serve with a single bearer token.
 #[cfg(feature = "http-api")]
 pub async fn serve_with_auth(
     core: ClientCore,
     listen_addr: &str,
     api_token: &str,
 ) -> anyhow::Result<()> {
-    let state = ApiState::new(
-        core.db().clone(),
-        core.process_manager().clone(),
-        core.config_dir().clone(),
-        core.state().clone(),
-    );
-    state.metrics.spawn_sampler(core.process_manager().clone());
-    crate::traffic::spawn(
-        state.metrics.clone(),
-        state.db.clone(),
-        state.process_manager.clone(),
-    );
-
-    let router = create_router(state, BearerToken::new(api_token.to_string()));
-
-    let addr: SocketAddr = listen_addr.parse()?;
-    tracing::info!(%addr, "HTTP API server starting (auth: BearerToken)");
-
-    let listener = TcpListener::bind(addr).await?;
-
-    let api_server = axum::serve(listener, router.into_make_service());
-
-    tokio::select! {
-        result = api_server => {
-            if let Err(e) = result {
-                tracing::error!(error = %e, "HTTP API server error");
-            }
-        }
-        result = core.run() => {
-            if let Err(e) = result {
-                tracing::error!(error = %e, "Client core error");
-            }
-        }
-    }
-
-    tracing::info!("Daemon shut down");
-    Ok(())
+    serve_with(
+        core,
+        listen_addr,
+        BearerToken::new(api_token.to_string()),
+        "bearer token",
+    )
+    .await
 }
 
+/// Serve with a scoped, tenant-aware policy.
 pub async fn serve_with_policy(
     core: ClientCore,
     listen_addr: &str,
     policy: AuthPolicy,
 ) -> anyhow::Result<()> {
-    let state = ApiState::new(
-        core.db().clone(),
-        core.process_manager().clone(),
-        core.config_dir().clone(),
-        core.state().clone(),
-    );
-    state.metrics.spawn_sampler(core.process_manager().clone());
-    crate::traffic::spawn(
-        state.metrics.clone(),
-        state.db.clone(),
-        state.process_manager.clone(),
-    );
-    let router = create_router(state, ScopedBearerToken::new(policy));
-    let addr: SocketAddr = listen_addr.parse()?;
-    tracing::info!(%addr, "HTTP API server starting (auth: scoped bearer policy)");
-    let listener = TcpListener::bind(addr).await?;
-    let api_server = axum::serve(listener, router.into_make_service());
-    tokio::select! {
-        result = api_server => if let Err(error) = result { tracing::error!(%error, "HTTP API server error"); },
-        result = core.run() => if let Err(error) = result { tracing::error!(%error, "Client core error"); },
-    }
-    Ok(())
+    serve_with(
+        core,
+        listen_addr,
+        ScopedBearerToken::new(policy),
+        "scoped bearer policy",
+    )
+    .await
 }
 
 #[cfg(test)]

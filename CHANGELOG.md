@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Removed
+
+- Dead code: a 146-line commented-out binding handler, four byte-identical
+  `api_error` helpers (one shared definition remains), and three copies of the
+  `serve` body (now one `serve_with` plus three thin wrappers).
+
 ### Fixed
 
 - Hot reload no longer kills frpc. frpc only registers `SIGINT`/`SIGTERM`, so the

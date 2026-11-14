@@ -14,7 +14,7 @@ use rustfrp_client::config::model::FrpsProfile;
 use serde::{Deserialize, Serialize};
 
 use super::auth::AuthIdentity;
-use super::response::ApiResponse;
+use super::response::{api_error, ApiResponse};
 use super::state::ApiState;
 
 /// List all profiles
@@ -433,20 +433,6 @@ pub async fn stop(
         enabled_proxy_count: count,
         config_pending: false,
     })))
-}
-
-fn api_error(
-    error: rustfrp_client::error::ClientError,
-) -> (axum::http::StatusCode, Json<ApiResponse<()>>) {
-    (
-        super::response::status_code(&error),
-        Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&error)),
-        }),
-    )
 }
 
 pub(super) async fn ensure_profile_tenant(

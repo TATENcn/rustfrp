@@ -15,7 +15,7 @@ use chrono::Utc;
 use rustfrp_client::config::model::BindingRule;
 use serde::{Deserialize, Serialize};
 
-use super::response::ApiResponse;
+use super::response::{api_error, ApiResponse};
 use super::state::ApiState;
 
 /// Query parameters for listing bindings
@@ -270,20 +270,6 @@ async fn reconcile_profile_if_running(
     Ok(())
 }
 
-fn api_error(
-    error: rustfrp_client::error::ClientError,
-) -> (axum::http::StatusCode, Json<ApiResponse<()>>) {
-    (
-        super::response::status_code(&error),
-        Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(super::response::ApiError::from_client_error(&error)),
-        }),
-    )
-}
-
 /* Profile runtime control intentionally lives in api::profiles. BindingRule is
  * only a Profile/Proxy membership and must never be treated as a process. */
 #[derive(Debug, Serialize)]
@@ -294,152 +280,6 @@ pub struct BindingControlResponse {
     pub profile_id: i64,
     pub profile_name: String,
 }
-/*
-pub async fn legacy_start_binding_removed(
-    State(state): State<ApiState>, Path(id): Path<i64>,
-) -> Result<Json<ApiResponse<()>>, (StatusCode, Json<ApiResponse<()>>)> {
-    let binding = state.db.get_binding(id).await.map_err(|e| {
-        (
-            super::response::status_code(&e),
-            Json(ApiResponse {
-                success: false,
-                data: None,
-                count: None,
-                error: Some(super::response::ApiError::from_client_error(&e)),
-            }),
-        )
-    })?;
-
-    // Precondition: enabled must be true
-    if !binding.enabled {
-        let err = super::response::ApiError::generic(
-            "BINDING_DISABLED",
-            "Binding is disabled. Enable it first before starting.".into(),
-        );
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(ApiResponse {
-                success: false,
-                data: None,
-                count: None,
-                error: Some(err),
-            }),
-        ));
-    }
-
-    // Idempotent: already running
-    if binding.running {
-        let profile = state
-            .db
-            .get_profile(binding.profile_id)
-            .await
-            .map_err(|e| {
-                (
-                    super::response::status_code(&e),
-                    Json(ApiResponse {
-                        success: false,
-                        data: None,
-                        count: None,
-                        error: Some(super::response::ApiError::from_client_error(&e)),
-                    }),
-                )
-            })?;
-
-        return Ok(Json(ApiResponse::ok(BindingControlResponse {
-            binding_id: id,
-            running: true,
-            process_status: "already_running".into(),
-            profile_id: binding.profile_id,
-            profile_name: profile.name,
-        })));
-    }
-
-    // Set running = true
-    state.db.set_running(id, true).await.map_err(|e| {
-        (
-            super::response::status_code(&e),
-            Json(ApiResponse {
-                success: false,
-                data: None,
-                count: None,
-                error: Some(super::response::ApiError::from_client_error(&e)),
-            }),
-        )
-    })?;
-
-    // Regenerate TOML for this profile
-    let toml_result = rustfrp_client::config::generator::generate_frpc_toml_for_profile(
-        &state.db,
-        binding.profile_id,
-        &state.config_dir,
-    )
-    .await;
-
-    let profile = state
-        .db
-        .get_profile(binding.profile_id)
-        .await
-        .map_err(|e| {
-            (
-                super::response::status_code(&e),
-                Json(ApiResponse {
-                    success: false,
-                    data: None,
-                    count: None,
-                    error: Some(super::response::ApiError::from_client_error(&e)),
-                }),
-            )
-        })?;
-
-    // If TOML generation failed, roll back running state
-    if let Err(e) = &toml_result {
-        let _ = state.db.set_running(id, false).await;
-        let err = super::response::ApiError::generic(
-            "TOML_GENERATION_FAILED",
-            format!("Failed to generate TOML: {e}"),
-        );
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse {
-                success: false,
-                data: None,
-                count: None,
-                error: Some(err),
-            }),
-        ));
-    }
-
-    // Ensure frpc is running (start or reload)
-    let action = match state
-        .process_manager
-        .ensure_running(binding.profile_id, &profile.name)
-        .await
-    {
-        Ok(action) => action,
-        Err(e) => {
-            // Roll back running state on process error
-            let _ = state.db.set_running(id, false).await;
-            return Err((
-                super::response::status_code(&e),
-                Json(ApiResponse {
-                    success: false,
-                    data: None,
-                    count: None,
-                    error: Some(super::response::ApiError::from_client_error(&e)),
-                }),
-            ));
-        }
-    };
-
-    Ok(Json(ApiResponse::ok(BindingControlResponse {
-        binding_id: id,
-        running: true,
-        process_status: action.as_str().into(),
-        profile_id: binding.profile_id,
-        profile_name: profile.name,
-    })))
-}
-*/
 
 // ── POST /api/v1/bindings/:id/stop ──
 
