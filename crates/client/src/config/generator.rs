@@ -229,7 +229,7 @@ async fn build_frpc_config(
         None => None,
     };
 
-    let mut proxies = Vec::new();
+    let mut proxies: Vec<ProxyEntry> = Vec::new();
     for binding in bindings {
         match db.get_proxy(binding.proxy_id).await {
             Ok(proxy) => {
@@ -245,6 +245,15 @@ async fn build_frpc_config(
                 }
                 for entry in &entries {
                     validate_proxy_entry(entry)?;
+                    // frpc rejects the whole file when two proxies share a name
+                    // (`proxy name [x] is duplicated`), which would take down an
+                    // otherwise healthy profile.
+                    if proxies.iter().any(|seen| seen.name == entry.name) {
+                        return Err(ClientError::ConfigValidation(format!(
+                            "duplicate proxy name '{}' in profile '{}': frpc rejects duplicated names",
+                            entry.name, profile.name
+                        )));
+                    }
                 }
                 proxies.extend(entries);
             }
@@ -842,6 +851,51 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().ends_with(".toml.tmp"))
             .collect();
         assert!(tmp_files.is_empty());
+    }
+
+    /// frpc refuses a file with duplicated proxy names, so generation must fail
+    /// early instead of producing a profile that cannot start.
+    #[tokio::test]
+    async fn duplicate_proxy_names_in_one_profile_are_rejected() {
+        let db = setup_db().await;
+        let profile_id = db
+            .insert_profile(&FrpsProfile {
+                name: "dup".into(),
+                server_addr: "frp.example.com".into(),
+                token: "t".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        for local_port in [8080u16, 8081] {
+            let proxy_id = db
+                .insert_proxy(&LocalProxy {
+                    name: "same".into(),
+                    local_port,
+                    remote_port: Some(local_port + 1000),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            db.insert_binding(&BindingRule {
+                profile_id,
+                proxy_id,
+                enabled: true,
+                running: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        }
+
+        let output_dir = TempDir::new().unwrap();
+        let error = generate_all_frpc_tomls(&db, output_dir.path())
+            .await
+            .expect_err("duplicate proxy names must not generate a TOML");
+        assert!(
+            error.to_string().contains("duplicate proxy name 'same'"),
+            "unexpected error: {error}"
+        );
     }
 
     /// Two profiles whose names sanitize to the same string must not share a TOML

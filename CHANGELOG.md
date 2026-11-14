@@ -4,6 +4,16 @@
 
 ### Fixed
 
+- Profile names are unique (schema V18). Existing duplicates are renamed with a
+  numeric suffix on migration, and conflicts return `DB_005` instead of a raw
+  SQLite error. Names are trimmed on write so `"prod"` and `"prod "` cannot
+  diverge.
+- Duplicate proxy names inside one profile fail generation with an explicit
+  message. frpc previously refused the whole file (`proxy name [x] is
+  duplicated`), taking down an otherwise healthy profile.
+
+### Fixed
+
 - Multi-instance isolation: generated TOML files and frpc logs are keyed by
   `{profile_id}-{name}` instead of the sanitized profile name. `sanitize_filename`
   maps distinct names onto one string (`"Test Server"` and `"Test_Server"` both

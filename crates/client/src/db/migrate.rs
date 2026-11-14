@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
 /// 当前最新的 schema 版本
-const LATEST_VERSION: i32 = 17;
+const LATEST_VERSION: i32 = 18;
 
 /// 运行所有待执行的迁移
 ///
@@ -100,6 +100,7 @@ fn apply_migration(conn: &Connection, version: i32) -> Result<()> {
         15 => migrate_v15(&tx)?,
         16 => migrate_v16(&tx)?,
         17 => migrate_v17(&tx)?,
+        18 => migrate_v18(&tx)?,
         _ => {
             return Err(ClientError::DatabaseMigration(format!(
                 "Unknown migration version: {version}"
@@ -868,6 +869,73 @@ fn migrate_v17(tx: &rusqlite::Transaction) -> Result<()> {
         }
     }
     tracing::info!("V17 Migration: Add remaining frpc common config columns");
+    Ok(())
+}
+
+/// V18: profile names must be unique.
+///
+/// Generated artifacts are keyed by profile id, so duplicates no longer corrupt
+/// each other's configuration, but two identically named profiles remain
+/// indistinguishable in the UI and in logs. Existing duplicates are renamed with
+/// a numeric suffix, keeping the oldest row untouched.
+fn migrate_v18(tx: &rusqlite::Transaction) -> Result<()> {
+    let duplicates: Vec<String> = {
+        let mut statement = tx
+            .prepare("SELECT name FROM frps_profile GROUP BY name HAVING COUNT(*) > 1")
+            .map_err(|e| {
+                ClientError::DatabaseMigration(format!("Failed to scan duplicate profiles: {e}"))
+            })?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| {
+                ClientError::DatabaseMigration(format!("Failed to scan duplicate profiles: {e}"))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| {
+                ClientError::DatabaseMigration(format!("Failed to scan duplicate profiles: {e}"))
+            })?;
+        rows
+    };
+
+    for name in duplicates {
+        let ids: Vec<i64> = {
+            let mut statement = tx
+                .prepare("SELECT id FROM frps_profile WHERE name = ?1 ORDER BY id")
+                .map_err(|e| {
+                    ClientError::DatabaseMigration(format!("Failed to load duplicate rows: {e}"))
+                })?;
+            let rows = statement
+                .query_map([&name], |row| row.get::<_, i64>(0))
+                .map_err(|e| {
+                    ClientError::DatabaseMigration(format!("Failed to load duplicate rows: {e}"))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|e| {
+                    ClientError::DatabaseMigration(format!("Failed to load duplicate rows: {e}"))
+                })?;
+            rows
+        };
+        for (index, id) in ids.into_iter().skip(1).enumerate() {
+            let renamed = format!("{name}-{}", index + 2);
+            tx.execute(
+                "UPDATE frps_profile SET name = ?1 WHERE id = ?2",
+                rusqlite::params![renamed, id],
+            )
+            .map_err(|e| {
+                ClientError::DatabaseMigration(format!("Failed to rename duplicate profile: {e}"))
+            })?;
+        }
+        tracing::info!(name, "V18 renamed duplicate profile names");
+    }
+
+    tx.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_frps_profile_name ON frps_profile(name)",
+        [],
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to add profile name uniqueness: {e}"))
+    })?;
+    tracing::info!("V18 Migration: Enforce unique profile names");
     Ok(())
 }
 

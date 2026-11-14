@@ -31,7 +31,7 @@ impl Database {
                  client_id, wire_protocol, auth_additional_scopes, oidc_additional_params, oidc_trusted_ca_file, oidc_insecure_skip_verify, oidc_proxy_url, tls_server_name, tls_disable_custom_first_byte, log_to, log_level, log_max_days, virtual_net_address)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48, ?49, ?50, ?51)",
             params![
-                profile.name,
+                profile.name.trim(),
                 profile.server_addr,
                 profile.server_port,
                 profile.token,
@@ -84,7 +84,16 @@ impl Database {
                 profile.virtual_net_address,
             ],
         )
-        .map_err(ClientError::DatabaseQuery)?;
+        .map_err(|error| {
+            if error.to_string().contains("UNIQUE") {
+                ClientError::RecordAlreadyExists(format!(
+                    "a server configuration named '{}' already exists",
+                    profile.name.trim()
+                ))
+            } else {
+                ClientError::DatabaseQuery(error)
+            }
+        })?;
         let id = tx.last_insert_rowid();
         tx.execute(
             "INSERT INTO profile_environment (profile_id, environment_id)
@@ -208,7 +217,7 @@ impl Database {
                     updated_at = datetime('now')
                  WHERE id = ?52",
                 params![
-                    profile.name,
+                    profile.name.trim(),
                     profile.server_addr,
                     profile.server_port,
                     profile.token,
@@ -262,7 +271,16 @@ impl Database {
                     id,
                 ],
             )
-            .map_err(ClientError::DatabaseQuery)?;
+            .map_err(|error| {
+                if error.to_string().contains("UNIQUE") {
+                    ClientError::RecordAlreadyExists(format!(
+                        "a server configuration named '{}' already exists",
+                        profile.name.trim()
+                    ))
+                } else {
+                    ClientError::DatabaseQuery(error)
+                }
+            })?;
 
         if affected == 0 {
             return Err(ClientError::RecordNotFound {
