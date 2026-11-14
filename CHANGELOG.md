@@ -4,6 +4,12 @@
 
 ### Changed
 
+- `local_proxy` read projections are defined once (`PROXY_COLUMNS`) instead of
+  being repeated in every query. Adding a field used to require editing several
+  aligned-by-hand column lists plus the row mapper.
+
+### Changed
+
 - The WASM plugin runtime is an opt-in build feature (`wasm-plugins`), off by
   default. It had no production caller, and Wasmtime was the largest dependency
   in the workspace, contradicting the Core-under-10-MiB budget. A WASM plugin

@@ -7,6 +7,13 @@ use crate::db::Database;
 use crate::error::{ClientError, Result};
 use rusqlite::params;
 
+/// Columns selected by every `local_proxy` read, in `row_to_proxy` order.
+///
+/// The projection, the row mapper and the insert column list must stay aligned;
+/// keeping the read projection here means adding a field touches one place
+/// instead of three.
+const PROXY_COLUMNS: &str = "id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, subdomain, use_encryption, use_compression, bandwidth_limit, bandwidth_limit_mode, health_check_type, health_check_timeout_s, health_check_max_failed, health_check_interval_s, health_check_path, health_check_http_headers, plugin_config, secret_key, locations, http_user, http_password, host_header_rewrite, request_headers, response_headers, route_by_http_user, annotations, metadatas, allow_users, nat_traversal_disable_assisted_addrs, proxy_protocol_version, multiplexer, created_at, updated_at";
+
 impl Database {
     /// 插入新的 Proxy
     pub async fn insert_proxy(&self, proxy: &LocalProxy) -> Result<i64> {
@@ -70,23 +77,9 @@ impl Database {
     pub async fn list_proxies(&self) -> Result<Vec<LocalProxy>> {
         let conn = self.lock().await;
         let mut stmt = conn
-            .prepare(
-                "SELECT id, name, proxy_type, local_ip, local_port, remote_port,
-                        custom_domains, subdomain, use_encryption, use_compression,
-                        bandwidth_limit, bandwidth_limit_mode,
-                        health_check_type, health_check_timeout_s,
-                        health_check_max_failed, health_check_interval_s,
-                        health_check_path, health_check_http_headers,
-                        plugin_config, secret_key,
-                        locations, http_user, http_password, host_header_rewrite,
-                        request_headers, response_headers, route_by_http_user,
-                        annotations, metadatas,
-                        allow_users, nat_traversal_disable_assisted_addrs,
-                        proxy_protocol_version, multiplexer,
-                        created_at, updated_at
-                 FROM local_proxy
-                 ORDER BY name",
-            )
+            .prepare(&format!(
+                "SELECT {PROXY_COLUMNS} FROM local_proxy ORDER BY name"
+            ))
             .map_err(ClientError::DatabaseQuery)?;
 
         let proxies: Vec<LocalProxy> = stmt
@@ -101,20 +94,7 @@ impl Database {
     pub async fn get_proxy(&self, id: i64) -> Result<LocalProxy> {
         let conn = self.lock().await;
         conn.query_row(
-            "SELECT id, name, proxy_type, local_ip, local_port, remote_port,
-                    custom_domains, subdomain, use_encryption, use_compression,
-                    bandwidth_limit, bandwidth_limit_mode,
-                    health_check_type, health_check_timeout_s,
-                    health_check_max_failed, health_check_interval_s,
-                    health_check_path, health_check_http_headers,
-                    plugin_config, secret_key,
-                    locations, http_user, http_password, host_header_rewrite,
-                    request_headers, response_headers, route_by_http_user,
-                    annotations, metadatas,
-                    allow_users, nat_traversal_disable_assisted_addrs,
-                    proxy_protocol_version, multiplexer,
-                    created_at, updated_at
-             FROM local_proxy WHERE id = ?1",
+            &format!("SELECT {PROXY_COLUMNS} FROM local_proxy WHERE id = ?1"),
             params![id],
             row_to_proxy,
         )
