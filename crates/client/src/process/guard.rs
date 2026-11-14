@@ -52,8 +52,8 @@ pub struct ProcessGuard {
     signal_handler: SignalHandler,
     /// 日志目录
     log_dir: PathBuf,
-    /// Profile 名称（用于生成独立日志文件）
-    profile_name: String,
+    /// Artifact identifier (`{profile_id}-{name}`) shared by logs and the TOML.
+    artifact_id: String,
 }
 impl ProcessGuard {
     pub fn binary_path(&self) -> &std::path::Path {
@@ -63,13 +63,14 @@ impl ProcessGuard {
     /// 创建新的 ProcessGuard
     ///
     /// 注意：此时尚未启动子进程，需调用 `start()`。
-    /// `profile_name` 用于生成独立的日志文件名。
+    /// `artifact_id` 由 profile id 与名称组成，用于日志文件名；它与 TOML 文件名
+    /// 同源，因此两个 sanitize 后同名的 profile 不会共用日志。
     /// `frpc_path` 为 rustfrp 托管的 frpc 二进制绝对路径（非 PATH 查找）。
     pub fn new(
         config_path: PathBuf,
         frpc_path: PathBuf,
         signal_handler: SignalHandler,
-        profile_name: String,
+        artifact_id: String,
     ) -> Self {
         let log_dir = dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
@@ -86,7 +87,7 @@ impl ProcessGuard {
             pid: Arc::new(AtomicU32::new(0)),
             signal_handler,
             log_dir,
-            profile_name,
+            artifact_id,
         }
     }
 
@@ -146,7 +147,7 @@ impl ProcessGuard {
     async fn spawn_child(&self) -> Result<()> {
         let config_path = self.config_path.clone();
         let log_dir = self.log_dir.clone();
-        let safe_name = sanitize_log_filename(&self.profile_name);
+        let artifact_id = self.artifact_id.clone();
 
         // 确保配置文件存在
         if !config_path.exists() {
@@ -156,8 +157,8 @@ impl ProcessGuard {
             )));
         }
 
-        let stdout_log = format!("frpc_{}.log", safe_name);
-        let stderr_log = format!("frpc_{}_err.log", safe_name);
+        let stdout_log = format!("frpc_{artifact_id}.log");
+        let stderr_log = format!("frpc_{artifact_id}_err.log");
 
         let stdout_file = OpenOptions::new()
             .append(true)
@@ -267,15 +268,14 @@ impl ProcessGuard {
         let config_path = self.config_path.clone();
         let frpc_path = self.frpc_path.clone();
         let log_dir = self.log_dir.clone();
-        let profile_name = self.profile_name.clone();
+        let watchdog_artifact_id = self.artifact_id.clone();
         let last_failure = self.last_failure.clone();
         tokio::spawn(async move {
             // 等待启动确认（消除 spawn_child 和 wait() 之间的竞态窗口）
             let _ = ready_rx.await;
 
-            let safe_name = sanitize_log_filename(&profile_name);
-            let stdout_log = format!("frpc_{safe_name}.log");
-            let stderr_log = format!("frpc_{safe_name}_err.log");
+            let stdout_log = format!("frpc_{watchdog_artifact_id}.log");
+            let stderr_log = format!("frpc_{watchdog_artifact_id}_err.log");
             let stderr_path = log_dir.join(&stderr_log);
             let mut started_at = Instant::now();
 
@@ -537,14 +537,13 @@ impl ProcessGuard {
 
     /// 获取 stdout 日志文件路径
     pub fn stdout_log_path(&self) -> PathBuf {
-        let safe_name = sanitize_log_filename(&self.profile_name);
-        self.log_dir.join(format!("frpc_{}.log", safe_name))
+        self.log_dir.join(format!("frpc_{}.log", self.artifact_id))
     }
 
     /// 获取 stderr 日志文件路径
     pub fn stderr_log_path(&self) -> PathBuf {
-        let safe_name = sanitize_log_filename(&self.profile_name);
-        self.log_dir.join(format!("frpc_{}_err.log", safe_name))
+        self.log_dir
+            .join(format!("frpc_{}_err.log", self.artifact_id))
     }
 }
 
@@ -588,17 +587,6 @@ impl std::fmt::Debug for ProcessGuard {
             .field("restart_count", &self.restart_count)
             .finish_non_exhaustive()
     }
-}
-
-/// 文件名安全处理：替换空格、去除非安全字符，用于日志文件名
-fn sanitize_log_filename(name: &str) -> String {
-    name.chars()
-        .map(|c| match c {
-            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => c,
-            ' ' => '_',
-            _ => '_',
-        })
-        .collect()
 }
 
 /// Read the last `max_lines` lines of a log file for error diagnostics.

@@ -49,13 +49,13 @@ pub async fn generate_all_frpc_tomls(db: &Database, output_dir: &Path) -> Result
             Ok(profile) => {
                 let config = build_frpc_config(&profile, group_bindings, db).await?;
 
-                let safe_name = sanitize_filename(&profile.name);
-                let output_path = output_dir.join(format!("{safe_name}.toml"));
+                let output_path = profile_toml_path(output_dir, *profile_id, &profile.name);
 
                 let toml_str = toml::to_string_pretty(&config)
                     .map_err(|e| ClientError::TomlSerialization(e.to_string()))?;
 
                 atomic_write(&output_path, &toml_str)?;
+                remove_stale_profile_tomls(output_dir, *profile_id, &output_path);
 
                 tracing::info!(
                     path = %output_path.display(),
@@ -97,8 +97,7 @@ pub async fn generate_frpc_toml_for_profile(
     output_dir: &Path,
 ) -> Result<Option<PathBuf>> {
     let profile = db.get_profile(profile_id).await?;
-    let safe_name = sanitize_filename(&profile.name);
-    let output_path = output_dir.join(format!("{safe_name}.toml"));
+    let output_path = profile_toml_path(output_dir, profile_id, &profile.name);
 
     let bindings = db.list_enabled_bindings_for_profile(profile_id).await?;
 
@@ -124,6 +123,10 @@ pub async fn generate_frpc_toml_for_profile(
 
     atomic_write(&output_path, &toml_str)?;
 
+    // Renaming a profile changes its artifact id, so the previous file would
+    // linger and look like another runnable profile.
+    remove_stale_profile_tomls(output_dir, profile_id, &output_path);
+
     tracing::info!(
         path = %output_path.display(),
         profile = %profile.name,
@@ -132,6 +135,38 @@ pub async fn generate_frpc_toml_for_profile(
     );
 
     Ok(Some(output_path))
+}
+
+/// Delete earlier TOML files belonging to `profile_id` but carrying another name.
+fn remove_stale_profile_tomls(output_dir: &Path, profile_id: i64, keep: &Path) {
+    let prefix = format!("{profile_id}-");
+    let Ok(entries) = std::fs::read_dir(output_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let belongs_to_other_id = name
+            .split_once('-')
+            .and_then(|(head, _)| head.parse::<i64>().ok())
+            .is_some_and(|other| other != profile_id);
+        if name.ends_with(".toml")
+            && !belongs_to_other_id
+            && name.starts_with(&prefix)
+            && path != keep
+        {
+            match std::fs::remove_file(&path) {
+                Ok(()) => {
+                    tracing::info!(path = %path.display(), "Removed stale profile TOML")
+                }
+                Err(error) => {
+                    tracing::warn!(path = %path.display(), %error, "Failed to remove stale TOML")
+                }
+            }
+        }
+    }
 }
 
 /// 为单个 Profile 构建 FrpcConfig
@@ -544,6 +579,30 @@ pub(crate) fn sanitize_filename(name: &str) -> String {
         .collect()
 }
 
+/// Length cap for the human-readable suffix in generated artifact names.
+const ARTIFACT_NAME_MAX: usize = 40;
+
+/// Identifier shared by a profile's TOML file and its frpc logs.
+///
+/// The profile id is the anchor: `sanitize_filename` maps distinct names onto the
+/// same string (`"Test Server"` and `"Test_Server"` both become `Test_Server`),
+/// so a name-only scheme lets two profiles share one TOML and one log file. The
+/// readable suffix stays for operators, truncated so a long name cannot exceed
+/// filesystem limits.
+pub fn profile_artifact_id(profile_id: i64, profile_name: &str) -> String {
+    let sanitized = sanitize_filename(profile_name);
+    let trimmed: String = sanitized.chars().take(ARTIFACT_NAME_MAX).collect();
+    if trimmed.is_empty() {
+        return profile_id.to_string();
+    }
+    format!("{profile_id}-{trimmed}")
+}
+
+/// Path of the generated TOML for one profile.
+pub fn profile_toml_path(output_dir: &Path, profile_id: i64, name: &str) -> PathBuf {
+    output_dir.join(format!("{}.toml", profile_artifact_id(profile_id, name)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -617,12 +676,12 @@ mod tests {
         assert!(content.contains("RDP"));
         assert!(content.contains("3389"));
         assert!(content.contains("user = \"tenant-user\""));
-        // 文件名应为 sanitized profile name
+        // 文件名以 profile id 为锚，附带 sanitized name
         assert!(paths[0]
             .file_name()
             .unwrap()
             .to_string_lossy()
-            .contains("Test_Server"));
+            .contains(&format!("{profile_id}-Test_Server")));
     }
 
     /// Fields that only matter for advanced deployments must still round-trip
@@ -760,8 +819,9 @@ mod tests {
             .iter()
             .map(|p| p.file_stem().unwrap().to_string_lossy().to_string())
             .collect();
-        assert!(names.contains(&"Server_Alpha".to_string()));
-        assert!(names.contains(&"Server_Beta".to_string()));
+        // Artifact names are profile-id anchored so they cannot collide.
+        assert!(names.contains(&format!("{p1_id}-Server_Alpha")));
+        assert!(names.contains(&format!("{p2_id}-Server_Beta")));
     }
 
     #[tokio::test]
@@ -782,6 +842,130 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().ends_with(".toml.tmp"))
             .collect();
         assert!(tmp_files.is_empty());
+    }
+
+    /// Two profiles whose names sanitize to the same string must not share a TOML
+    /// file or a log name; sharing let one load the other's configuration after a
+    /// global reload.
+    #[tokio::test]
+    async fn colliding_profile_names_get_distinct_artifacts() {
+        let db = setup_db().await;
+        let mut ids = Vec::new();
+        for name in ["Test Server", "Test_Server"] {
+            let profile_id = db
+                .insert_profile(&FrpsProfile {
+                    name: name.into(),
+                    server_addr: "frp.example.com".into(),
+                    token: "t".into(),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            let proxy_id = db
+                .insert_proxy(&LocalProxy {
+                    name: format!("p{profile_id}"),
+                    local_port: 8080,
+                    remote_port: Some(18000 + profile_id as u16),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            db.insert_binding(&BindingRule {
+                profile_id,
+                proxy_id,
+                enabled: true,
+                running: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+            ids.push(profile_id);
+        }
+
+        let output_dir = TempDir::new().unwrap();
+        let paths = generate_all_frpc_tomls(&db, output_dir.path())
+            .await
+            .unwrap();
+        assert_eq!(paths.len(), 2, "each profile needs its own TOML");
+
+        let mut names: Vec<String> = paths
+            .iter()
+            .map(|path| path.file_stem().unwrap().to_string_lossy().to_string())
+            .collect();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), 2, "artifact names must be unique: {names:?}");
+
+        for path in &paths {
+            let stem = path.file_stem().unwrap().to_string_lossy().to_string();
+            let profile_id = ids
+                .iter()
+                .find(|id| stem.starts_with(&format!("{id}-")))
+                .unwrap_or_else(|| panic!("unexpected artifact name {stem}"));
+            let content = std::fs::read_to_string(path).unwrap();
+            assert!(
+                content.contains(&format!("name = \"p{profile_id}\"")),
+                "{} must contain its own proxy",
+                path.display()
+            );
+        }
+    }
+
+    /// Renaming a profile must not leave its previous TOML behind: a stale file
+    /// looks like another runnable profile and is picked up on the next boot.
+    #[tokio::test]
+    async fn renaming_a_profile_removes_its_previous_toml() {
+        let db = setup_db().await;
+        let profile_id = db
+            .insert_profile(&FrpsProfile {
+                name: "before".into(),
+                server_addr: "frp.example.com".into(),
+                token: "t".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let proxy_id = db
+            .insert_proxy(&LocalProxy {
+                name: "svc".into(),
+                local_port: 8080,
+                remote_port: Some(18080),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        db.insert_binding(&BindingRule {
+            profile_id,
+            proxy_id,
+            enabled: true,
+            running: true,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+        let output_dir = TempDir::new().unwrap();
+        generate_all_frpc_tomls(&db, output_dir.path())
+            .await
+            .unwrap();
+        let stale = output_dir.path().join(format!("{profile_id}-before.toml"));
+        assert!(stale.exists());
+        let unrelated = output_dir.path().join("999-other.toml");
+        std::fs::write(&unrelated, "serverAddr = \"x\"\n").unwrap();
+
+        let mut profile = db.get_profile(profile_id).await.unwrap();
+        profile.name = "after".into();
+        db.update_profile(&profile).await.unwrap();
+        generate_all_frpc_tomls(&db, output_dir.path())
+            .await
+            .unwrap();
+
+        assert!(!stale.exists(), "renamed profile left a stale TOML");
+        assert!(output_dir
+            .path()
+            .join(format!("{profile_id}-after.toml"))
+            .exists());
+        assert!(unrelated.exists(), "cleanup must not touch other profiles");
     }
 
     #[test]

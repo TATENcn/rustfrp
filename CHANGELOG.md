@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Multi-instance isolation: generated TOML files and frpc logs are keyed by
+  `{profile_id}-{name}` instead of the sanitized profile name. `sanitize_filename`
+  maps distinct names onto one string (`"Test Server"` and `"Test_Server"` both
+  become `Test_Server`), so two profiles shared a single TOML and log file; after
+  a global reload one profile could restart with the other's configuration and
+  lose its tunnels silently.
+- Renaming a profile removes its previous TOML instead of leaving an orphan that
+  looked like another runnable profile.
+- Daemon startup restarts frpc for every profile that has a generated TOML. The
+  startup loop still looked for `{name}.toml` after the rename, so it found none
+  and started nothing.
+
 ### Changed
 
 - `local_proxy` read projections are defined once (`PROXY_COLUMNS`) instead of

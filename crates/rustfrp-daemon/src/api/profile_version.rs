@@ -160,7 +160,8 @@ mod tests {
                 })
                 .await
                 .unwrap();
-            tokio::fs::write(root.path().join(format!("{name}.toml")), "")
+            let artifact = rustfrp_client::config::generator::profile_artifact_id(id, name);
+            tokio::fs::write(root.path().join(format!("{artifact}.toml")), "")
                 .await
                 .unwrap();
             ids.push(id);

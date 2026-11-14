@@ -121,9 +121,8 @@ impl ProcessManager {
     ///
     /// 若该 profile_id 已有运行中实例，先停止旧的再启动新的。
     pub async fn start(&self, profile_id: i64, profile_name: &str) -> Result<()> {
-        let toml_path = self
-            .config_dir
-            .join(sanitize_filename(profile_name) + ".toml");
+        let toml_path =
+            crate::config::generator::profile_toml_path(&self.config_dir, profile_id, profile_name);
 
         if !toml_path.exists() {
             return Err(ClientError::ProcessStart(format!(
@@ -141,7 +140,7 @@ impl ProcessManager {
             toml_path.clone(),
             binary,
             self.signal_handler.clone(),
-            profile_name.to_string(),
+            crate::config::generator::profile_artifact_id(profile_id, profile_name),
         );
         guard.start().await?;
 
@@ -308,8 +307,6 @@ impl ProcessManager {
             .join("logs")
     }
 }
-
-use crate::config::generator::sanitize_filename;
 
 #[cfg(test)]
 mod tests {
