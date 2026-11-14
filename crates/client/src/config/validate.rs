@@ -49,13 +49,9 @@ impl FrpsProfile {
                     ));
                 }
             }
-            Some("token") | None => {
-                if self.token.trim().is_empty() {
-                    return Err(ClientError::MissingRequiredField(
-                        "token is required for FRP authentication".into(),
-                    ));
-                }
-            }
+            // An empty token is legitimate: frp accepts it when frps has no
+            // `auth.token` configured (`auth.method = "token"` on both sides).
+            Some("token") | None => {}
             Some(method) => {
                 return Err(ClientError::ConfigValidation(format!(
                     "Unsupported authentication method: {method}"
@@ -73,6 +69,54 @@ impl FrpsProfile {
             return Err(ClientError::ConfigValidation(
                 "heartbeat_timeout must be >= heartbeat_interval".into(),
             ));
+        }
+
+        // Wire protocol (FRP `transport.wireProtocol`)
+        if let Some(ref wire) = self.wire_protocol {
+            if !["v1", "v2"].contains(&wire.as_str()) {
+                return Err(ClientError::ConfigValidation(format!(
+                    "wire_protocol must be 'v1' or 'v2', got: {wire}"
+                )));
+            }
+        }
+
+        // Additional auth scopes (FRP `auth.additionalScopes`)
+        if let Some(ref scopes) = self.auth_additional_scopes {
+            for scope in scopes {
+                if !["HeartBeats", "NewWorkConns"].contains(&scope.as_str()) {
+                    return Err(ClientError::ConfigValidation(format!(
+                        "auth additional scope must be 'HeartBeats' or 'NewWorkConns', got: {scope}"
+                    )));
+                }
+            }
+        }
+
+        // frpc log level (FRP `log.level`)
+        if let Some(ref level) = self.log_level {
+            if !["trace", "debug", "info", "warn", "error"].contains(&level.as_str()) {
+                return Err(ClientError::ConfigValidation(format!(
+                    "log_level must be trace/debug/info/warn/error, got: {level}"
+                )));
+            }
+        }
+
+        // VirtualNet requires the matching feature gate, frpc refuses otherwise.
+        if self
+            .virtual_net_address
+            .as_ref()
+            .is_some_and(|address| !address.trim().is_empty())
+        {
+            let enabled = self
+                .feature_gates
+                .as_deref()
+                .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+                .and_then(|value| value.get("VirtualNet").and_then(|v| v.as_bool()))
+                .unwrap_or(false);
+            if !enabled {
+                return Err(ClientError::ConfigValidation(
+                    "virtual_net_address requires the VirtualNet feature gate".into(),
+                ));
+            }
         }
 
         // 传输协议
@@ -123,6 +167,27 @@ impl LocalProxy {
         {
             return Err(ClientError::ConfigValidation(
                 "HTTP/HTTPS/TCPMux proxy requires custom_domains or subdomain".into(),
+            ));
+        }
+
+        // frpc rejects tcpmux proxies without a supported multiplexer.
+        if self.proxy_type == ProxyType::Tcpmux {
+            match self.multiplexer.as_deref() {
+                Some("httpconnect") => {}
+                Some(other) => {
+                    return Err(ClientError::ConfigValidation(format!(
+                        "tcpmux multiplexer must be 'httpconnect', got: {other}"
+                    )));
+                }
+                None => {
+                    return Err(ClientError::MissingRequiredField(
+                        "multiplexer is required for tcpmux proxy type".into(),
+                    ));
+                }
+            }
+        } else if self.multiplexer.is_some() {
+            return Err(ClientError::ConfigValidation(
+                "multiplexer is only valid for tcpmux proxy type".into(),
             ));
         }
 
@@ -206,6 +271,38 @@ impl LocalVisitor {
                     ));
                 }
             }
+            if self.max_retries_an_hour.is_some_and(|value| value < 1) {
+                return Err(ClientError::ConfigValidation(
+                    "max_retries_an_hour must be >= 1".into(),
+                ));
+            }
+            if self.min_retry_interval.is_some_and(|value| value < 1) {
+                return Err(ClientError::ConfigValidation(
+                    "min_retry_interval must be >= 1".into(),
+                ));
+            }
+            if self.fallback_timeout_ms.is_some_and(|value| value < 1) {
+                return Err(ClientError::ConfigValidation(
+                    "fallback_timeout_ms must be >= 1".into(),
+                ));
+            }
+        } else if self.xtcp_protocol.is_some()
+            || self.keep_tunnel_open.is_some()
+            || self.max_retries_an_hour.is_some()
+            || self.min_retry_interval.is_some()
+            || self.fallback_to.is_some()
+            || self.fallback_timeout_ms.is_some()
+        {
+            return Err(ClientError::ConfigValidation(
+                "XTCP-only fields are not valid for stcp/sudp visitors".into(),
+            ));
+        }
+
+        // SUDP visitors cannot skip the bind port (frp rejects bindPort < 0).
+        if matches!(self.visitor_type, VisitorType::Sudp) && self.bind_port < 0 {
+            return Err(ClientError::ConfigValidation(
+                "sudp visitor requires a non-negative bind_port".into(),
+            ));
         }
         // Profile ID must be valid
         if self.profile_id <= 0 {
@@ -387,5 +484,131 @@ mod tests {
             ..Default::default()
         };
         assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn tcpmux_requires_httpconnect_multiplexer() {
+        let mut p = LocalProxy {
+            name: "mux".into(),
+            proxy_type: ProxyType::Tcpmux,
+            local_ip: "127.0.0.1".into(),
+            local_port: 22,
+            custom_domains: Some(vec!["mux.example.com".into()]),
+            ..Default::default()
+        };
+        assert!(
+            p.validate().is_err(),
+            "missing multiplexer must be rejected"
+        );
+
+        p.multiplexer = Some("unsupported".into());
+        assert!(
+            p.validate().is_err(),
+            "unknown multiplexer must be rejected"
+        );
+
+        p.multiplexer = Some("httpconnect".into());
+        assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn multiplexer_is_tcpmux_only() {
+        let p = LocalProxy {
+            name: "tcp".into(),
+            local_ip: "127.0.0.1".into(),
+            local_port: 22,
+            remote_port: Some(6001),
+            multiplexer: Some("httpconnect".into()),
+            ..Default::default()
+        };
+        assert!(p.validate().is_err(), "multiplexer on tcp must be rejected");
+    }
+
+    #[test]
+    fn virtual_net_requires_feature_gate() {
+        let mut p = FrpsProfile {
+            name: "vn".into(),
+            server_addr: "frp.example.com".into(),
+            token: "t".into(),
+            virtual_net_address: Some("100.86.1.1/24".into()),
+            ..Default::default()
+        };
+        assert!(
+            p.validate().is_err(),
+            "VirtualNet without the gate must fail"
+        );
+
+        p.feature_gates = Some(r#"{"VirtualNet":true}"#.into());
+        assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn rejects_unknown_wire_protocol_and_auth_scope() {
+        let base = FrpsProfile {
+            name: "p".into(),
+            server_addr: "frp.example.com".into(),
+            token: "t".into(),
+            ..Default::default()
+        };
+
+        let mut p = base.clone();
+        p.wire_protocol = Some("v3".into());
+        assert!(p.validate().is_err());
+
+        let mut p = base.clone();
+        p.auth_additional_scopes = Some(vec!["Everything".into()]);
+        assert!(p.validate().is_err());
+
+        let mut p = base;
+        p.wire_protocol = Some("v2".into());
+        p.auth_additional_scopes = Some(vec!["HeartBeats".into(), "NewWorkConns".into()]);
+        assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn xtcp_only_fields_rejected_on_stcp_visitor() {
+        use crate::config::model::VisitorType;
+        let base = LocalVisitor {
+            name: "v".into(),
+            visitor_type: VisitorType::Stcp,
+            server_name: "svc".into(),
+            bind_port: 9000,
+            secret_key: Some("k".into()),
+            profile_id: 1,
+            ..Default::default()
+        };
+        assert!(base.validate().is_ok());
+
+        let mut with_xtcp_field = base.clone();
+        with_xtcp_field.keep_tunnel_open = Some(true);
+        assert!(with_xtcp_field.validate().is_err());
+
+        let mut sudp_without_port = base;
+        sudp_without_port.visitor_type = VisitorType::Sudp;
+        sudp_without_port.bind_port = -1;
+        assert!(sudp_without_port.validate().is_err());
+    }
+
+    #[test]
+    fn xtcp_visitor_accepts_and_bounds_retry_settings() {
+        use crate::config::model::VisitorType;
+        let mut visitor = LocalVisitor {
+            name: "v".into(),
+            visitor_type: VisitorType::Xtcp,
+            server_name: "svc".into(),
+            bind_port: 9000,
+            secret_key: Some("k".into()),
+            profile_id: 1,
+            xtcp_protocol: Some("kcp".into()),
+            keep_tunnel_open: Some(true),
+            max_retries_an_hour: Some(8),
+            min_retry_interval: Some(90),
+            fallback_timeout_ms: Some(1000),
+            ..Default::default()
+        };
+        assert!(visitor.validate().is_ok());
+
+        visitor.min_retry_interval = Some(0);
+        assert!(visitor.validate().is_err());
     }
 }

@@ -69,7 +69,7 @@ RustFRP 不修改 FRP 协议，也不接管流量转发。已有的现代格式 
 - **查看流量去向**：每秒采样，按上游服务器、本地代理或系统网卡查看速率与缓存区间汇总。
 - **面向长期运行**：支持热重载、优雅退出、崩溃恢复、指数退避和结构化故障诊断。
 - **可选集中运维**：可通过 Control/Agent 管理远端 frps，并接入 Prometheus、Grafana 和 Alertmanager。
-- **安全地扩展**：提供 REST API、租户与权限策略，以及受权限、时间、计算量和内存限制的无 WASI 插件沙箱。
+- **按需扩展**：提供 REST API 与 Token/scope 鉴权；WASM 插件沙箱是可选构建特性（默认关闭）。
 
 ## 核心能力
 
@@ -82,7 +82,7 @@ RustFRP 不修改 FRP 协议，也不接管流量转发。已有的现代格式 
 | 迁移备份 | 事务化导入现代 `frpc.toml`；一致性 SQLite 备份导出 |
 | 服务端管理 | Agent 主动拉取配置，ETag 缓存，`frps verify` 校验，原子切换与失败回滚 |
 | 可观测性 | 资源趋势与运行进程侧栏；三种口径的流量统计；日志筛选；可选 Prometheus / Grafana |
-| API 与扩展 | REST API、Token/策略鉴权、租户隔离、WASM 插件及参考插件 |
+| API 与扩展 | REST API、Token/scope 鉴权、按 token 的租户隔离、可选 WASM 插件 |
 
 ## 系统架构
 
@@ -246,13 +246,14 @@ Linux 下可使用统一的 Bun 开发管理入口，自动构建 WebUI / daemon
 
 ```bash
 bun run mode:start    # 构建并后台启动
-bun run mode:status   # 查看真实地址与健康状态
+bun run mode:status   # 查看真实地址、健康与磁盘水位
 bun run mode:reload   # 重新构建并重启
+bun run mode:clean    # 预览可回收缓存（--execute 才删除）
 bun run mode:stop     # 停止，保留数据
 bun run mode:help     # 中文分组帮助
 ```
 
-首次访问需要信任本地自签证书，并在界面填写 `.local/mode/api-token` 中的 Token。管理器使用独立开发数据库；完整命令、隔离边界及证书信任说明见 [Bun 开发管理指南](docs/development-mode.md)。
+首次访问需要信任本地自签证书，并在界面填写 `.local/mode/api-token` 中的 Token。开发者选择集中在仓库根被忽略的 `.local/mode.json`；管理器使用独立开发数据库，缓存回收仅限可核验归属的可重建产物。完整命令、磁盘策略、隔离边界及证书信任说明见 [Bun 开发管理指南](docs/development-mode.md)。
 
 ```bash
 just test-fast             # 快速单元测试
@@ -268,6 +269,7 @@ bash scripts/e2e-local.sh  # 双 frps + 双 frpc 本地闭环测试
 ## 文档
 
 - [frpc 版本与安装渠道](docs/frpc-versions.md)
+- [热重载与逐代理状态](docs/hot-reload.md)
 - [网络流量监控](docs/traffic-monitoring.md)
 - [Bun 开发管理指南](docs/development-mode.md)
 

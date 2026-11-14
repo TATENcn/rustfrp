@@ -83,6 +83,32 @@ pub struct FrpsProfile {
     pub store_path: Option<String>,
     /// Feature gates, used to enable or disable experimental features (map[string]bool as JSON).
     pub feature_gates: Option<String>,
+    /// Unique identifier for this frpc instance (FRP `clientID`).
+    pub client_id: Option<String>,
+    /// frpc/frps internal wire protocol version: "v1" or "v2".
+    pub wire_protocol: Option<String>,
+    /// Extra auth scopes whose messages carry auth info ("HeartBeats", "NewWorkConns").
+    pub auth_additional_scopes: Option<Vec<String>>,
+    /// OIDC extra token-endpoint parameters (map[string]string as JSON).
+    pub oidc_additional_params: Option<String>,
+    /// Custom CA for the OIDC token endpoint TLS certificate.
+    pub oidc_trusted_ca_file: Option<String>,
+    /// Skip OIDC token-endpoint certificate verification (debugging only).
+    pub oidc_insecure_skip_verify: Option<bool>,
+    /// Proxy for OIDC token-endpoint connections.
+    pub oidc_proxy_url: Option<String>,
+    /// Override the server name used for certificate verification.
+    pub tls_server_name: Option<String>,
+    /// Use FRP's custom TLS first byte when TLS is enabled.
+    pub tls_disable_custom_first_byte: Option<bool>,
+    /// frpc log destination ("console" or a file path).
+    pub log_to: Option<String>,
+    /// frpc log level ("trace", "debug", "info", "warn", "error").
+    pub log_level: Option<String>,
+    /// Days to retain the frpc log file.
+    pub log_max_days: Option<i64>,
+    /// Experimental virtual network address (requires featureGates.VirtualNet).
+    pub virtual_net_address: Option<String>,
     #[serde(skip_deserializing)]
     pub created_at: String,
     #[serde(skip_deserializing)]
@@ -131,6 +157,19 @@ impl Default for FrpsProfile {
             includes: None,
             store_path: None,
             feature_gates: None,
+            client_id: None,
+            wire_protocol: None,
+            auth_additional_scopes: None,
+            oidc_additional_params: None,
+            oidc_trusted_ca_file: None,
+            oidc_insecure_skip_verify: None,
+            oidc_proxy_url: None,
+            tls_server_name: None,
+            tls_disable_custom_first_byte: None,
+            log_to: None,
+            log_level: None,
+            log_max_days: None,
+            virtual_net_address: None,
             created_at: String::new(),
             updated_at: String::new(),
         }
@@ -400,6 +439,8 @@ pub struct LocalProxy {
     pub health_check_path: Option<String>,
     /// HTTP health check request headers. Only effective when health_check_type = "http".
     pub health_check_http_headers: Option<Vec<HttpHeader>>,
+    /// tcpmux multiplexer ("httpconnect"). Required by frpc for `type = "tcpmux"`.
+    pub multiplexer: Option<String>,
     /// FRP 原生插件配置（对应 TOML 中的 `[proxies.plugin]` 段）
     ///
     /// None 表示不使用 FRP 原生插件。
@@ -445,6 +486,7 @@ impl Default for LocalProxy {
             health_check_interval_s: 10,
             health_check_path: None,
             health_check_http_headers: None,
+            multiplexer: None,
             plugin_config: None,
             created_at: String::new(),
             updated_at: String::new(),
@@ -576,6 +618,8 @@ pub struct VisitorEntry {
 pub struct AuthConfig {
     pub method: Option<String>,
     pub token: Option<String>,
+    #[serde(rename = "additionalScopes", skip_serializing_if = "Option::is_none")]
+    pub additional_scopes: Option<Vec<String>>,
     #[serde(rename = "oidc", skip_serializing_if = "Option::is_none")]
     pub oidc: Option<OidcClientConfig>,
 }
@@ -593,6 +637,17 @@ pub struct OidcClientConfig {
     pub scope: Option<String>,
     #[serde(rename = "tokenEndpointURL")]
     pub token_endpoint_url: String,
+    #[serde(
+        rename = "additionalEndpointParams",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub additional_endpoint_params: Option<serde_json::Value>,
+    #[serde(rename = "trustedCaFile", skip_serializing_if = "Option::is_none")]
+    pub trusted_ca_file: Option<String>,
+    #[serde(rename = "insecureSkipVerify", skip_serializing_if = "Option::is_none")]
+    pub insecure_skip_verify: Option<bool>,
+    #[serde(rename = "proxyURL", skip_serializing_if = "Option::is_none")]
+    pub proxy_url: Option<String>,
 }
 
 /// 生成 frpc.toml 时使用的完整配置结构
@@ -611,6 +666,9 @@ pub struct FrpcConfig {
     pub transport: Option<TransportConfig>,
     #[serde(rename = "auth", skip_serializing_if = "Option::is_none")]
     pub auth: Option<AuthConfig>,
+    /// frpc admin listener. Required by `frpc reload` and `frpc status`.
+    #[serde(rename = "webServer", skip_serializing_if = "Option::is_none")]
+    pub web_server: Option<WebServerConfig>,
     #[serde(rename = "loginFailExit", skip_serializing_if = "Option::is_none")]
     pub login_fail_exit: Option<bool>,
     #[serde(rename = "metadatas", skip_serializing_if = "Option::is_none")]
@@ -625,10 +683,50 @@ pub struct FrpcConfig {
     pub includes: Option<Vec<String>>,
     #[serde(rename = "featureGates", skip_serializing_if = "Option::is_none")]
     pub feature_gates: Option<serde_json::Value>,
+    #[serde(rename = "clientID", skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    #[serde(rename = "start", skip_serializing_if = "Option::is_none")]
+    pub start: Option<Vec<String>>,
+    #[serde(rename = "log", skip_serializing_if = "Option::is_none")]
+    pub log: Option<LogConfig>,
+    #[serde(rename = "virtualNet", skip_serializing_if = "Option::is_none")]
+    pub virtual_net: Option<VirtualNetConfig>,
     #[serde(rename = "proxies")]
     pub proxies: Vec<ProxyEntry>,
     #[serde(rename = "visitors", skip_serializing_if = "Vec::is_empty")]
     pub visitors: Vec<VisitorEntry>,
+}
+
+/// frpc admin listener configuration
+///
+/// 对应 FRP TOML 中的 `[webServer]` 段。仅用于本地 `frpc reload` / `/api/status`，
+/// 因此绑定回环地址并要求 Basic 认证（`/api/config` 会回显完整配置含 token）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebServerConfig {
+    pub addr: String,
+    pub port: u16,
+    pub user: String,
+    pub password: String,
+}
+
+/// frpc log configuration
+///
+/// 对应 FRP TOML 中的 `[log]` 段。子进程日志由 RustFRP 重定向到文件，
+/// 因此仅当用户显式设置时才输出该段。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogConfig {
+    #[serde(rename = "to", skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+    #[serde(rename = "level", skip_serializing_if = "Option::is_none")]
+    pub level: Option<String>,
+    #[serde(rename = "maxDays", skip_serializing_if = "Option::is_none")]
+    pub max_days: Option<i64>,
+}
+
+/// Experimental virtual network configuration (requires the `VirtualNet` gate).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VirtualNetConfig {
+    pub address: String,
 }
 
 /// 传输层配置
@@ -637,6 +735,8 @@ pub struct FrpcConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransportConfig {
     pub protocol: String,
+    #[serde(rename = "wireProtocol", skip_serializing_if = "Option::is_none")]
+    pub wire_protocol: Option<String>,
     #[serde(rename = "tls")]
     pub tls: Option<TlsConfig>,
     #[serde(rename = "heartbeatInterval", skip_serializing_if = "Option::is_none")]
@@ -692,6 +792,13 @@ pub struct TlsConfig {
     pub key_file: Option<String>,
     #[serde(rename = "trustedCaFile", skip_serializing_if = "Option::is_none")]
     pub trusted_ca_file: Option<String>,
+    #[serde(rename = "serverName", skip_serializing_if = "Option::is_none")]
+    pub server_name: Option<String>,
+    #[serde(
+        rename = "disableCustomTLSFirstByte",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub disable_custom_first_byte: Option<bool>,
 }
 
 /// 单个代理条目
@@ -712,6 +819,9 @@ pub struct ProxyEntry {
     pub custom_domains: Option<Vec<String>>,
     #[serde(rename = "subdomain", skip_serializing_if = "Option::is_none")]
     pub subdomain: Option<String>,
+    /// tcpmux multiplexer ("httpconnect"). Required for `type = "tcpmux"`.
+    #[serde(rename = "multiplexer", skip_serializing_if = "Option::is_none")]
+    pub multiplexer: Option<String>,
     /// Transport-level configuration (useEncryption, useCompression, bandwidth, etc.).
     /// In FRP TOML format v0.52+, these fields are nested under `transport.*` keys.
     #[serde(rename = "transport", skip_serializing_if = "Option::is_none")]

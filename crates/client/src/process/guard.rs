@@ -1,7 +1,7 @@
 //! 进程守护
 //!
 //! 管理 frpc 子进程的完整生命周期：
-//! 启动 → 运行（监控 stderr）→ 热重载（SIGHUP）→ 优雅退出（SIGTERM → SIGKILL）
+//! 启动 → 运行（监控 stderr）→ 热重载（`frpc reload`）→ 优雅退出（SIGTERM → SIGKILL）
 #![allow(clippy::lines_filter_map_ok)]
 
 use crate::error::{ClientError, Result};
@@ -23,6 +23,9 @@ const STABLE_RUN_SECS: u64 = 60;
 
 /// 优雅退出等待时间
 const GRACEFUL_SHUTDOWN_SECS: u64 = 3;
+
+/// `frpc reload` 的等待上限；frpc 默认在数秒内完成代理增删。
+const RELOAD_TIMEOUT_SECS: u64 = 10;
 
 /// 进程守护
 ///
@@ -49,8 +52,8 @@ pub struct ProcessGuard {
     signal_handler: SignalHandler,
     /// 日志目录
     log_dir: PathBuf,
-    /// Profile 名称（用于生成独立日志文件）
-    profile_name: String,
+    /// Artifact identifier (`{profile_id}-{name}`) shared by logs and the TOML.
+    artifact_id: String,
 }
 impl ProcessGuard {
     pub fn binary_path(&self) -> &std::path::Path {
@@ -60,13 +63,14 @@ impl ProcessGuard {
     /// 创建新的 ProcessGuard
     ///
     /// 注意：此时尚未启动子进程，需调用 `start()`。
-    /// `profile_name` 用于生成独立的日志文件名。
+    /// `artifact_id` 由 profile id 与名称组成，用于日志文件名；它与 TOML 文件名
+    /// 同源，因此两个 sanitize 后同名的 profile 不会共用日志。
     /// `frpc_path` 为 rustfrp 托管的 frpc 二进制绝对路径（非 PATH 查找）。
     pub fn new(
         config_path: PathBuf,
         frpc_path: PathBuf,
         signal_handler: SignalHandler,
-        profile_name: String,
+        artifact_id: String,
     ) -> Self {
         let log_dir = dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
@@ -83,27 +87,67 @@ impl ProcessGuard {
             pid: Arc::new(AtomicU32::new(0)),
             signal_handler,
             log_dir,
-            profile_name,
+            artifact_id,
         }
     }
 
     /// 启动 frpc 子进程
     ///
-    /// 如果已有进程在运行，先停止。
+    /// 如果已有进程在运行，先停止。启动前先用 `frpc verify` 检查生成的配置，
+    /// 让结构性错误（非法 proxy 字段、缺失 multiplexer 等）在拉起进程前暴露。
     pub async fn start(&self) -> Result<()> {
         // 确保日志目录存在
         std::fs::create_dir_all(&self.log_dir).map_err(|e| {
             ClientError::ProcessStart(format!("Failed to create log directory: {e}"))
         })?;
 
+        self.verify_config().await?;
         self.spawn_child().await
+    }
+
+    /// 用 `frpc verify -c` 校验配置文件
+    ///
+    /// 与启动共用同一二进制，保证版本一致。`verify` 不绑定端口、不连接服务器，
+    /// 因此可以在进程运行时安全调用。
+    pub async fn verify_config(&self) -> Result<()> {
+        let output = tokio::time::timeout(
+            Duration::from_secs(RELOAD_TIMEOUT_SECS),
+            Command::new(&self.frpc_path)
+                .arg("verify")
+                .arg("-c")
+                .arg(&self.config_path)
+                .output(),
+        )
+        .await
+        .map_err(|_| {
+            ClientError::ConfigValidation(format!(
+                "frpc verify timed out after {RELOAD_TIMEOUT_SECS}s"
+            ))
+        })?
+        .map_err(|e| ClientError::ProcessStart(format!("failed to run frpc verify: {e}")))?;
+
+        if output.status.success() {
+            return Ok(());
+        }
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let detail = if stderr.trim().is_empty() {
+            stdout.trim().to_string()
+        } else {
+            stderr.trim().to_string()
+        };
+        Err(ClientError::ConfigValidation(format!(
+            "frpc rejected the generated configuration {}: {detail}",
+            self.config_path.display()
+        )))
     }
 
     /// 内部：启动子进程
     async fn spawn_child(&self) -> Result<()> {
         let config_path = self.config_path.clone();
         let log_dir = self.log_dir.clone();
-        let safe_name = sanitize_log_filename(&self.profile_name);
+        let artifact_id = self.artifact_id.clone();
 
         // 确保配置文件存在
         if !config_path.exists() {
@@ -113,8 +157,8 @@ impl ProcessGuard {
             )));
         }
 
-        let stdout_log = format!("frpc_{}.log", safe_name);
-        let stderr_log = format!("frpc_{}_err.log", safe_name);
+        let stdout_log = format!("frpc_{artifact_id}.log");
+        let stderr_log = format!("frpc_{artifact_id}_err.log");
 
         let stdout_file = OpenOptions::new()
             .append(true)
@@ -224,15 +268,14 @@ impl ProcessGuard {
         let config_path = self.config_path.clone();
         let frpc_path = self.frpc_path.clone();
         let log_dir = self.log_dir.clone();
-        let profile_name = self.profile_name.clone();
+        let watchdog_artifact_id = self.artifact_id.clone();
         let last_failure = self.last_failure.clone();
         tokio::spawn(async move {
             // 等待启动确认（消除 spawn_child 和 wait() 之间的竞态窗口）
             let _ = ready_rx.await;
 
-            let safe_name = sanitize_log_filename(&profile_name);
-            let stdout_log = format!("frpc_{safe_name}.log");
-            let stderr_log = format!("frpc_{safe_name}_err.log");
+            let stdout_log = format!("frpc_{watchdog_artifact_id}.log");
+            let stderr_log = format!("frpc_{watchdog_artifact_id}_err.log");
             let stderr_path = log_dir.join(&stderr_log);
             let mut started_at = Instant::now();
 
@@ -355,10 +398,13 @@ impl ProcessGuard {
         });
     }
 
-    /// 热重载：发送 SIGHUP（Unix）或 restart（Windows）
+    /// 热重载：通过 frpc admin API (`frpc reload -c`) 重读配置
     ///
-    /// Unix 上通过 SIGHUP 通知 frpc 重读配置，不中断已建立的连接。
-    /// Windows 没有 SIGHUP，改为 stop + start 实现等效效果（会短暂中断连接）。
+    /// frpc 只注册了 SIGINT/SIGTERM；SIGHUP 会以默认动作终止进程（实测 exit 129），
+    /// 因此热重载必须走 `frpc reload`，它请求 `[webServer]` 上的 `/api/reload`，
+    /// 由 frpc 自行增删代理且不断开已建立的连接（PERF-002）。
+    ///
+    /// 重载失败（配置非法）时 `frpc reload` 非零退出，frpc 继续使用旧配置。
     pub async fn reload(&self) -> Result<()> {
         let pid = {
             let guard = self.child.lock().await;
@@ -368,34 +414,45 @@ impl ProcessGuard {
                 .ok_or_else(|| ClientError::ProcessCommunication("frpc is not running".into()))?
         };
 
-        #[cfg(unix)]
-        {
-            use nix::sys::signal::{kill, Signal};
-            use nix::unistd::Pid;
+        let output = tokio::time::timeout(
+            Duration::from_secs(RELOAD_TIMEOUT_SECS),
+            Command::new(&self.frpc_path)
+                .arg("reload")
+                .arg("-c")
+                .arg(&self.config_path)
+                .output(),
+        )
+        .await
+        .map_err(|_| {
+            ClientError::ProcessCommunication(format!(
+                "frpc reload timed out after {RELOAD_TIMEOUT_SECS}s"
+            ))
+        })?
+        .map_err(|e| {
+            ClientError::ProcessCommunication(format!("failed to run frpc reload: {e}"))
+        })?;
 
-            kill(Pid::from_raw(pid as i32), Signal::SIGHUP)
-                .map_err(|e| ClientError::SignalError(format!("SIGHUP send failed: {e}")))?;
-
-            tracing::info!(pid, "SIGHUP sent (hot reload)");
-            Ok(())
-        }
-
-        #[cfg(not(unix))]
-        {
-            tracing::info!(
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let detail = if stderr.trim().is_empty() {
+                stdout.trim().to_string()
+            } else {
+                stderr.trim().to_string()
+            };
+            tracing::warn!(
                 pid,
-                "SIGHUP not available on this platform, restarting frpc instead"
+                exit_code = output.status.code().unwrap_or(-1),
+                %detail,
+                "frpc rejected the configuration; the running process keeps the previous one"
             );
-
-            // Windows: stop + start the process to pick up config changes.
-            // The Mutex lock is released before calling shutdown() to avoid deadlock,
-            // since shutdown() also acquires the same lock.
-            self.shutdown().await?;
-            self.spawn_child().await?;
-
-            tracing::info!("frpc restarted successfully");
-            Ok(())
+            return Err(ClientError::ConfigValidation(format!(
+                "frpc rejected the new configuration, it keeps running with the previous one: {detail}"
+            )));
         }
+
+        tracing::info!(pid, "frpc reloaded via admin API");
+        Ok(())
     }
 
     /// 优雅退出
@@ -480,14 +537,13 @@ impl ProcessGuard {
 
     /// 获取 stdout 日志文件路径
     pub fn stdout_log_path(&self) -> PathBuf {
-        let safe_name = sanitize_log_filename(&self.profile_name);
-        self.log_dir.join(format!("frpc_{}.log", safe_name))
+        self.log_dir.join(format!("frpc_{}.log", self.artifact_id))
     }
 
     /// 获取 stderr 日志文件路径
     pub fn stderr_log_path(&self) -> PathBuf {
-        let safe_name = sanitize_log_filename(&self.profile_name);
-        self.log_dir.join(format!("frpc_{}_err.log", safe_name))
+        self.log_dir
+            .join(format!("frpc_{}_err.log", self.artifact_id))
     }
 }
 
@@ -531,17 +587,6 @@ impl std::fmt::Debug for ProcessGuard {
             .field("restart_count", &self.restart_count)
             .finish_non_exhaustive()
     }
-}
-
-/// 文件名安全处理：替换空格、去除非安全字符，用于日志文件名
-fn sanitize_log_filename(name: &str) -> String {
-    name.chars()
-        .map(|c| match c {
-            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => c,
-            ' ' => '_',
-            _ => '_',
-        })
-        .collect()
 }
 
 /// Read the last `max_lines` lines of a log file for error diagnostics.

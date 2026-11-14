@@ -1,4 +1,3 @@
-import { VersionPicker } from "./version-picker";
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -172,11 +171,12 @@ export function Versions() {
               <FieldLabel htmlFor="version">
                 {t("frpVersion.version")}
               </FieldLabel>
-              <VersionPicker
+              <Input
+                id="version"
                 value={version}
-                onChange={setVersion}
-                versions={releases.data?.map((release) => release.version) ?? []}
                 disabled={busy}
+                placeholder="0.71.1"
+                onChange={(e) => setVersion(e.target.value)}
               />
             </Field>
             <Field>

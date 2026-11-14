@@ -20,6 +20,14 @@ export function lanIPs() { return Object.values(os.networkInterfaces()).flat().f
 export function prepare() { fs.mkdirSync(dir, {recursive: true, mode: 0o700}); }
 export function atomic(file, value) { fs.writeFileSync(`${file}.tmp`, value, {mode: 0o600}); fs.renameSync(`${file}.tmp`, file); }
 export function readState() { try { return JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return null; throw e; } }
+
+/** 仓库所在文件系统的已用字节数。构建增长以此为基准。 */
+export function filesystemBytes() {
+  try {
+    const s = fs.statfsSync(root);
+    return (s.blocks - s.bfree) * s.bsize;
+  } catch { return NaN; }
+}
 export function processExists(pid) { return Number.isInteger(pid) && pid > 1 && fs.existsSync(`/proc/${pid}`); }
 export function identity(pid) {
   try {

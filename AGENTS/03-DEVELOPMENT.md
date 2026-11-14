@@ -307,15 +307,23 @@ impl ProcessGuard {
         Ok(Self { child })
     }
 
-    /// 热重载：发送 SIGHUP
+    /// 热重载：调用 `frpc reload -c <config>`
+    ///
+    /// frpc 只注册 SIGINT/SIGTERM，SIGHUP 会以默认动作终止进程；
+    /// 官方热重载路径是 admin API（`[webServer]` 上的 `/api/reload`），
+    /// 由 `frpc reload` 子命令代为调用。失败时 frpc 保留旧配置。
     pub async fn reload(&self) -> Result<()> {
-        #[cfg(unix)]
-        {
-            use tokio::signal::unix::{signal, SignalKind};
-            nix::sys::signal::kill(
-                nix::unistd::Pid::from_raw(self.child.id().unwrap() as i32),
-                nix::sys::signal::Signal::SIGHUP,
-            ).map_err(|e| CoreError::Process(e.to_string()))?;
+        let output = tokio::process::Command::new(&self.frpc_path)
+            .arg("reload")
+            .arg("-c")
+            .arg(&self.config_path)
+            .output()
+            .await
+            .map_err(|e| CoreError::Process(e.to_string()))?;
+        if !output.status.success() {
+            return Err(CoreError::ConfigValidation(
+                String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            ));
         }
         Ok(())
     }

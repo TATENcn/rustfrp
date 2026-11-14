@@ -1,4 +1,3 @@
-import { ProfileVersionButton } from "./profile-version";
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -290,9 +289,6 @@ export default function Resources({ kind }: { kind: EntityKind }) {
     className: "text-right",
     cell: (row) => (
       <div className="flex justify-end gap-1">
-        {kind === "profiles" && (
-          <ProfileVersionButton id={row.id!} name={row.name} />
-        )}
         <Button variant="ghost" size="sm" onClick={() => setEditing(row)}>
           {t("common.edit")}
         </Button>

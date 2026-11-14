@@ -3,7 +3,7 @@
 //! Wires together Database, PluginManager, TOML generator, ProcessManager,
 //! and SignalHandler into a working frpc wrapper daemon.
 
-use crate::config::generator::{generate_all_frpc_tomls, sanitize_filename};
+use crate::config::generator::{generate_all_frpc_tomls, profile_toml_path};
 use crate::db::{migrate, Database};
 use crate::error::{ClientError, Result};
 use crate::process::manager::ProcessManager;
@@ -190,10 +190,10 @@ impl ClientCore {
         let profiles = self.db.list_profiles().await?;
         let mut started = 0;
         for profile in &profiles {
-            let safe_name = sanitize_filename(&profile.name);
-            let toml_path = self.config_dir.join(format!("{safe_name}.toml"));
+            let Some(id) = profile.id else { continue };
+            let toml_path = profile_toml_path(&self.config_dir, id, &profile.name);
             if toml_path.exists() {
-                if let Some(id) = profile.id {
+                {
                     match self.process_manager.start(id, &profile.name).await {
                         Ok(()) => started += 1,
                         Err(error) => {
@@ -269,13 +269,11 @@ impl ClientFacade for ClientCore {
     async fn start_all_frpc(&self) -> Result<()> {
         let profiles = self.db.list_profiles().await?;
         for profile in &profiles {
-            let safe_name = sanitize_filename(&profile.name);
-            let toml_path = self.config_dir.join(format!("{safe_name}.toml"));
+            let Some(id) = profile.id else { continue };
+            let toml_path = profile_toml_path(&self.config_dir, id, &profile.name);
             if toml_path.exists() {
-                if let Some(id) = profile.id {
-                    if let Err(e) = self.process_manager.start(id, &profile.name).await {
-                        tracing::warn!(profile_id = id, error = %e, "failed to start frpc");
-                    }
+                if let Err(e) = self.process_manager.start(id, &profile.name).await {
+                    tracing::warn!(profile_id = id, error = %e, "failed to start frpc");
                 }
             }
         }

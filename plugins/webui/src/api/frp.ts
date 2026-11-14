@@ -60,16 +60,3 @@ export const beginInstallation = (
     channel,
     mirror_base: mirror_base || null,
   });
-export interface ProfileVersion {
-  profile_id: number;
-  version: string | null;
-  effective_version: string | null;
-  running_version: string | null;
-  running: boolean;
-  restart_required: boolean;
-}
-export const getProfileVersion = (id: number) =>
-  apiGet<ProfileVersion>(`/profiles/${id}/frpc-version`);
-
-export const setProfileVersion = (id: number, version: string | null) =>
-  apiPut<ProfileVersion>(`/profiles/${id}/frpc-version`, { version });

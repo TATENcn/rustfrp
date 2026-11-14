@@ -281,6 +281,9 @@ mod tests {
             .await
             .unwrap();
         db.set_profile_environment(second, env).await.unwrap();
+        // Tenancy lives on the profile itself, so move the profile rather than
+        // relying on its environment.
+        db.set_profile_tenant(second, "other").await.unwrap();
         let own_env = db.profile_environment_id(first).await.unwrap();
         let manager = ProcessManager::new(
             root.path().into(),

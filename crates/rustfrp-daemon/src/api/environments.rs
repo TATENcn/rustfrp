@@ -7,7 +7,7 @@ use rustfrp_client::db::environment::Environment;
 use serde::{Deserialize, Serialize};
 
 use super::auth::AuthIdentity;
-use super::response::{ApiError, ApiResponse};
+use super::response::{api_error, ApiError, ApiResponse};
 use super::state::ApiState;
 
 type ApiResult<T> = Result<Json<ApiResponse<T>>, (StatusCode, Json<ApiResponse<()>>)>;
@@ -22,18 +22,6 @@ pub struct EnvironmentView {
 #[derive(Debug, Deserialize)]
 pub struct Assignment {
     pub environment_id: i64,
-}
-
-fn api_error(error: &rustfrp_client::error::ClientError) -> (StatusCode, Json<ApiResponse<()>>) {
-    (
-        super::response::status_code(error),
-        Json(ApiResponse {
-            success: false,
-            data: None,
-            count: None,
-            error: Some(ApiError::from_client_error(error)),
-        }),
-    )
 }
 
 async fn view(
@@ -58,10 +46,10 @@ pub async fn list(
         .db
         .list_environments_for_tenant(&identity.tenant)
         .await
-        .map_err(|e| api_error(&e))?;
+        .map_err(api_error)?;
     let mut views = Vec::with_capacity(environments.len());
     for environment in environments {
-        views.push(view(&state, environment).await.map_err(|e| api_error(&e))?);
+        views.push(view(&state, environment).await.map_err(api_error)?);
     }
     let count = views.len();
     Ok(Json(ApiResponse::ok_list(views, count)))
@@ -77,12 +65,12 @@ pub async fn create(
         .db
         .insert_environment(&environment)
         .await
-        .map_err(|e| api_error(&e))?;
+        .map_err(api_error)?;
     environment.id = Some(id);
     Ok((
         StatusCode::CREATED,
         Json(ApiResponse::ok(
-            view(&state, environment).await.map_err(|e| api_error(&e))?,
+            view(&state, environment).await.map_err(api_error)?,
         )),
     ))
 }
@@ -100,9 +88,9 @@ pub async fn update(
         .db
         .update_environment(&environment)
         .await
-        .map_err(|e| api_error(&e))?;
+        .map_err(api_error)?;
     Ok(Json(ApiResponse::ok(
-        view(&state, environment).await.map_err(|e| api_error(&e))?,
+        view(&state, environment).await.map_err(api_error)?,
     )))
 }
 
@@ -112,11 +100,7 @@ pub async fn delete(
     Path(id): Path<i64>,
 ) -> ApiResult<()> {
     ensure_environment_tenant(&state, id, &identity.tenant).await?;
-    state
-        .db
-        .delete_environment(id)
-        .await
-        .map_err(|e| api_error(&e))?;
+    state.db.delete_environment(id).await.map_err(api_error)?;
     Ok(Json(ApiResponse::ok(())))
 }
 
@@ -132,7 +116,7 @@ pub async fn assign_profile(
         .db
         .set_profile_environment(profile_id, assignment.environment_id)
         .await
-        .map_err(|e| api_error(&e))?;
+        .map_err(api_error)?;
     Ok(Json(ApiResponse::ok(())))
 }
 
@@ -160,7 +144,7 @@ async fn ensure_environment_tenant(
         .db
         .environment_belongs_to_tenant(id, tenant)
         .await
-        .map_err(|error| api_error(&error))?
+        .map_err(api_error)?
         .then_some(())
         .ok_or_else(hidden_resource)
 }
@@ -174,7 +158,7 @@ async fn ensure_profile_tenant(
         .db
         .profile_belongs_to_tenant(id, tenant)
         .await
-        .map_err(|error| api_error(&error))?
+        .map_err(api_error)?
         .then_some(())
         .ok_or_else(hidden_resource)
 }

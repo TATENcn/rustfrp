@@ -38,6 +38,14 @@ struct ImportConfig {
     includes: Option<Vec<String>>,
     #[serde(default)]
     feature_gates: Option<toml::Value>,
+    #[serde(default, rename = "clientID")]
+    client_id: Option<String>,
+    #[serde(default)]
+    start: Option<Vec<String>>,
+    #[serde(default)]
+    log: Option<ImportLog>,
+    #[serde(default)]
+    virtual_net: Option<ImportVirtualNet>,
     #[serde(default)]
     proxies: Vec<ImportProxy>,
     #[serde(default)]
@@ -49,11 +57,31 @@ fn default_server_port() -> u16 {
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportLog {
+    #[serde(default)]
+    to: Option<String>,
+    #[serde(default)]
+    level: Option<String>,
+    #[serde(default, rename = "maxDays")]
+    max_days: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportVirtualNet {
+    #[serde(default)]
+    address: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
 struct ImportAuth {
     #[serde(default)]
     method: Option<String>,
     #[serde(default)]
     token: Option<String>,
+    #[serde(default, rename = "additionalScopes")]
+    additional_scopes: Option<Vec<String>>,
     #[serde(default)]
     oidc: Option<ImportOidc>,
 }
@@ -61,16 +89,24 @@ struct ImportAuth {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ImportOidc {
-    #[serde(default)]
+    #[serde(default, rename = "clientID")]
     client_id: Option<String>,
     #[serde(default)]
     client_secret: Option<String>,
-    #[serde(default)]
+    #[serde(default, rename = "tokenEndpointURL")]
     token_endpoint_url: Option<String>,
     #[serde(default)]
     audience: Option<String>,
     #[serde(default)]
     scope: Option<String>,
+    #[serde(default, rename = "additionalEndpointParams")]
+    additional_endpoint_params: Option<toml::Value>,
+    #[serde(default)]
+    trusted_ca_file: Option<String>,
+    #[serde(default)]
+    insecure_skip_verify: Option<bool>,
+    #[serde(default, rename = "proxyURL")]
+    proxy_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -78,6 +114,8 @@ struct ImportOidc {
 struct ImportTransport {
     #[serde(default = "default_protocol")]
     protocol: String,
+    #[serde(default, rename = "wireProtocol")]
+    wire_protocol: Option<String>,
     #[serde(default)]
     tls: ImportTls,
     #[serde(default = "default_heartbeat_interval")]
@@ -86,17 +124,17 @@ struct ImportTransport {
     heartbeat_timeout: i64,
     #[serde(default)]
     dial_server_timeout: Option<i64>,
-    #[serde(default)]
+    #[serde(default, rename = "dialServerKeepalive")]
     dial_server_keepalive: Option<i64>,
-    #[serde(default)]
+    #[serde(default, rename = "connectServerLocalIP")]
     connect_server_local_ip: Option<String>,
-    #[serde(default)]
+    #[serde(default, rename = "proxyURL")]
     proxy_url: Option<String>,
     #[serde(default)]
     pool_count: Option<i32>,
-    #[serde(default)]
+    #[serde(default, rename = "tcpMux")]
     tcp_mux: Option<bool>,
-    #[serde(default)]
+    #[serde(default, rename = "tcpMuxKeepaliveInterval")]
     tcp_mux_keepalive_interval: Option<i64>,
     #[serde(default)]
     quic: ImportQuic,
@@ -106,6 +144,7 @@ impl Default for ImportTransport {
     fn default() -> Self {
         Self {
             protocol: default_protocol(),
+            wire_protocol: None,
             tls: ImportTls::default(),
             heartbeat_interval: default_heartbeat_interval(),
             heartbeat_timeout: default_heartbeat_timeout(),
@@ -142,6 +181,10 @@ struct ImportTls {
     key_file: Option<String>,
     #[serde(default)]
     trusted_ca_file: Option<String>,
+    #[serde(default)]
+    server_name: Option<String>,
+    #[serde(default, rename = "disableCustomTLSFirstByte")]
+    disable_custom_tls_first_byte: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -161,7 +204,7 @@ struct ImportProxy {
     name: String,
     #[serde(rename = "type")]
     proxy_type: String,
-    #[serde(default = "default_local_ip")]
+    #[serde(default = "default_local_ip", rename = "localIP")]
     local_ip: String,
     #[serde(default)]
     local_port: u16,
@@ -171,6 +214,8 @@ struct ImportProxy {
     custom_domains: Option<Vec<String>>,
     #[serde(default)]
     subdomain: Option<String>,
+    #[serde(default)]
+    multiplexer: Option<String>,
     #[serde(default)]
     transport: ImportProxyTransport,
     #[serde(default)]
@@ -187,7 +232,7 @@ struct ImportProxy {
     request_headers: Option<toml::Value>,
     #[serde(default)]
     response_headers: Option<toml::Value>,
-    #[serde(default)]
+    #[serde(default, rename = "routeByHTTPUser")]
     route_by_http_user: Option<String>,
     #[serde(default)]
     annotations: Option<toml::Value>,
@@ -216,11 +261,11 @@ struct ImportProxyTransport {
     use_encryption: bool,
     #[serde(default)]
     use_compression: bool,
-    #[serde(default)]
+    #[serde(default, rename = "bandwidthLimit")]
     bandwidth_limit: Option<String>,
-    #[serde(default)]
+    #[serde(default, rename = "bandwidthLimitMode")]
     bandwidth_limit_mode: Option<String>,
-    #[serde(default)]
+    #[serde(default, rename = "proxyProtocolVersion")]
     proxy_protocol_version: Option<String>,
 }
 
@@ -236,7 +281,7 @@ struct ImportNatTraversal {
 struct ImportLoadBalancer {
     #[serde(default)]
     group: Option<String>,
-    #[serde(default)]
+    #[serde(default, rename = "groupKey")]
     group_key: Option<String>,
 }
 
@@ -253,7 +298,7 @@ struct ImportHealthCheck {
     interval_seconds: i64,
     #[serde(default)]
     path: Option<String>,
-    #[serde(default)]
+    #[serde(default, rename = "httpHeaders")]
     http_headers: Option<Vec<HttpHeader>>,
 }
 
@@ -420,8 +465,18 @@ impl Database {
             .and_then(|a| a.method.clone())
             .or_else(|| Some(if token.is_empty() { "none" } else { "token" }.into()));
         tx.execute(
-            "INSERT INTO frps_profile (name, server_addr, server_port, token, tls_enable, tls_cert_file, tls_key_file, tls_trusted_ca_file, transport_protocol, heartbeat_interval, heartbeat_timeout, dial_server_timeout, dial_server_keepalive, connect_server_local_ip, proxy_url, pool_count, tcp_mux, tcp_mux_keepalive_interval, quic_keepalive_period, quic_max_idle_timeout, quic_max_incoming_streams, auth_method, oidc_client_id, oidc_client_secret, oidc_token_endpoint_url, oidc_audience, oidc_scope, user, metadatas, login_fail_exit, dns_server, nat_hole_stun_server, udp_packet_size, includes, feature_gates) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35)",
-            params![profile_name, config.server_addr, config.server_port, token, config.transport.tls.enable as i32, config.transport.tls.cert_file, config.transport.tls.key_file, config.transport.tls.trusted_ca_file, config.transport.protocol, config.transport.heartbeat_interval, config.transport.heartbeat_timeout, config.transport.dial_server_timeout, config.transport.dial_server_keepalive, config.transport.connect_server_local_ip, config.transport.proxy_url, config.transport.pool_count, config.transport.tcp_mux.map(|v| v as i32), config.transport.tcp_mux_keepalive_interval, config.transport.quic.keepalive_period, config.transport.quic.max_idle_timeout, config.transport.quic.max_incoming_streams, auth_method, oidc.and_then(|o| o.client_id.clone()), oidc.and_then(|o| o.client_secret.clone()), oidc.and_then(|o| o.token_endpoint_url.clone()), oidc.and_then(|o| o.audience.clone()), oidc.and_then(|o| o.scope.clone()), config.user, json(&config.metadatas), config.login_fail_exit.map(|v| v as i32), config.dns_server, config.nat_hole_stun_server, config.udp_packet_size, config.includes.as_ref().map(|v| v.join(",")), json(&config.feature_gates)]
+            "INSERT INTO frps_profile (name, server_addr, server_port, token, tls_enable, tls_cert_file, tls_key_file, tls_trusted_ca_file, transport_protocol, heartbeat_interval, heartbeat_timeout, dial_server_timeout, dial_server_keepalive, connect_server_local_ip, proxy_url, pool_count, tcp_mux, tcp_mux_keepalive_interval, quic_keepalive_period, quic_max_idle_timeout, quic_max_incoming_streams, auth_method, oidc_client_id, oidc_client_secret, oidc_token_endpoint_url, oidc_audience, oidc_scope, user, metadatas, login_fail_exit, dns_server, nat_hole_stun_server, udp_packet_size, includes, feature_gates, client_id, start, log_to, log_level, log_max_days, virtual_net_address, wire_protocol, auth_additional_scopes, oidc_additional_params, oidc_trusted_ca_file, oidc_insecure_skip_verify, oidc_proxy_url, tls_server_name, tls_disable_custom_first_byte, tenant_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48, ?49, ?50)",
+            params![profile_name, config.server_addr, config.server_port, token, config.transport.tls.enable as i32, config.transport.tls.cert_file, config.transport.tls.key_file, config.transport.tls.trusted_ca_file, config.transport.protocol, config.transport.heartbeat_interval, config.transport.heartbeat_timeout, config.transport.dial_server_timeout, config.transport.dial_server_keepalive, config.transport.connect_server_local_ip, config.transport.proxy_url, config.transport.pool_count, config.transport.tcp_mux.map(|v| v as i32), config.transport.tcp_mux_keepalive_interval, config.transport.quic.keepalive_period, config.transport.quic.max_idle_timeout, config.transport.quic.max_incoming_streams, auth_method, oidc.and_then(|o| o.client_id.clone()), oidc.and_then(|o| o.client_secret.clone()), oidc.and_then(|o| o.token_endpoint_url.clone()), oidc.and_then(|o| o.audience.clone()), oidc.and_then(|o| o.scope.clone()), config.user, json(&config.metadatas), config.login_fail_exit.map(|v| v as i32), config.dns_server, config.nat_hole_stun_server, config.udp_packet_size, config.includes.as_ref().map(|v| v.join(",")), json(&config.feature_gates), config.client_id, config.start.as_ref().map(|v| v.join(",")),
+                config.log.as_ref().and_then(|l| l.to.clone()), config.log.as_ref().and_then(|l| l.level.clone()), config.log.as_ref().and_then(|l| l.max_days),
+                config.virtual_net.as_ref().and_then(|v| v.address.clone()),
+                config.transport.wire_protocol,
+                config.auth.as_ref().and_then(|a| a.additional_scopes.as_ref()).map(|v| v.join(",")),
+                oidc.and_then(|o| o.additional_endpoint_params.as_ref()).and_then(|v| serde_json::to_string(v).ok()),
+                oidc.and_then(|o| o.trusted_ca_file.clone()),
+                oidc.and_then(|o| o.insecure_skip_verify).map(|v| v as i32),
+                oidc.and_then(|o| o.proxy_url.clone()),
+                    config.transport.tls.server_name.clone(),
+                config.transport.tls.disable_custom_tls_first_byte.map(|v| v as i32), "default"]
         ).map_err(ClientError::DatabaseQuery)?;
         let profile_id = tx.last_insert_rowid();
 
@@ -431,8 +486,8 @@ impl Database {
             let name = proxy.name.clone();
             let health = proxy.health_check.as_ref();
             tx.execute(
-                "INSERT INTO local_proxy (name, proxy_type, local_ip, local_port, remote_port, custom_domains, subdomain, use_encryption, use_compression, bandwidth_limit, bandwidth_limit_mode, health_check_type, health_check_timeout_s, health_check_max_failed, health_check_interval_s, health_check_path, health_check_http_headers, plugin_config, secret_key, locations, http_user, http_password, host_header_rewrite, request_headers, response_headers, route_by_http_user, annotations, metadatas, allow_users, nat_traversal_disable_assisted_addrs, proxy_protocol_version) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31)",
-                params![name, proxy.proxy_type, proxy.local_ip, proxy.local_port, proxy.remote_port, proxy.custom_domains.as_ref().map(|v| v.join(",")), proxy.subdomain, proxy.transport.use_encryption as i32, proxy.transport.use_compression as i32, proxy.transport.bandwidth_limit, proxy.transport.bandwidth_limit_mode, health.map(|h| h.check_type.clone()), health.map(|h| h.timeout_seconds).unwrap_or(3), health.map(|h| h.max_failed).unwrap_or(3), health.map(|h| h.interval_seconds).unwrap_or(10), health.and_then(|h| h.path.clone()), health.and_then(|h| h.http_headers.as_ref()).and_then(|v| serde_json::to_string(v).ok()), json(&proxy.plugin), proxy.secret_key, proxy.locations.as_ref().map(|v| v.join(",")), proxy.http_user, proxy.http_password, proxy.host_header_rewrite, json(&proxy.request_headers), json(&proxy.response_headers), proxy.route_by_http_user, json(&proxy.annotations), json(&proxy.metadatas), proxy.allow_users.as_ref().map(|v| v.join(",")), proxy.nat_traversal.disable_assisted_addrs.map(|v| v as i32), proxy.transport.proxy_protocol_version]
+                "INSERT INTO local_proxy (name, proxy_type, local_ip, local_port, remote_port, custom_domains, subdomain, use_encryption, use_compression, bandwidth_limit, bandwidth_limit_mode, health_check_type, health_check_timeout_s, health_check_max_failed, health_check_interval_s, health_check_path, health_check_http_headers, plugin_config, secret_key, locations, http_user, http_password, host_header_rewrite, request_headers, response_headers, route_by_http_user, annotations, metadatas, allow_users, nat_traversal_disable_assisted_addrs, proxy_protocol_version, multiplexer) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32)",
+                params![name, proxy.proxy_type, proxy.local_ip, proxy.local_port, proxy.remote_port, proxy.custom_domains.as_ref().map(|v| v.join(",")), proxy.subdomain, proxy.transport.use_encryption as i32, proxy.transport.use_compression as i32, proxy.transport.bandwidth_limit, proxy.transport.bandwidth_limit_mode, health.map(|h| h.check_type.clone()), health.map(|h| h.timeout_seconds).unwrap_or(3), health.map(|h| h.max_failed).unwrap_or(3), health.map(|h| h.interval_seconds).unwrap_or(10), health.and_then(|h| h.path.clone()), health.and_then(|h| h.http_headers.as_ref()).and_then(|v| serde_json::to_string(v).ok()), json(&proxy.plugin), proxy.secret_key, proxy.locations.as_ref().map(|v| v.join(",")), proxy.http_user, proxy.http_password, proxy.host_header_rewrite, json(&proxy.request_headers), json(&proxy.response_headers), proxy.route_by_http_user, json(&proxy.annotations), json(&proxy.metadatas), proxy.allow_users.as_ref().map(|v| v.join(",")), proxy.nat_traversal.disable_assisted_addrs.map(|v| v as i32), proxy.transport.proxy_protocol_version, proxy.multiplexer]
             ).map_err(ClientError::DatabaseQuery)?;
             let proxy_id = tx.last_insert_rowid();
             tx.execute("INSERT INTO binding_rule (profile_id, proxy_id, enabled, running, priority, group_name, group_key) VALUES (?1,?2,1,0,?3,?4,?5)", params![profile_id, proxy_id, priority as i32, proxy.load_balancer.group, proxy.load_balancer.group_key]).map_err(ClientError::DatabaseQuery)?;
@@ -497,6 +552,58 @@ mod tests {
         crate::db::migrate::run(&conn).unwrap();
         drop(conn);
         (dir, db)
+    }
+
+    /// Import must capture the advanced common-config fields, not silently drop them.
+    #[tokio::test]
+    async fn imports_advanced_common_config_fields() {
+        let (_dir, db) = db().await;
+        let summary = db
+            .import_frpc_toml(
+                "advanced",
+                r#"
+serverAddr = "frp.example.com"
+serverPort = 7000
+clientID = "edge-1"
+start = ["svc"]
+log.level = "warn"
+virtualNet.address = "100.86.1.1/24"
+transport.protocol = "tcp"
+transport.wireProtocol = "v2"
+transport.tls.enable = true
+transport.tls.serverName = "frps.example.com"
+auth.method = "token"
+auth.token = "t"
+auth.additionalScopes = ["HeartBeats"]
+
+[[proxies]]
+name = "svc"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 8080
+remotePort = 16080
+"#,
+            )
+            .await
+            .unwrap();
+
+        let profile = db.get_profile(summary.profile_id).await.unwrap();
+        assert_eq!(profile.client_id.as_deref(), Some("edge-1"));
+        assert_eq!(profile.wire_protocol.as_deref(), Some("v2"));
+        assert_eq!(profile.log_level.as_deref(), Some("warn"));
+        assert_eq!(
+            profile.virtual_net_address.as_deref(),
+            Some("100.86.1.1/24")
+        );
+        assert_eq!(profile.tls_server_name.as_deref(), Some("frps.example.com"));
+        assert_eq!(
+            profile.auth_additional_scopes.as_deref(),
+            Some(["HeartBeats".to_string()].as_slice())
+        );
+        assert_eq!(
+            profile.start.as_deref(),
+            Some(["svc".to_string()].as_slice())
+        );
     }
 
     #[tokio::test]

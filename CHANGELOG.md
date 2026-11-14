@@ -2,6 +2,121 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Tenant isolation is enforced for proxies, bindings, visitors, and logs. Those
+  handlers previously ignored the caller's tenant: a token issued for one tenant
+  could list another tenant's proxies (including their internal `local_ip`
+  topology), read any profile's logs, and delete foreign proxies by id.
+  Ownership now lives on `frps_profile.tenant_id` and `local_proxy.tenant_id`
+  (schema V20); visitors and bindings inherit their profile's tenant, and every
+  read filters on it. Foreign ids report "not found" so ids cannot be probed.
+- Assigning a profile to an environment also assigns it to that environment's
+  tenant, keeping the two paths consistent.
+
+### Changed
+
+- API scope classification treats proxies, bindings, visitors, and logs as
+  tenant-owned resources; they previously required platform scopes despite being
+  per-tenant data.
+
+### Changed
+
+- RustFRP runs one fixed frp version. Per-profile version pinning and its
+  "restart required" state are removed (schema V19 drops `frpc_version`): a
+  single daemon cannot validate generated TOML against several binary versions
+  at once, so a pin could only produce configurations that older frpc builds
+  reject. Switch the active version through the FRP version registry instead;
+  `PUT /api/v1/profiles/{id}/frpc-version` is gone.
+
+### Fixed
+
+- Profile names are unique (schema V18). Existing duplicates are renamed with a
+  numeric suffix on migration, and conflicts return `DB_005` instead of a raw
+  SQLite error. Names are trimmed on write so `"prod"` and `"prod "` cannot
+  diverge.
+- Duplicate proxy names inside one profile fail generation with an explicit
+  message. frpc previously refused the whole file (`proxy name [x] is
+  duplicated`), taking down an otherwise healthy profile.
+
+### Fixed
+
+- Multi-instance isolation: generated TOML files and frpc logs are keyed by
+  `{profile_id}-{name}` instead of the sanitized profile name. `sanitize_filename`
+  maps distinct names onto one string (`"Test Server"` and `"Test_Server"` both
+  become `Test_Server`), so two profiles shared a single TOML and log file; after
+  a global reload one profile could restart with the other's configuration and
+  lose its tunnels silently.
+- Renaming a profile removes its previous TOML instead of leaving an orphan that
+  looked like another runnable profile.
+- Daemon startup restarts frpc for every profile that has a generated TOML. The
+  startup loop still looked for `{name}.toml` after the rename, so it found none
+  and started nothing.
+
+### Changed
+
+- `local_proxy` read projections are defined once (`PROXY_COLUMNS`) instead of
+  being repeated in every query. Adding a field used to require editing several
+  aligned-by-hand column lists plus the row mapper.
+
+### Changed
+
+- The WASM plugin runtime is an opt-in build feature (`wasm-plugins`), off by
+  default. It had no production caller, and Wasmtime was the largest dependency
+  in the workspace, contradicting the Core-under-10-MiB budget. A WASM plugin
+  loaded without the feature now logs a warning instead of silently doing
+  nothing, and CI runs the suite both with and without it.
+
+### Removed
+
+- Dead code: a 146-line commented-out binding handler, four byte-identical
+  `api_error` helpers (one shared definition remains), and three copies of the
+  `serve` body (now one `serve_with` plus three thin wrappers).
+
+### Fixed
+
+- Hot reload no longer kills frpc. frpc only registers `SIGINT`/`SIGTERM`, so the
+  previous `SIGHUP` was handled by the default action and terminated the process
+  (exit 129) instead of reloading. Generated configs now carry an authenticated
+  loopback `[webServer]` per profile and reload runs `frpc reload`, which applies
+  proxy changes without dropping established connections. A rejected
+  configuration keeps the previous one running and is reported per profile.
+- tcpmux proxies are now valid: `multiplexer` is part of the proxy model, SQLite
+  schema, TOML generator, import path, and WebUI form. frpc rejects a tcpmux
+  entry without it, which previously invalidated the whole profile.
+- Proxy and visitor payloads are validated on create/update, so structurally
+  invalid entries are rejected instead of persisting and breaking TOML
+  generation later.
+- Generated configurations are checked with `frpc verify` before a process is
+  spawned, surfacing structural errors as a startup error.
+
+### Added
+
+- `profile_runtime.admin_port` / `admin_password` and `local_proxy.multiplexer`
+  (schema V16). Existing profiles get a loopback admin port on their next
+  configuration generation.
+- Client common-config coverage (schema V17): `clientID`, `transport.wireProtocol`,
+  `auth.additionalScopes`, `start`, `log.to`/`log.level`/`log.maxDays`,
+  `virtualNet.address`, `transport.tls.serverName`,
+  `transport.tls.disableCustomTLSFirstByte`, and the OIDC
+  `additionalEndpointParams`/`trustedCaFile`/`insecureSkipVerify`/`proxyURL`
+  fields are now modelled, persisted, imported, and emitted.
+- `frpc.toml` import honours frp's initialism keys (`clientID`, `localIP`,
+  `proxyURL`, `tokenEndpointURL`, `routeByHTTPUser`, `tcpMux*`, `bandwidthLimit*`,
+  `proxyProtocolVersion`, `httpHeaders`, `groupKey`, `maxDays`, `wireProtocol`).
+  They previously did not match and were silently dropped — `localIP` fell back
+  to `127.0.0.1`.
+- Profile and proxy validation is enforced on create/update, including wire
+  protocol, auth scopes, log level, `VirtualNet` feature-gate consistency, and
+  tcpmux multiplexer rules.
+- `GET /api/v1/profiles/{id}/proxy-status` reports each proxy's real state from
+  frpc's admin API, so a proxy rejected by frps is visible instead of appearing
+  healthy because its process is alive.
+- The WebUI exposes the remaining frpc fields: bandwidth limit and mode, proxy
+  protocol version, health check settings, `allowUsers`, XTCP NAT traversal,
+  `routeByHTTPUser`, request/response headers, annotations, metadatas, the FRP
+  client plugin blob, and the XTCP visitor fields.
+
 ## [0.4.0] - 2026-10-25
 
 ### Added
