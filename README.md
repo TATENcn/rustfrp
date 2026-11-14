@@ -246,13 +246,14 @@ Linux 下可使用统一的 Bun 开发管理入口，自动构建 WebUI / daemon
 
 ```bash
 bun run mode:start    # 构建并后台启动
-bun run mode:status   # 查看真实地址与健康状态
+bun run mode:status   # 查看真实地址、健康与磁盘水位
 bun run mode:reload   # 重新构建并重启
+bun run mode:clean    # 预览可回收缓存（--execute 才删除）
 bun run mode:stop     # 停止，保留数据
 bun run mode:help     # 中文分组帮助
 ```
 
-首次访问需要信任本地自签证书，并在界面填写 `.local/mode/api-token` 中的 Token。管理器使用独立开发数据库；完整命令、隔离边界及证书信任说明见 [Bun 开发管理指南](docs/development-mode.md)。
+首次访问需要信任本地自签证书，并在界面填写 `.local/mode/api-token` 中的 Token。开发者选择集中在仓库根被忽略的 `.local/mode.json`；管理器使用独立开发数据库，缓存回收仅限可核验归属的可重建产物。完整命令、磁盘策略、隔离边界及证书信任说明见 [Bun 开发管理指南](docs/development-mode.md)。
 
 ```bash
 just test-fast             # 快速单元测试

@@ -38,6 +38,7 @@ dist/
 
 # Repository-isolated development manager
 /.local/mode/
+/.local/mode.json
 
 # Browser regression artifacts
 plugins/webui/test-results/
