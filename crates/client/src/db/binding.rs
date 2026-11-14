@@ -33,18 +33,24 @@ impl Database {
 
     /// 获取所有绑定规则
     pub async fn list_bindings(&self) -> Result<Vec<BindingRule>> {
+        self.list_bindings_for_tenant("default").await
+    }
+
+    /// 获取指定租户的 Binding（归属由所属 Profile 决定）
+    pub async fn list_bindings_for_tenant(&self, tenant: &str) -> Result<Vec<BindingRule>> {
         let conn = self.lock().await;
         let mut stmt = conn
             .prepare(
                 "SELECT id, profile_id, proxy_id, enabled, running, priority,
                         group_name, group_key, created_at, updated_at
                  FROM binding_rule
+                 WHERE profile_id IN (SELECT id FROM frps_profile WHERE tenant_id = ?1)
                  ORDER BY priority",
             )
             .map_err(ClientError::DatabaseQuery)?;
 
         let bindings: Vec<BindingRule> = stmt
-            .query_map([], row_to_binding)?
+            .query_map(params![tenant], row_to_binding)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(ClientError::DatabaseQuery)?;
 

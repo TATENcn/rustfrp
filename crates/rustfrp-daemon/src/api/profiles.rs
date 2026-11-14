@@ -17,34 +17,16 @@ use super::auth::AuthIdentity;
 use super::response::{api_error, ApiResponse};
 use super::state::ApiState;
 
-/// List all profiles
+/// List all profiles visible to the caller's tenant
 pub async fn list(
     State(state): State<ApiState>,
     Extension(identity): Extension<AuthIdentity>,
 ) -> Result<Json<ApiResponse<Vec<FrpsProfile>>>, (axum::http::StatusCode, Json<ApiResponse<()>>)> {
-    let all_profiles = state.db.list_profiles().await.map_err(|e| {
-        (
-            super::response::status_code(&e),
-            Json(ApiResponse::<()> {
-                success: false,
-                data: None,
-                count: None,
-                error: Some(super::response::ApiError::from_client_error(&e)),
-            }),
-        )
-    })?;
-    let mut profiles = Vec::new();
-    for profile in all_profiles {
-        if state
-            .db
-            .profile_belongs_to_tenant(profile.id.unwrap_or_default(), &identity.tenant)
-            .await
-            .map_err(api_error)?
-        {
-            profiles.push(profile);
-        }
-    }
-
+    let profiles = state
+        .db
+        .list_profiles_for_tenant(&identity.tenant)
+        .await
+        .map_err(api_error)?;
     let count = profiles.len();
     Ok(Json(ApiResponse::ok_list(profiles, count)))
 }
@@ -92,17 +74,11 @@ pub async fn create(
         .default_environment_for_tenant(&identity.tenant)
         .await
         .map_err(api_error)?;
-    let id = state.db.insert_profile(&profile).await.map_err(|e| {
-        (
-            super::response::status_code(&e),
-            Json(ApiResponse {
-                success: false,
-                data: None,
-                count: None,
-                error: Some(super::response::ApiError::from_client_error(&e)),
-            }),
-        )
-    })?;
+    let id = state
+        .db
+        .insert_profile_for_tenant(&profile, &identity.tenant)
+        .await
+        .map_err(api_error)?;
 
     if let Err(error) = state.db.set_profile_environment(id, environment_id).await {
         let _ = state.db.delete_profile(id).await;

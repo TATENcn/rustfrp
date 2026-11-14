@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Tenant isolation is enforced for proxies, bindings, visitors, and logs. Those
+  handlers previously ignored the caller's tenant: a token issued for one tenant
+  could list another tenant's proxies (including their internal `local_ip`
+  topology), read any profile's logs, and delete foreign proxies by id.
+  Ownership now lives on `frps_profile.tenant_id` and `local_proxy.tenant_id`
+  (schema V20); visitors and bindings inherit their profile's tenant, and every
+  read filters on it. Foreign ids report "not found" so ids cannot be probed.
+- Assigning a profile to an environment also assigns it to that environment's
+  tenant, keeping the two paths consistent.
+
+### Changed
+
+- API scope classification treats proxies, bindings, visitors, and logs as
+  tenant-owned resources; they previously required platform scopes despite being
+  per-tenant data.
+
 ### Changed
 
 - RustFRP runs one fixed frp version. Per-profile version pinning and its

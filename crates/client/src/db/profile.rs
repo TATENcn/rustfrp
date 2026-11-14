@@ -10,6 +10,15 @@ use rusqlite::params;
 impl Database {
     /// 插入新的 Profile
     pub async fn insert_profile(&self, profile: &FrpsProfile) -> Result<i64> {
+        self.insert_profile_for_tenant(profile, "default").await
+    }
+
+    /// 插入新的 Profile，并记录租户归属
+    pub async fn insert_profile_for_tenant(
+        &self,
+        profile: &FrpsProfile,
+        tenant: &str,
+    ) -> Result<i64> {
         let conn = self.lock().await;
         let tx = conn.unchecked_transaction()?;
         tx.execute(
@@ -28,8 +37,8 @@ impl Database {
                  user, metadatas, login_fail_exit, dns_server,
                  nat_hole_stun_server, udp_packet_size,
                  start, includes, store_path, feature_gates,
-                 client_id, wire_protocol, auth_additional_scopes, oidc_additional_params, oidc_trusted_ca_file, oidc_insecure_skip_verify, oidc_proxy_url, tls_server_name, tls_disable_custom_first_byte, log_to, log_level, log_max_days, virtual_net_address)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48, ?49, ?50, ?51)",
+                 client_id, wire_protocol, auth_additional_scopes, oidc_additional_params, oidc_trusted_ca_file, oidc_insecure_skip_verify, oidc_proxy_url, tls_server_name, tls_disable_custom_first_byte, log_to, log_level, log_max_days, virtual_net_address, tenant_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48, ?49, ?50, ?51, ?52)",
             params![
                 profile.name.trim(),
                 profile.server_addr,
@@ -82,6 +91,7 @@ impl Database {
                 profile.log_level,
                 profile.log_max_days,
                 profile.virtual_net_address,
+                tenant,
             ],
         )
         .map_err(|error| {
@@ -105,8 +115,28 @@ impl Database {
         Ok(id)
     }
 
+    /// Move a profile to another tenant.
+    ///
+    /// Used by migrations and by operators reassigning a server configuration;
+    /// normal API traffic derives the tenant from the caller.
+    pub async fn set_profile_tenant(&self, id: i64, tenant: &str) -> Result<()> {
+        self.lock()
+            .await
+            .execute(
+                "UPDATE frps_profile SET tenant_id = ?1, updated_at = datetime('now') WHERE id = ?2",
+                rusqlite::params![tenant, id],
+            )
+            .map_err(ClientError::DatabaseQuery)?;
+        Ok(())
+    }
+
     /// 获取所有 Profile
     pub async fn list_profiles(&self) -> Result<Vec<FrpsProfile>> {
+        self.list_profiles_for_tenant("default").await
+    }
+
+    /// 获取指定租户的 Profile
+    pub async fn list_profiles_for_tenant(&self, tenant: &str) -> Result<Vec<FrpsProfile>> {
         let conn = self.lock().await;
         let mut stmt = conn
             .prepare(
@@ -127,12 +157,13 @@ impl Database {
                         client_id, wire_protocol, auth_additional_scopes, oidc_additional_params, oidc_trusted_ca_file, oidc_insecure_skip_verify, oidc_proxy_url, tls_server_name, tls_disable_custom_first_byte, log_to, log_level, log_max_days, virtual_net_address,
                         created_at, updated_at
                  FROM frps_profile
+                 WHERE tenant_id = ?1
                  ORDER BY name",
             )
             .map_err(ClientError::DatabaseQuery)?;
 
         let profiles: Vec<FrpsProfile> = stmt
-            .query_map([], row_to_profile)?
+            .query_map(rusqlite::params![tenant], row_to_profile)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(ClientError::DatabaseQuery)?;
 

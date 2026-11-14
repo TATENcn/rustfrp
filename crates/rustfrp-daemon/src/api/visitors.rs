@@ -7,11 +7,12 @@
 //! - PUT    /api/v1/visitors/{id}  — update a visitor
 //! - DELETE /api/v1/visitors/{id}  — delete a visitor
 
-use axum::extract::{Path, State};
+use axum::extract::{Extension, Path, State};
 use axum::Json;
 use chrono::Utc;
 use rustfrp_client::config::model::LocalVisitor;
 
+use super::auth::AuthIdentity;
 use super::response::{api_error, ApiResponse};
 use super::state::ApiState;
 
@@ -20,19 +21,13 @@ use super::state::ApiState;
 /// List all visitors
 pub async fn list(
     State(state): State<ApiState>,
+    Extension(identity): Extension<AuthIdentity>,
 ) -> Result<Json<ApiResponse<Vec<LocalVisitor>>>, (axum::http::StatusCode, Json<ApiResponse<()>>)> {
-    let visitors = state.db.list_visitors().await.map_err(|e| {
-        (
-            super::response::status_code(&e),
-            Json(ApiResponse::<()> {
-                success: false,
-                data: None,
-                count: None,
-                error: Some(super::response::ApiError::from_client_error(&e)),
-            }),
-        )
-    })?;
-
+    let visitors = state
+        .db
+        .list_visitors_for_tenant(&identity.tenant)
+        .await
+        .map_err(api_error)?;
     let count = visitors.len();
     Ok(Json(ApiResponse::ok_list(visitors, count)))
 }

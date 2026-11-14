@@ -8,13 +8,14 @@
 //! - DELETE /api/v1/bindings/{id}       — delete a binding
 //! - PATCH  /api/v1/bindings/{id}/toggle — toggle enabled/disabled
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use chrono::Utc;
 use rustfrp_client::config::model::BindingRule;
 use serde::{Deserialize, Serialize};
 
+use super::auth::AuthIdentity;
 use super::response::{api_error, ApiResponse};
 use super::state::ApiState;
 
@@ -28,6 +29,7 @@ pub struct ListQuery {
 /// List all bindings, optionally filtered by profile_id or proxy_id
 pub async fn list(
     State(state): State<ApiState>,
+    Extension(identity): Extension<AuthIdentity>,
     Query(query): Query<ListQuery>,
 ) -> Result<Json<ApiResponse<Vec<BindingRule>>>, (axum::http::StatusCode, Json<ApiResponse<()>>)> {
     let bindings = if let Some(profile_id) = query.profile_id {
@@ -35,20 +37,9 @@ pub async fn list(
     } else if let Some(proxy_id) = query.proxy_id {
         state.db.list_bindings_for_proxy(proxy_id).await
     } else {
-        state.db.list_bindings().await
+        state.db.list_bindings_for_tenant(&identity.tenant).await
     }
-    .map_err(|e| {
-        (
-            super::response::status_code(&e),
-            Json(ApiResponse::<()> {
-                success: false,
-                data: None,
-                count: None,
-                error: Some(super::response::ApiError::from_client_error(&e)),
-            }),
-        )
-    })?;
-
+    .map_err(api_error)?;
     let count = bindings.len();
     Ok(Json(ApiResponse::ok_list(bindings, count)))
 }

@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
 /// 当前最新的 schema 版本
-const LATEST_VERSION: i32 = 19;
+const LATEST_VERSION: i32 = 20;
 
 /// 运行所有待执行的迁移
 ///
@@ -102,6 +102,7 @@ fn apply_migration(conn: &Connection, version: i32) -> Result<()> {
         17 => migrate_v17(&tx)?,
         18 => migrate_v18(&tx)?,
         19 => migrate_v19(&tx)?,
+        20 => migrate_v20(&tx)?,
         _ => {
             return Err(ClientError::DatabaseMigration(format!(
                 "Unknown migration version: {version}"
@@ -963,6 +964,74 @@ fn migrate_v19(tx: &rusqlite::Transaction) -> Result<()> {
         }
     }
     tracing::info!("V19 Migration: Remove per-profile frp version pinning");
+    Ok(())
+}
+
+/// V20: give proxies and server configurations a tenant, so API tokens issued for
+/// different tenants cannot see each other's data.
+///
+/// Membership used to be derived through `environment.tenant_id`, which forced
+/// every handler to repeat a two-hop join and let several handlers skip the check
+/// entirely. The tenant now lives on the row itself; visitors and bindings reach
+/// it through their `profile_id`, which already exists.
+///
+/// Existing rows inherit the tenant of the environment their profile belongs to,
+/// falling back to `default` for unassigned profiles and unbound proxies.
+fn migrate_v20(tx: &rusqlite::Transaction) -> Result<()> {
+    for statement in [
+        "ALTER TABLE frps_profile ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'",
+        "ALTER TABLE local_proxy ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'",
+    ] {
+        if let Err(error) = tx.execute(statement, []) {
+            if !error.to_string().contains("duplicate column") {
+                return Err(ClientError::DatabaseMigration(format!(
+                    "Failed to add tenant column: {error}"
+                )));
+            }
+            tracing::info!("V20 column already exists, skipping: {statement}");
+        }
+    }
+
+    tx.execute(
+        "UPDATE frps_profile
+            SET tenant_id = COALESCE((
+                SELECT e.tenant_id
+                  FROM profile_environment pe
+                  JOIN environment e ON e.id = pe.environment_id
+                 WHERE pe.profile_id = frps_profile.id
+            ), 'default')",
+        [],
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to backfill profile tenants: {e}"))
+    })?;
+
+    tx.execute(
+        "UPDATE local_proxy
+            SET tenant_id = COALESCE((
+                SELECT p.tenant_id
+                  FROM binding_rule b
+                  JOIN frps_profile p ON p.id = b.profile_id
+                 WHERE b.proxy_id = local_proxy.id
+                 LIMIT 1
+            ), 'default')",
+        [],
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to backfill proxy tenants: {e}"))
+    })?;
+
+    tx.execute(
+        "CREATE INDEX IF NOT EXISTS idx_frps_profile_tenant ON frps_profile(tenant_id)",
+        [],
+    )
+    .ok();
+    tx.execute(
+        "CREATE INDEX IF NOT EXISTS idx_local_proxy_tenant ON local_proxy(tenant_id)",
+        [],
+    )
+    .ok();
+    tracing::info!("V20 Migration: Add tenant ownership to profiles and proxies");
     Ok(())
 }
 
