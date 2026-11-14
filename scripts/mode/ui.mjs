@@ -75,7 +75,7 @@ export function createRenderUtils({columns = 80, write = console.log, paint = te
   };
   const section = title => {
     write('');
-    write(paint(`${indent}${title}`, 1));
+    write(`${paint('▍', 36)}${paint(` ${title}`, 1)}`);
   };
   const title = (text, status) => {
     rule();
@@ -138,18 +138,27 @@ export function renderer({
       row('磁盘水位', '未获取');
       return;
     }
-    if (storage.usedPercent == null) row('磁盘水位', '未获取（文件系统查询失败）');
-    else row('磁盘水位', `${storage.usedPercent}% 已用 · 可用 ${gib(storage.availBytes)} / ${gib(storage.capacityBytes)}`);
+    if (storage.usedPercent == null) {
+      row('磁盘水位', yellow('未获取（文件系统查询失败）'));
+    } else {
+      const tone = storage.level === 'critical' ? red : storage.level === 'high' || storage.level === 'elevated' ? yellow : green;
+      row('磁盘水位', `${tone(`${storage.usedPercent}% 已用`)} · 可用 ${gib(storage.availBytes)} / ${gib(storage.capacityBytes)}`);
+    }
     const parts = [];
-    if (storage.cacheBytes != null) parts.push(`缓存 ${gib(storage.cacheBytes)}`);
+    if (storage.cacheBytes != null) {
+      const over = storage.budgetBytes != null && storage.cacheBytes > storage.budgetBytes;
+      const text = `缓存 ${gib(storage.cacheBytes)}`;
+      parts.push(over ? yellow(text) : text);
+    }
     if (storage.budgetBytes != null) parts.push(`预算 ${gib(storage.budgetBytes)}`);
     if (parts.length) row('缓存占用', parts.join(' · '));
-    row('回收策略', `${storage.levelLabel} · ${storage.policyText}`);
+    const levelTone = storage.level === 'critical' ? red : storage.level === 'high' || storage.level === 'elevated' ? yellow : green;
+    row('回收策略', `${levelTone(storage.levelLabel)} · ${storage.policyText}`);
     if (storage.lastRun) {
       const when = new Date(storage.lastRun.at).toISOString().replace('T', ' ').slice(0, 16);
       const before = storage.lastRun.before == null ? '未获取' : `${storage.lastRun.before}%`;
       const after = storage.lastRun.after == null ? '未获取' : `${storage.lastRun.after}%`;
-      row('上次清理', `${when} · 回收 ${gib(storage.lastRun.removedBytes)} · ${before} → ${after}`);
+      row('上次清理', `${when} · ${cyan(`回收 ${gib(storage.lastRun.removedBytes)}`)} · ${before} → ${after}`);
     } else {
       row('上次清理', '未执行');
     }
@@ -158,7 +167,7 @@ export function renderer({
   const status = s => {
     if (json) return write(JSON.stringify(s));
     title('RustFRP · 开发环境', stateBadge(s));
-    row('当前模式', 'local · 本机构建预览');
+    row('当前模式', `${cyan('local')} · 本机构建预览`);
     row('访问地址', s.running && s.url ? cyan(s.url) : s.unverified ? '未获取' : '未启动');
     if (s.running) for (const url of s.lanUrls || []) row('局域网', cyan(url));
     row('监听范围', 'HTTPS 0.0.0.0 · 后端仅回环');
@@ -172,7 +181,7 @@ export function renderer({
 
     section('诊断');
     row('项目目录', s.root);
-    row('仓库标识', s.repoKey || '未获取');
+    row('仓库标识', s.repoKey ? cyan(s.repoKey) : '未获取');
     row('配置文件', s.configFile || configFile);
     row('证书文件', s.cert);
     row('日志文件', s.log);
@@ -229,9 +238,10 @@ export function renderer({
   const clean = (plan, result) => {
     if (json) return write(JSON.stringify(result ? {plan, result} : plan));
     title('RustFRP · 缓存维护', {value: result ? (result.dryRun ? '预览' : '已执行') : '预览', code: 36});
-    row('磁盘水位', plan.usedPercent == null ? '未获取' : `${plan.usedPercent}% 已用 · 可用 ${gib(plan.availBytes)} / ${gib(plan.capacityBytes)}`);
-    row('水位级别', plan.level);
-    row('分级策略', `回收类别 ${plan.policy.categories.join(' / ')} · 闲置期限 ${Object.entries(plan.policy.idleDays).map(([key, days]) => `${key} ${days} 天`).join(' · ')}`);
+    const tone = plan.level === 'critical' ? red : plan.level === 'high' || plan.level === 'elevated' ? yellow : green;
+    row('磁盘水位', plan.usedPercent == null ? yellow('未获取') : `${tone(`${plan.usedPercent}% 已用`)} · 可用 ${gib(plan.availBytes)} / ${gib(plan.capacityBytes)}`);
+    row('水位级别', tone(plan.level));
+    row('分级策略', `回收类别 ${cyan(plan.policy.categories.join(' / '))} · 闲置期限 ${Object.entries(plan.policy.idleDays).map(([key, days]) => `${key} ${days} 天`).join(' · ')}`);
     row('缓存预算', plan.budgetBytes == null ? '未获取' : gib(plan.budgetBytes));
     row('日志上限', `${gib(plan.logMaxBytes)} × ${plan.logKeep} 个文件`);
 
@@ -239,7 +249,7 @@ export function renderer({
     if (!plan.candidates.length) write('    无候选（未到期限或不在当前级别范围）');
     for (const candidate of plan.candidates) {
       const flag = candidate.expensive ? yellow('昂贵') : green('便宜');
-      write(`    ${candidate.id.padEnd(14)}${gib(candidate.bytes).padStart(10)}  ${flag}  闲置 ${candidate.idleDays} 天 · ${candidate.source}`);
+      write(`    ${cyan(candidate.id.padEnd(14))}${gib(candidate.bytes).padStart(10)}  ${flag}  闲置 ${candidate.idleDays} 天 · ${candidate.source}`);
     }
 
     section('跳过与保护');
@@ -248,8 +258,11 @@ export function renderer({
 
     if (result && !result.dryRun) {
       section('执行结果');
-      for (const item of result.results) write(`    ${item.id.padEnd(14)}${item.action}`);
-      row('实际回收', gib(result.removedBytes));
+      for (const item of result.results) {
+        const ok = item.action.startsWith('已清理');
+        write(`    ${cyan(item.id.padEnd(14))}${ok ? green(item.action) : red(item.action)}`);
+      }
+      row('实际回收', green(gib(result.removedBytes)));
       row('执行前后', `${result.before == null ? '未获取' : `${result.before}%`} → ${result.after == null ? '未获取' : `${result.after}%`}`);
       row('批次', `${result.batches} 批`);
       if (result.goalMet === false) write(yellow('    未达到退出水位；可提高维护上限或手动处理其他占用'));

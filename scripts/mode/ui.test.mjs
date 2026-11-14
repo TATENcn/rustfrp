@@ -166,3 +166,52 @@ test('wrapped rows never exceed the terminal width, and long paths stay complete
   expect(wrapText('a b c', 3)).toEqual(['a b', 'c']);
   expect(wrapText('工程 项目 目录', 9)).toEqual(['工程 项目', '目录']);
 });
+
+test('status uses the full semantic palette, not just a badge', () => {
+  const tty = {tty: true, env: {TERM: 'xterm-256color'}};
+  const healthy = render('status', tty, running);
+  // 绿：状态徽章与健康行；青：URL、模式值、仓库标识、指引；黄：TLS 警告；dim：标签与分隔线；bold：标题与分区。
+  for (const code of ['32', '33', '36', '1', '2']) expect(healthy).toContain(`\x1b[${code}m`);
+  // 分区标题带可见标记，让分组能一眼扫到。
+  expect(healthy).toContain('\x1b[36m▍\x1b[0m');
+  // 水位按严重程度换色：正常绿、偏高黄、临界红。
+  const storageAt = (percent, level) => ({...base.storage, usedPercent: percent, level});
+  expect(render('status', tty, {...running, storage: storageAt(33, 'normal')})).toContain('\x1b[32m33% 已用\x1b[0m');
+  expect(render('status', tty, {...running, storage: storageAt(86, 'high')})).toContain('\x1b[33m86% 已用\x1b[0m');
+  expect(render('status', tty, {...running, storage: storageAt(95, 'critical')})).toContain('\x1b[31m95% 已用\x1b[0m');
+  // 停止状态不出现绿色成功色，但仍保留结构化排版。
+  const stoppedText = render('status', tty, stopped);
+  expect(stoppedText).not.toContain('\x1b[32m');
+  expect(stoppedText).toContain('磁盘与缓存');
+});
+
+test('clean marks expensive candidates and result rows by outcome', () => {
+  const lines = [];
+  const ui = renderer({tty: true, env: {TERM: 'xterm-256color'}, write: line => lines.push(line)});
+  ui.clean({...plan, candidates: [...plan.candidates, {id: 'build', bytes: 19 * 1024 ** 3, expensive: true, idleDays: 40, source: '管理器记录'}]});
+  const preview = lines.join('\n');
+  expect(preview).toContain('\x1b[32m便宜\x1b[0m');
+  expect(preview).toContain('\x1b[33m昂贵\x1b[0m');
+  expect(preview).toContain('\x1b[33m86% 已用\x1b[0m');
+
+  const done = [];
+  renderer({tty: true, env: {TERM: 'xterm-256color'}, write: line => done.push(line)}).clean(plan, {
+    dryRun: false, results: [{id: 'tmp', action: '已清理'}, {id: 'build', action: '失败：清理工具返回非零'}],
+    removedBytes: 2 * 1024 ** 3, before: 86, after: 74, batches: 1, goalMet: true,
+  });
+  const text = done.join('\n');
+  expect(text).toContain('\x1b[32m已清理\x1b[0m');
+  expect(text).toContain('\x1b[31m失败：清理工具返回非零\x1b[0m');
+});
+
+test('no colour leaks into redirected or JSON output after the palette change', () => {
+  for (const method of ['status', 'help', 'health']) {
+    expect(render(method, {tty: false}, running)).not.toContain('\x1b[');
+  }
+  // 无色输出仍保留分区标记与分组结构。
+  expect(render('status', {tty: false}, running)).toContain('▍');
+  expect(render('help', {tty: false}, running)).toContain('▍');
+  const cleaned = render('clean', {tty: false}, plan);
+  expect(cleaned).not.toContain('\x1b[');
+  expect(cleaned).toContain('可回收候选');
+});
