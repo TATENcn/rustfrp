@@ -18,5 +18,8 @@
 pub mod lifecycle;
 pub mod manager;
 pub mod manifest;
+#[cfg(feature = "wasm-plugins")]
 pub mod runtime;
 pub mod sandbox;
+#[cfg(feature = "wasm-plugins")]
+pub use runtime::{HostAction, WasmPluginRuntime};

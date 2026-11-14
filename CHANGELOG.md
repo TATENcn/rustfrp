@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The WASM plugin runtime is an opt-in build feature (`wasm-plugins`), off by
+  default. It had no production caller, and Wasmtime was the largest dependency
+  in the workspace, contradicting the Core-under-10-MiB budget. A WASM plugin
+  loaded without the feature now logs a warning instead of silently doing
+  nothing, and CI runs the suite both with and without it.
+
 ### Removed
 
 - Dead code: a 146-line commented-out binding handler, four byte-identical

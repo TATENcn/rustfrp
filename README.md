@@ -69,7 +69,7 @@ RustFRP 不修改 FRP 协议，也不接管流量转发。已有的现代格式 
 - **查看流量去向**：每秒采样，按上游服务器、本地代理或系统网卡查看速率与缓存区间汇总。
 - **面向长期运行**：支持热重载、优雅退出、崩溃恢复、指数退避和结构化故障诊断。
 - **可选集中运维**：可通过 Control/Agent 管理远端 frps，并接入 Prometheus、Grafana 和 Alertmanager。
-- **安全地扩展**：提供 REST API、租户与权限策略，以及受权限、时间、计算量和内存限制的无 WASI 插件沙箱。
+- **按需扩展**：提供 REST API 与 Token/scope 鉴权；WASM 插件沙箱是可选构建特性（默认关闭）。
 
 ## 核心能力
 
@@ -82,7 +82,7 @@ RustFRP 不修改 FRP 协议，也不接管流量转发。已有的现代格式 
 | 迁移备份 | 事务化导入现代 `frpc.toml`；一致性 SQLite 备份导出 |
 | 服务端管理 | Agent 主动拉取配置，ETag 缓存，`frps verify` 校验，原子切换与失败回滚 |
 | 可观测性 | 资源趋势与运行进程侧栏；三种口径的流量统计；日志筛选；可选 Prometheus / Grafana |
-| API 与扩展 | REST API、Token/策略鉴权、租户隔离、WASM 插件及参考插件 |
+| API 与扩展 | REST API、Token/scope 鉴权、按 token 的租户隔离、可选 WASM 插件 |
 
 ## 系统架构
 

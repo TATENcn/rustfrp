@@ -12,7 +12,63 @@
 use crate::error::{Result, SharedError};
 use crate::plugin::lifecycle::LifecycleManager;
 use crate::plugin::manifest::{PluginManifest, PluginType};
+#[cfg(feature = "wasm-plugins")]
 use crate::plugin::runtime::{HostAction, WasmPluginRuntime};
+
+/// Stand-in for host actions when the `wasm-plugins` feature is off.
+///
+/// The manager keeps its lifecycle bookkeeping, but nothing can emit or execute
+/// actions, so the type is uninhabited.
+#[cfg(not(feature = "wasm-plugins"))]
+#[derive(Debug)]
+pub enum HostAction {}
+
+/// Placeholder runtime for feature-off builds. It is never constructed: the
+/// manager only creates one when the feature is enabled, so every method here is
+/// unreachable and reports that the runtime is unavailable.
+#[cfg(not(feature = "wasm-plugins"))]
+#[derive(Debug)]
+pub struct WasmPluginRuntime;
+
+#[cfg(not(feature = "wasm-plugins"))]
+impl WasmPluginRuntime {
+    const DISABLED: &'static str = "the `wasm-plugins` feature is not enabled in this build";
+
+    pub fn from_file(
+        _path: &std::path::Path,
+        _sandbox_config: crate::plugin::sandbox::SandboxConfig,
+    ) -> std::result::Result<Self, String> {
+        Err(Self::DISABLED.to_owned())
+    }
+
+    pub fn set_config(&mut self, _key: impl Into<String>, _value: impl Into<String>) {}
+
+    pub fn set_traffic_stats(&mut self, _json: impl Into<String>) {}
+
+    pub fn subscriptions(&self) -> &[String] {
+        &[]
+    }
+
+    pub fn drain_actions(&mut self) -> Vec<HostAction> {
+        Vec::new()
+    }
+
+    pub fn init(&mut self) -> std::result::Result<(), String> {
+        Err(Self::DISABLED.to_owned())
+    }
+
+    pub fn start(&mut self) -> std::result::Result<(), String> {
+        Err(Self::DISABLED.to_owned())
+    }
+
+    pub fn stop(&mut self) -> std::result::Result<(), String> {
+        Ok(())
+    }
+
+    pub fn on_event(&mut self, _event: &str) -> std::result::Result<(), String> {
+        Err(Self::DISABLED.to_owned())
+    }
+}
 use crate::plugin::sandbox::{Sandbox, SandboxConfig};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -45,6 +101,7 @@ impl PluginInstance {
             None
         };
 
+        #[cfg(feature = "wasm-plugins")]
         let runtime = if manifest.plugin_type == PluginType::Wasm {
             let config = SandboxConfig::with_permissions(manifest.permissions.clone());
             Some(Arc::new(std::sync::Mutex::new(
@@ -54,6 +111,17 @@ impl PluginInstance {
         } else {
             None
         };
+        // Without the feature the plugin loads but never executes; say so rather
+        // than letting it look active.
+        #[cfg(not(feature = "wasm-plugins"))]
+        let runtime: Option<Arc<std::sync::Mutex<WasmPluginRuntime>>> = None;
+        #[cfg(not(feature = "wasm-plugins"))]
+        if manifest.plugin_type == PluginType::Wasm {
+            tracing::warn!(
+                plugin = %manifest.name,
+                "WASM plugin loaded without the `wasm-plugins` feature: it will not execute"
+            );
+        }
 
         Ok(Self {
             manifest,
@@ -558,6 +626,7 @@ mod tests {
         assert_eq!(manager.plugin_count().await, 0);
     }
 
+    #[cfg(feature = "wasm-plugins")]
     #[tokio::test]
     async fn official_plugins_compile_and_run() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

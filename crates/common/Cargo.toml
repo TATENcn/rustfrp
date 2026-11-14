@@ -15,10 +15,17 @@ thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true }
 chrono.workspace = true
-wasmtime.workspace = true
+wasmtime = { workspace = true, optional = true }
 
 # Zero network dependencies
 dirs = "5"
+
+[features]
+default = []
+# WASM plugin runtime. Off by default: no production code path drives plugin
+# events or drains host actions yet, and Wasmtime is the single largest
+# dependency in the workspace (PERF-001 budgets Core under 10 MiB).
+wasm-plugins = ["dep:wasmtime"]
 
 [dev-dependencies]
 tempfile.workspace = true
