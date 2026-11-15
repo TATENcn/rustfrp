@@ -1,9 +1,15 @@
+import { fileURLToPath } from 'node:url'
+
+// `URL.pathname` keeps a leading slash before the drive letter on Windows
+// (`/D:/a/...`), which is not a valid path there. `fileURLToPath` yields a real
+// filesystem path on every platform.
 const sourceRoot = new URL('../src/', import.meta.url)
+const sourceDir = fileURLToPath(sourceRoot)
 const allowedSvg = new Set<string>()
 const allowedIconImports = new Set(['components/icon/AppIcon.tsx'])
 const problems: string[] = []
 
-for await (const relative of new Bun.Glob('**/*.{ts,tsx}').scan({ cwd: sourceRoot.pathname })) {
+for await (const relative of new Bun.Glob('**/*.{ts,tsx}').scan({ cwd: sourceDir })) {
   const content = await Bun.file(new URL(relative, sourceRoot)).text()
   if (/\p{Extended_Pictographic}/u.test(content)) problems.push(`${relative}: emoji are not allowed in UI source`)
   if (!allowedSvg.has(relative) && /<(?:svg|path)\b/i.test(content)) problems.push(`${relative}: inline UI SVG is not allowed; use AppIcon`)
