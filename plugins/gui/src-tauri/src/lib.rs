@@ -97,7 +97,18 @@ fn build() -> tauri::Builder<Wry> {
         .plugin(tauri_plugin_dialog::init())
         .manage(QuitState::default())
         .setup(|app| {
-            install_tray(app.handle())?;
+            // A tray is a convenience, not a requirement: the window is fully
+            // usable without one. Reporting the error out of `setup` makes Tauri
+            // panic and kill the whole application, which is what happened when
+            // the shell was launched in a way that denied tray creation
+            // (`error encountered during setup hook: tray icon error: Access is
+            // denied`). Degrade instead, and say so.
+            if let Err(error) = install_tray(app.handle()) {
+                tracing::warn!(
+                    %error,
+                    "tray icon unavailable; continuing without one (the window still works)"
+                );
+            }
             start_session(app.handle().clone());
             Ok(())
         })
