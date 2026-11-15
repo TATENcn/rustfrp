@@ -8,7 +8,7 @@ rust-version.workspace = true
 description = "RustFRP agent — optional frps wrapper for server-side config management and plugin runtime"
 
 [dependencies]
-rustfrp-common = { version = "0.5.0", path = "../../common" }
+rustfrp-common = { version = "0.5.1", path = "../../common" }
 rustfrp-bin = { version = "0.5.0", path = "../../rustfrp-bin" }
 tokio = { workspace = true, features = ["process", "sync", "time"] }
 serde.workspace = true

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.1] - 2026-11-15
+
+### Fixed
+
+- The sidebar no longer claims a hardcoded version. It read `v0.4.0` from a
+  literal in `shell.tsx`, so 0.5.0 shipped an installer whose own footer
+  disagreed with `GET /api/v1/health`. The footer now follows the version the
+  running daemon reports.
+
 ## [0.5.0] - 2026-11-15
 
 ### Added
