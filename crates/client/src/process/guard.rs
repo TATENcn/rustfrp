@@ -5,13 +5,14 @@
 #![allow(clippy::lines_filter_map_ok)]
 
 use crate::error::{ClientError, Result};
+use crate::process::command::child_command;
 use crate::process::diagnostic::{classify_failure, ProcessFailure};
 use rustfrp_common::signal::SignalHandler;
 use std::fs::OpenOptions;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
-use tokio::process::{Child, Command};
+use tokio::process::Child;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration, Instant};
 
@@ -112,7 +113,7 @@ impl ProcessGuard {
     pub async fn verify_config(&self) -> Result<()> {
         let output = tokio::time::timeout(
             Duration::from_secs(RELOAD_TIMEOUT_SECS),
-            Command::new(&self.frpc_path)
+            child_command(&self.frpc_path)
                 .arg("verify")
                 .arg("-c")
                 .arg(&self.config_path)
@@ -176,7 +177,7 @@ impl ProcessGuard {
                 ClientError::ProcessStart(format!("Failed to open {}: {e}", stderr_log))
             })?;
 
-        let child = Command::new(&self.frpc_path)
+        let child = child_command(&self.frpc_path)
             .arg("-c")
             .arg(&config_path)
             .stdout(std::process::Stdio::from(stdout_file))
@@ -373,7 +374,7 @@ impl ProcessGuard {
                         return;
                     }
                 };
-                match Command::new(&frpc_path)
+                match child_command(&frpc_path)
                     .arg("-c")
                     .arg(&config_path)
                     .stdout(std::process::Stdio::from(stdout_file))
@@ -416,7 +417,7 @@ impl ProcessGuard {
 
         let output = tokio::time::timeout(
             Duration::from_secs(RELOAD_TIMEOUT_SECS),
-            Command::new(&self.frpc_path)
+            child_command(&self.frpc_path)
                 .arg("reload")
                 .arg("-c")
                 .arg(&self.config_path)
