@@ -2,11 +2,25 @@ name: Desktop
 
 # The desktop shell lives outside the Cargo workspace (its GTK/WebKit system
 # dependencies must not become a prerequisite for every Rust job) and outside the
-# WebUI workflow (it packs a native window around those assets). Pull requests
-# therefore run the full chain on Linux only; the other platforms are built when
-# a release tag is pushed, in release.yml.
+# WebUI workflow (it packs a native window around those assets). Pushes and pull
+# requests run the full chain on Linux only; the other platforms are built when a
+# release tag is pushed, in release.yml.
 on:
   workflow_dispatch:
+  # Pushes matter as much as pull requests here: the shell crate is outside the
+  # workspace, so nothing else in CI compiles it, and direct pushes to these
+  # branches are possible in this repository.
+  push:
+    branches: [dev, main]
+    paths:
+      - '.github/workflows/desktop.yml'
+      - 'crates/rustfrp-daemon/**'
+      - 'crates/client/**'
+      - 'crates/common/**'
+      - 'plugins/webui/**'
+      - 'plugins/gui/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
   pull_request:
     branches: [dev, main]
     paths:
