@@ -15,6 +15,9 @@ mod check '.just/check.just'
 # 调试、发布与交叉编译
 mod build '.just/build.just'
 
+# 桌面端（Tauri 外壳）
+mod desktop '.just/desktop.just'
+
 # 显示全部命令
 default:
     @{{ just_executable() }} help
@@ -66,6 +69,12 @@ help:
       just check i18n           检查 WebUI 翻译键
       just check audit          运行依赖安全与策略审计
       just check all            运行常规检查
+
+    桌面端
+      just desktop              查看桌面端命令
+      just desktop dev          启动桌面端开发模式
+      just desktop build        构建当前平台安装包
+      just desktop build-linux  构建 Linux deb 与 AppImage
 
     构建
       just build                查看构建命令

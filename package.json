@@ -11,6 +11,7 @@
     "mode:status": "bun scripts/mode/cli.mjs status",
     "mode:health": "bun scripts/mode/cli.mjs health",
     "mode:logs": "bun scripts/mode/cli.mjs logs",
+    "mode:clean": "bun scripts/mode/cli.mjs clean",
     "mode:help": "bun scripts/mode/cli.mjs help",
     "mode:test": "bun scripts/mode/cli.mjs test"
   }

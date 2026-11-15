@@ -129,6 +129,22 @@ pub fn error_response(err: ClientError) -> Response {
     (code, Json(body)).into_response()
 }
 
+/// Map a client-layer error into the API error tuple used by handlers.
+///
+/// One definition for the whole API layer: handlers call `.map_err(api_error)?`.
+pub fn api_error(error: ClientError) -> (axum::http::StatusCode, Json<ApiResponse<()>>) {
+    let code = status_code(&error);
+    (
+        code,
+        Json(ApiResponse {
+            success: false,
+            data: None,
+            count: None,
+            error: Some(ApiError::from_client_error(&error)),
+        }),
+    )
+}
+
 /// Wrapper type for ClientError that implements IntoResponse.
 ///
 /// Since both `IntoResponse` (axum) and `ClientError` (rustfrp-client) are foreign

@@ -8,9 +8,9 @@ rust-version.workspace = true
 description = "RustFRP daemon — HTTP API server for frpc configuration management"
 
 [dependencies]
-rustfrp-client = { version = "0.4.0", path = "../client" }
-rustfrp-bin = { version = "0.4.0", path = "../rustfrp-bin" }
-rustfrp-common = { version = "0.4.0", path = "../common" }
+rustfrp-client = { version = "0.5.0", path = "../client" }
+rustfrp-bin = { version = "0.5.0", path = "../rustfrp-bin" }
+rustfrp-common = { version = "0.5.0", path = "../common" }
 tokio = { workspace = true, features = ["process", "sync", "time", "signal", "net"] }
 serde.workspace = true
 serde_json.workspace = true
@@ -23,6 +23,8 @@ chrono.workspace = true
 anyhow.workspace = true
 clap = { workspace = true }
 sha2 = "0.10"
+# frpc admin API (per-proxy status) — loopback only
+reqwest = { workspace = true, features = ["json"] }
 
 # HTTP API (optional via feature flag)
 axum = { version = "0.7", optional = true, features = ["macros"] }

@@ -10,6 +10,15 @@ use rusqlite::params;
 impl Database {
     /// 插入新的 Profile
     pub async fn insert_profile(&self, profile: &FrpsProfile) -> Result<i64> {
+        self.insert_profile_for_tenant(profile, "default").await
+    }
+
+    /// 插入新的 Profile，并记录租户归属
+    pub async fn insert_profile_for_tenant(
+        &self,
+        profile: &FrpsProfile,
+        tenant: &str,
+    ) -> Result<i64> {
         let conn = self.lock().await;
         let tx = conn.unchecked_transaction()?;
         tx.execute(
@@ -27,10 +36,11 @@ impl Database {
                  oidc_additional_endpoint_params,
                  user, metadatas, login_fail_exit, dns_server,
                  nat_hole_stun_server, udp_packet_size,
-                 start, includes, store_path, feature_gates)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38)",
+                 start, includes, store_path, feature_gates,
+                 client_id, wire_protocol, auth_additional_scopes, oidc_additional_params, oidc_trusted_ca_file, oidc_insecure_skip_verify, oidc_proxy_url, tls_server_name, tls_disable_custom_first_byte, log_to, log_level, log_max_days, virtual_net_address, tenant_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48, ?49, ?50, ?51, ?52)",
             params![
-                profile.name,
+                profile.name.trim(),
                 profile.server_addr,
                 profile.server_port,
                 profile.token,
@@ -68,9 +78,32 @@ impl Database {
                 profile.includes.as_ref().map(|v| v.join(",")),
                 profile.store_path,
                 profile.feature_gates,
+                profile.client_id,
+                profile.wire_protocol,
+                profile.auth_additional_scopes.as_ref().map(|v| v.join(",")),
+                profile.oidc_additional_params,
+                profile.oidc_trusted_ca_file,
+                profile.oidc_insecure_skip_verify.map(|v| v as i32),
+                profile.oidc_proxy_url,
+                profile.tls_server_name,
+                profile.tls_disable_custom_first_byte.map(|v| v as i32),
+                profile.log_to,
+                profile.log_level,
+                profile.log_max_days,
+                profile.virtual_net_address,
+                tenant,
             ],
         )
-        .map_err(ClientError::DatabaseQuery)?;
+        .map_err(|error| {
+            if error.to_string().contains("UNIQUE") {
+                ClientError::RecordAlreadyExists(format!(
+                    "a server configuration named '{}' already exists",
+                    profile.name.trim()
+                ))
+            } else {
+                ClientError::DatabaseQuery(error)
+            }
+        })?;
         let id = tx.last_insert_rowid();
         tx.execute(
             "INSERT INTO profile_environment (profile_id, environment_id)
@@ -82,8 +115,28 @@ impl Database {
         Ok(id)
     }
 
+    /// Move a profile to another tenant.
+    ///
+    /// Used by migrations and by operators reassigning a server configuration;
+    /// normal API traffic derives the tenant from the caller.
+    pub async fn set_profile_tenant(&self, id: i64, tenant: &str) -> Result<()> {
+        self.lock()
+            .await
+            .execute(
+                "UPDATE frps_profile SET tenant_id = ?1, updated_at = datetime('now') WHERE id = ?2",
+                rusqlite::params![tenant, id],
+            )
+            .map_err(ClientError::DatabaseQuery)?;
+        Ok(())
+    }
+
     /// 获取所有 Profile
     pub async fn list_profiles(&self) -> Result<Vec<FrpsProfile>> {
+        self.list_profiles_for_tenant("default").await
+    }
+
+    /// 获取指定租户的 Profile
+    pub async fn list_profiles_for_tenant(&self, tenant: &str) -> Result<Vec<FrpsProfile>> {
         let conn = self.lock().await;
         let mut stmt = conn
             .prepare(
@@ -101,14 +154,16 @@ impl Database {
                         user, metadatas, login_fail_exit, dns_server,
                         nat_hole_stun_server, udp_packet_size,
                         start, includes, store_path, feature_gates,
+                        client_id, wire_protocol, auth_additional_scopes, oidc_additional_params, oidc_trusted_ca_file, oidc_insecure_skip_verify, oidc_proxy_url, tls_server_name, tls_disable_custom_first_byte, log_to, log_level, log_max_days, virtual_net_address,
                         created_at, updated_at
                  FROM frps_profile
+                 WHERE tenant_id = ?1
                  ORDER BY name",
             )
             .map_err(ClientError::DatabaseQuery)?;
 
         let profiles: Vec<FrpsProfile> = stmt
-            .query_map([], row_to_profile)?
+            .query_map(rusqlite::params![tenant], row_to_profile)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(ClientError::DatabaseQuery)?;
 
@@ -133,6 +188,7 @@ impl Database {
                     user, metadatas, login_fail_exit, dns_server,
                     nat_hole_stun_server, udp_packet_size,
                     start, includes, store_path, feature_gates,
+                    client_id, wire_protocol, auth_additional_scopes, oidc_additional_params, oidc_trusted_ca_file, oidc_insecure_skip_verify, oidc_proxy_url, tls_server_name, tls_disable_custom_first_byte, log_to, log_level, log_max_days, virtual_net_address,
                     created_at, updated_at
              FROM frps_profile WHERE id = ?1",
             params![id],
@@ -178,10 +234,21 @@ impl Database {
                     nat_hole_stun_server = ?33, udp_packet_size = ?34,
                     start = ?35, includes = ?36, store_path = ?37,
                     feature_gates = ?38,
+                    client_id = ?39, wire_protocol = ?40,
+                    auth_additional_scopes = ?41,
+                    oidc_additional_params = ?42,
+                    oidc_trusted_ca_file = ?43,
+                    oidc_insecure_skip_verify = ?44,
+                    oidc_proxy_url = ?45,
+                    tls_server_name = ?46,
+                    tls_disable_custom_first_byte = ?47,
+                    log_to = ?48, log_level = ?49,
+                    log_max_days = ?50,
+                    virtual_net_address = ?51,
                     updated_at = datetime('now')
-                 WHERE id = ?39",
+                 WHERE id = ?52",
                 params![
-                    profile.name,
+                    profile.name.trim(),
                     profile.server_addr,
                     profile.server_port,
                     profile.token,
@@ -219,10 +286,32 @@ impl Database {
                     profile.includes.as_ref().map(|v| v.join(",")),
                     profile.store_path,
                     profile.feature_gates,
+                    profile.client_id,
+                    profile.wire_protocol,
+                    profile.auth_additional_scopes.as_ref().map(|v| v.join(",")),
+                    profile.oidc_additional_params,
+                    profile.oidc_trusted_ca_file,
+                    profile.oidc_insecure_skip_verify.map(|v| v as i32),
+                    profile.oidc_proxy_url,
+                    profile.tls_server_name,
+                    profile.tls_disable_custom_first_byte.map(|v| v as i32),
+                    profile.log_to,
+                    profile.log_level,
+                    profile.log_max_days,
+                    profile.virtual_net_address,
                     id,
                 ],
             )
-            .map_err(ClientError::DatabaseQuery)?;
+            .map_err(|error| {
+                if error.to_string().contains("UNIQUE") {
+                    ClientError::RecordAlreadyExists(format!(
+                        "a server configuration named '{}' already exists",
+                        profile.name.trim()
+                    ))
+                } else {
+                    ClientError::DatabaseQuery(error)
+                }
+            })?;
 
         if affected == 0 {
             return Err(ClientError::RecordNotFound {
@@ -301,8 +390,25 @@ fn row_to_profile(row: &rusqlite::Row<'_>) -> rusqlite::Result<FrpsProfile> {
             .map(|s| s.split(',').map(|d| d.to_string()).collect()),
         store_path: row.get(37)?,
         feature_gates: row.get(38)?,
-        created_at: row.get(39)?,
-        updated_at: row.get(40)?,
+        client_id: row.get(39)?,
+        wire_protocol: row.get(40)?,
+        auth_additional_scopes: {
+            let raw: Option<String> = row.get(41)?;
+            raw.filter(|s| !s.is_empty())
+                .map(|s| s.split(',').map(|d| d.to_string()).collect())
+        },
+        oidc_additional_params: row.get(42)?,
+        oidc_trusted_ca_file: row.get(43)?,
+        oidc_insecure_skip_verify: row.get::<_, Option<i32>>(44)?.map(|v| v != 0),
+        oidc_proxy_url: row.get(45)?,
+        tls_server_name: row.get(46)?,
+        tls_disable_custom_first_byte: row.get::<_, Option<i32>>(47)?.map(|v| v != 0),
+        log_to: row.get(48)?,
+        log_level: row.get(49)?,
+        log_max_days: row.get(50)?,
+        virtual_net_address: row.get(51)?,
+        created_at: row.get(52)?,
+        updated_at: row.get(53)?,
     })
 }
 
@@ -359,6 +465,19 @@ mod tests {
             includes: None,
             store_path: None,
             feature_gates: None,
+            client_id: None,
+            wire_protocol: None,
+            auth_additional_scopes: None,
+            oidc_additional_params: None,
+            oidc_trusted_ca_file: None,
+            oidc_insecure_skip_verify: None,
+            oidc_proxy_url: None,
+            tls_server_name: None,
+            tls_disable_custom_first_byte: None,
+            log_to: None,
+            log_level: None,
+            log_max_days: None,
+            virtual_net_address: None,
             created_at: String::new(),
             updated_at: String::new(),
         }

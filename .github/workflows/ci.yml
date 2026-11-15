@@ -64,7 +64,11 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: Tests
-        run: cargo test --workspace --all-features
+        # Default features exclude the WASM plugin runtime (Wasmtime). Both
+        # configurations must pass: the shipped build has the feature off.
+        run: |
+          cargo test --workspace
+          cargo test --workspace --all-features
 
   webui:
     name: WebUI quality gate

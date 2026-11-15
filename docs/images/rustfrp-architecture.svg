@@ -342,8 +342,8 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="115" y="299" class="t-muted" font-size="9" text-anchor="middle">浏览器 / REST 客户端</text>
         </g>
 
-        <g id="node-webui" data-node-id="webui" data-node-label="Web 管理台" tabindex="0" role="button" aria-label="聚焦Web 管理台，Vue 3 + Vite, 本地管理与客户端控制面" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="Vue 3 + Vite" data-node-context="本地管理与客户端控制面">
-          <title>Web 管理台 · Vue 3 + Vite · 本地管理与客户端控制面</title>
+        <g id="node-webui" data-node-id="webui" data-node-label="Web 管理台" tabindex="0" role="button" aria-label="聚焦Web 管理台，React + Vite, 本地管理与客户端控制面" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="React + Vite" data-node-context="本地管理与客户端控制面">
+          <title>Web 管理台 · React + Vite · 本地管理与客户端控制面</title>
           <rect x="250" y="250" width="150" height="70" rx="6" class="c-mask"/>
           <rect x="250" y="250" width="150" height="70" rx="6" class="c-frontend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(256 256) scale(0.6875)">
@@ -353,7 +353,7 @@ rect.c-bg-rect { fill: var(--bg); }
             <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
           </g>
           <text data-node-label="" x="325" y="283" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Web 管理台</text>
-        <text x="325" y="299" class="t-muted" font-size="9" text-anchor="middle">Vue 3 + Vite</text>
+        <text x="325" y="299" class="t-muted" font-size="9" text-anchor="middle">React + Vite</text>
         </g>
 
         <g id="node-daemon" data-node-id="daemon" data-node-label="RustFRP Daemon" tabindex="0" role="button" aria-label="聚焦RustFRP Daemon，HTTP API + ClientCore, 本地管理与客户端控制面" aria-pressed="false" data-node-kind="backend" data-node-sublabel="HTTP API + ClientCore" data-node-tag="鉴权 / 租户 / 进程守护" data-node-context="本地管理与客户端控制面">

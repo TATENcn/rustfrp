@@ -36,8 +36,13 @@ dist/
 .env
 .env.local
 
+# Tauri desktop shell (own workspace, generated artifacts)
+plugins/gui/src-tauri/target/
+plugins/gui/src-tauri/gen/
+
 # Repository-isolated development manager
 /.local/mode/
+/.local/mode.json
 
 # Browser regression artifacts
 plugins/webui/test-results/

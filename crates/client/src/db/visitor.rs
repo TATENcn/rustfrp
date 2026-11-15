@@ -49,6 +49,11 @@ impl Database {
 
     /// List all Visitors
     pub async fn list_visitors(&self) -> Result<Vec<LocalVisitor>> {
+        self.list_visitors_for_tenant("default").await
+    }
+
+    /// 获取指定租户的 Visitor（归属由所属 Profile 决定）
+    pub async fn list_visitors_for_tenant(&self, tenant: &str) -> Result<Vec<LocalVisitor>> {
         let conn = self.lock().await;
         let mut stmt = conn
             .prepare(
@@ -58,12 +63,13 @@ impl Database {
                         min_retry_interval, fallback_to, fallback_timeout_ms,
                         plugin_config, profile_id, annotations, created_at, updated_at
                  FROM local_visitor
+                 WHERE profile_id IN (SELECT id FROM frps_profile WHERE tenant_id = ?1)
                  ORDER BY name",
             )
             .map_err(ClientError::DatabaseQuery)?;
 
         let visitors: Vec<LocalVisitor> = stmt
-            .query_map([], row_to_visitor)?
+            .query_map(params![tenant], row_to_visitor)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(ClientError::DatabaseQuery)?;
 

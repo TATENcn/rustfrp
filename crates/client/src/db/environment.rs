@@ -151,9 +151,18 @@ impl Database {
         .map_err(ClientError::DatabaseQuery)
     }
 
+    /// Whether a profile belongs to `tenant`.
+    ///
+    /// The tenant lives on the profile row; membership through `environment` was
+    /// the previous indirect path and required a two-hop join at every call site.
     pub async fn profile_belongs_to_tenant(&self, profile_id: i64, tenant: &str) -> Result<bool> {
         let conn = self.lock().await;
-        conn.query_row("SELECT EXISTS(SELECT 1 FROM profile_environment pe JOIN environment e ON e.id=pe.environment_id WHERE pe.profile_id=?1 AND e.tenant_id=?2)", params![profile_id, tenant], |row| row.get(0)).map_err(ClientError::DatabaseQuery)
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM frps_profile WHERE id = ?1 AND tenant_id = ?2)",
+            params![profile_id, tenant],
+            |row| row.get(0),
+        )
+        .map_err(ClientError::DatabaseQuery)
     }
 
     pub async fn default_environment_for_tenant(&self, tenant: &str) -> Result<i64> {
@@ -213,6 +222,16 @@ impl Database {
         conn.execute(
             "INSERT INTO profile_environment (profile_id, environment_id) VALUES (?1, ?2)
              ON CONFLICT(profile_id) DO UPDATE SET environment_id=excluded.environment_id",
+            params![profile_id, environment_id],
+        )
+        .map_err(ClientError::DatabaseQuery)?;
+        // Assigning a profile to a tenant-scoped environment assigns the profile
+        // to that tenant; ownership otherwise lives on the profile row.
+        conn.execute(
+            "UPDATE frps_profile
+                SET tenant_id = COALESCE((SELECT tenant_id FROM environment WHERE id = ?2), tenant_id),
+                    updated_at = datetime('now')
+              WHERE id = ?1",
             params![profile_id, environment_id],
         )
         .map_err(ClientError::DatabaseQuery)?;

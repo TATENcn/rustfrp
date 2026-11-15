@@ -1,5 +1,6 @@
 import { ofetch } from 'ofetch'
 import type { ApiEnvelope } from '@/api/types'
+import { isDesktop } from '@/lib/desktop'
 
 const API_BASE = '/api/v1'
 
@@ -16,6 +17,10 @@ export const apiClient = ofetch.create({
   },
   onResponseError({ response }) {
     if (response.status === 401) {
+      // The desktop shell injects the token at launch; discarding it would leave
+      // the window on a login page with nothing to type. Keep it and let the
+      // failure surface instead.
+      if (isDesktop()) return
       localStorage.removeItem('api_token')
       window.location.hash = '#/login'
     }

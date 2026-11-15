@@ -7,9 +7,21 @@ use crate::db::Database;
 use crate::error::{ClientError, Result};
 use rusqlite::params;
 
+/// Columns selected by every `local_proxy` read, in `row_to_proxy` order.
+///
+/// The projection, the row mapper and the insert column list must stay aligned;
+/// keeping the read projection here means adding a field touches one place
+/// instead of three.
+const PROXY_COLUMNS: &str = "id, name, proxy_type, local_ip, local_port, remote_port, custom_domains, subdomain, use_encryption, use_compression, bandwidth_limit, bandwidth_limit_mode, health_check_type, health_check_timeout_s, health_check_max_failed, health_check_interval_s, health_check_path, health_check_http_headers, plugin_config, secret_key, locations, http_user, http_password, host_header_rewrite, request_headers, response_headers, route_by_http_user, annotations, metadatas, allow_users, nat_traversal_disable_assisted_addrs, proxy_protocol_version, multiplexer, created_at, updated_at";
+
 impl Database {
     /// 插入新的 Proxy
     pub async fn insert_proxy(&self, proxy: &LocalProxy) -> Result<i64> {
+        self.insert_proxy_for_tenant(proxy, "default").await
+    }
+
+    /// 插入新的 Proxy，并记录其租户归属
+    pub async fn insert_proxy_for_tenant(&self, proxy: &LocalProxy, tenant: &str) -> Result<i64> {
         let conn = self.lock().await;
         conn.execute(
             "INSERT INTO local_proxy
@@ -24,8 +36,8 @@ impl Database {
                  request_headers, response_headers, route_by_http_user,
                  annotations, metadatas,
                  allow_users, nat_traversal_disable_assisted_addrs,
-                 proxy_protocol_version)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31)",
+                 proxy_protocol_version, multiplexer, tenant_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33)",
             params![
                 proxy.name,
                 proxy.proxy_type.to_string(),
@@ -58,6 +70,8 @@ impl Database {
                 proxy.allow_users.as_ref().map(|v| v.join(",")),
                 proxy.nat_traversal_disable_assisted_addrs.map(|v| v as i32),
                 proxy.proxy_protocol_version,
+                proxy.multiplexer,
+                tenant,
             ],
         )
         .map_err(ClientError::DatabaseQuery)?;
@@ -67,29 +81,20 @@ impl Database {
 
     /// 获取所有 Proxy
     pub async fn list_proxies(&self) -> Result<Vec<LocalProxy>> {
+        self.list_proxies_for_tenant("default").await
+    }
+
+    /// 获取指定租户的 Proxy
+    pub async fn list_proxies_for_tenant(&self, tenant: &str) -> Result<Vec<LocalProxy>> {
         let conn = self.lock().await;
         let mut stmt = conn
-            .prepare(
-                "SELECT id, name, proxy_type, local_ip, local_port, remote_port,
-                        custom_domains, subdomain, use_encryption, use_compression,
-                        bandwidth_limit, bandwidth_limit_mode,
-                        health_check_type, health_check_timeout_s,
-                        health_check_max_failed, health_check_interval_s,
-                        health_check_path, health_check_http_headers,
-                        plugin_config, secret_key,
-                        locations, http_user, http_password, host_header_rewrite,
-                        request_headers, response_headers, route_by_http_user,
-                        annotations, metadatas,
-                        allow_users, nat_traversal_disable_assisted_addrs,
-                        proxy_protocol_version,
-                        created_at, updated_at
-                 FROM local_proxy
-                 ORDER BY name",
-            )
+            .prepare(&format!(
+                "SELECT {PROXY_COLUMNS} FROM local_proxy WHERE tenant_id = ?1 ORDER BY name"
+            ))
             .map_err(ClientError::DatabaseQuery)?;
 
         let proxies: Vec<LocalProxy> = stmt
-            .query_map([], row_to_proxy)?
+            .query_map(params![tenant], row_to_proxy)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(ClientError::DatabaseQuery)?;
 
@@ -98,23 +103,15 @@ impl Database {
 
     /// 按 ID 获取单个 Proxy
     pub async fn get_proxy(&self, id: i64) -> Result<LocalProxy> {
+        self.get_proxy_in_tenant(id, "default").await
+    }
+
+    /// 按 ID 获取单个 Proxy，并校验租户归属
+    pub async fn get_proxy_in_tenant(&self, id: i64, tenant: &str) -> Result<LocalProxy> {
         let conn = self.lock().await;
         conn.query_row(
-            "SELECT id, name, proxy_type, local_ip, local_port, remote_port,
-                    custom_domains, subdomain, use_encryption, use_compression,
-                    bandwidth_limit, bandwidth_limit_mode,
-                    health_check_type, health_check_timeout_s,
-                    health_check_max_failed, health_check_interval_s,
-                    health_check_path, health_check_http_headers,
-                    plugin_config, secret_key,
-                    locations, http_user, http_password, host_header_rewrite,
-                    request_headers, response_headers, route_by_http_user,
-                    annotations, metadatas,
-                    allow_users, nat_traversal_disable_assisted_addrs,
-                    proxy_protocol_version,
-                    created_at, updated_at
-             FROM local_proxy WHERE id = ?1",
-            params![id],
+            &format!("SELECT {PROXY_COLUMNS} FROM local_proxy WHERE id = ?1 AND tenant_id = ?2"),
+            params![id, tenant],
             row_to_proxy,
         )
         .map_err(|e| match e {
@@ -151,9 +148,9 @@ impl Database {
                     annotations = ?27, metadatas = ?28,
                     allow_users = ?29,
                     nat_traversal_disable_assisted_addrs = ?30,
-                    proxy_protocol_version = ?31,
+                    proxy_protocol_version = ?31, multiplexer = ?32,
                     updated_at = datetime('now')
-                 WHERE id = ?32",
+                 WHERE id = ?33",
                 params![
                     proxy.name,
                     proxy.proxy_type.to_string(),
@@ -193,6 +190,7 @@ impl Database {
                     proxy.allow_users.as_ref().map(|v| v.join(",")),
                     proxy.nat_traversal_disable_assisted_addrs.map(|v| v as i32),
                     proxy.proxy_protocol_version,
+                    proxy.multiplexer,
                     id,
                 ],
             )
@@ -297,6 +295,7 @@ fn row_to_proxy(row: &rusqlite::Row<'_>) -> rusqlite::Result<LocalProxy> {
             raw.map(|v| v != 0)
         },
         proxy_protocol_version: row.get(31)?,
+        multiplexer: row.get(32)?,
         health_check_type: row.get(12)?,
         health_check_timeout_s: row.get(13)?,
         health_check_max_failed: row.get(14)?,
@@ -304,9 +303,117 @@ fn row_to_proxy(row: &rusqlite::Row<'_>) -> rusqlite::Result<LocalProxy> {
         health_check_path: row.get(16)?,
         health_check_http_headers,
         plugin_config,
-        created_at: row.get(32)?,
-        updated_at: row.get(33)?,
+        created_at: row.get(33)?,
+        updated_at: row.get(34)?,
     })
+}
+
+#[cfg(test)]
+mod tenant_tests {
+    use super::*;
+    use crate::config::model::FrpsProfile;
+
+    async fn setup() -> Database {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let path = tmp.path().to_string_lossy().to_string();
+        let db = Database::open(&path).await.unwrap();
+        crate::db::migrate::run(&*db.lock().await).unwrap();
+        std::mem::forget(tmp);
+        db
+    }
+
+    fn proxy(name: &str) -> LocalProxy {
+        LocalProxy {
+            name: name.into(),
+            local_port: 8080,
+            remote_port: Some(18080),
+            ..Default::default()
+        }
+    }
+
+    /// A token issued for one tenant must not see another tenant's proxies, and
+    /// must not be able to read them by id: foreign ids report "not found" so
+    /// they cannot be probed.
+    #[tokio::test]
+    async fn proxies_are_invisible_across_tenants() {
+        let db = setup().await;
+        let mine = db
+            .insert_proxy_for_tenant(&proxy("mine"), "alpha")
+            .await
+            .unwrap();
+        let theirs = db
+            .insert_proxy_for_tenant(&proxy("theirs"), "beta")
+            .await
+            .unwrap();
+
+        let alpha_view = db.list_proxies_for_tenant("alpha").await.unwrap();
+        assert_eq!(alpha_view.len(), 1);
+        assert_eq!(alpha_view[0].id, Some(mine));
+
+        assert!(matches!(
+            db.get_proxy_in_tenant(theirs, "alpha").await,
+            Err(ClientError::RecordNotFound { .. })
+        ));
+        assert!(db.get_proxy_in_tenant(theirs, "beta").await.is_ok());
+    }
+
+    /// Visitors, bindings and profiles inherit their tenant from the profile row.
+    #[tokio::test]
+    async fn related_rows_follow_their_profile_tenant() {
+        let db = setup().await;
+        let profile = db
+            .insert_profile_for_tenant(
+                &FrpsProfile {
+                    name: "beta-server".into(),
+                    server_addr: "frp.example.com".into(),
+                    ..Default::default()
+                },
+                "beta",
+            )
+            .await
+            .unwrap();
+        let proxy_id = db
+            .insert_proxy_for_tenant(&proxy("svc"), "beta")
+            .await
+            .unwrap();
+        db.insert_binding(&crate::config::model::BindingRule {
+            profile_id: profile,
+            proxy_id,
+            enabled: true,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        db.insert_visitor(&crate::config::model::LocalVisitor {
+            name: "visitor".into(),
+            server_name: "svc".into(),
+            bind_port: 9000,
+            secret_key: Some("k".into()),
+            profile_id: profile,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(db.list_bindings_for_tenant("beta").await.unwrap().len(), 1);
+        assert!(db
+            .list_bindings_for_tenant("alpha")
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(db.list_visitors_for_tenant("beta").await.unwrap().len(), 1);
+        assert!(db
+            .list_visitors_for_tenant("alpha")
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(db.list_profiles_for_tenant("beta").await.unwrap().len(), 1);
+        assert!(db
+            .list_profiles_for_tenant("alpha")
+            .await
+            .unwrap()
+            .is_empty());
+    }
 }
 
 #[cfg(test)]
@@ -354,6 +461,7 @@ mod tests {
             health_check_interval_s: 10,
             health_check_path: None,
             health_check_http_headers: None,
+            multiplexer: None,
             plugin_config: None,
             created_at: String::new(),
             updated_at: String::new(),

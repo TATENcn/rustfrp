@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
 /// 当前最新的 schema 版本
-const LATEST_VERSION: i32 = 15;
+const LATEST_VERSION: i32 = 20;
 
 /// 运行所有待执行的迁移
 ///
@@ -98,6 +98,11 @@ fn apply_migration(conn: &Connection, version: i32) -> Result<()> {
         13 => migrate_v13(&tx)?,
         14 => migrate_v14(&tx)?,
         15 => migrate_v15(&tx)?,
+        16 => migrate_v16(&tx)?,
+        17 => migrate_v17(&tx)?,
+        18 => migrate_v18(&tx)?,
+        19 => migrate_v19(&tx)?,
+        20 => migrate_v20(&tx)?,
         _ => {
             return Err(ClientError::DatabaseMigration(format!(
                 "Unknown migration version: {version}"
@@ -791,6 +796,242 @@ fn migrate_v15(tx: &rusqlite::Transaction) -> Result<()> {
         [],
     )
     .map_err(|e| ClientError::DatabaseMigration(format!("Failed to add runtime version: {e}")))?;
+    Ok(())
+}
+
+/// V16: persist the per-profile frpc admin port and the tcpmux multiplexer.
+///
+/// The admin port enables `frpc reload` / `frpc status` (the only documented
+/// hot-reload path); `multiplexer` is required for valid tcpmux proxies.
+fn migrate_v16(tx: &rusqlite::Transaction) -> Result<()> {
+    for statement in [
+        "ALTER TABLE local_proxy ADD COLUMN multiplexer TEXT DEFAULT NULL",
+        "ALTER TABLE profile_runtime ADD COLUMN admin_port INTEGER DEFAULT NULL",
+        "ALTER TABLE profile_runtime ADD COLUMN admin_password TEXT DEFAULT NULL",
+    ] {
+        if let Err(error) = tx.execute(statement, []) {
+            if !error.to_string().contains("duplicate column") {
+                return Err(ClientError::DatabaseMigration(format!(
+                    "Failed to apply V16 migration: {error}"
+                )));
+            }
+            tracing::info!("V16 column already exists, skipping: {statement}");
+        }
+    }
+    tracing::info!("V16 Migration: Add tcpmux multiplexer and frpc admin port");
+    Ok(())
+}
+
+/// V17: remaining frpc common-config fields that were modelled but never
+/// persisted, so they could not survive a restart.
+fn migrate_v17(tx: &rusqlite::Transaction) -> Result<()> {
+    let columns = [
+        ("client_id", "TEXT"),
+        ("wire_protocol", "TEXT"),
+        ("auth_additional_scopes", "TEXT"),
+        ("oidc_additional_params", "TEXT"),
+        ("oidc_trusted_ca_file", "TEXT"),
+        ("oidc_proxy_url", "TEXT"),
+        ("tls_server_name", "TEXT"),
+        ("log_to", "TEXT"),
+        ("log_level", "TEXT"),
+        ("log_max_days", "INTEGER"),
+        ("virtual_net_address", "TEXT"),
+    ];
+    for (column, kind) in columns {
+        match tx.execute(
+            &format!("ALTER TABLE frps_profile ADD COLUMN {column} {kind} DEFAULT NULL"),
+            [],
+        ) {
+            Ok(_) => {}
+            Err(error) if error.to_string().contains("duplicate column") => {
+                tracing::info!(column, "V17 column already exists, skipping");
+            }
+            Err(error) => {
+                return Err(ClientError::DatabaseMigration(format!(
+                    "Failed to add {column} column: {error}"
+                )));
+            }
+        }
+    }
+    for column in ["oidc_insecure_skip_verify", "tls_disable_custom_first_byte"] {
+        match tx.execute(
+            &format!("ALTER TABLE frps_profile ADD COLUMN {column} INTEGER DEFAULT NULL"),
+            [],
+        ) {
+            Ok(_) => {}
+            Err(error) if error.to_string().contains("duplicate column") => {
+                tracing::info!(column, "V17 column already exists, skipping");
+            }
+            Err(error) => {
+                return Err(ClientError::DatabaseMigration(format!(
+                    "Failed to add {column} column: {error}"
+                )));
+            }
+        }
+    }
+    tracing::info!("V17 Migration: Add remaining frpc common config columns");
+    Ok(())
+}
+
+/// V18: profile names must be unique.
+///
+/// Generated artifacts are keyed by profile id, so duplicates no longer corrupt
+/// each other's configuration, but two identically named profiles remain
+/// indistinguishable in the UI and in logs. Existing duplicates are renamed with
+/// a numeric suffix, keeping the oldest row untouched.
+fn migrate_v18(tx: &rusqlite::Transaction) -> Result<()> {
+    let duplicates: Vec<String> = {
+        let mut statement = tx
+            .prepare("SELECT name FROM frps_profile GROUP BY name HAVING COUNT(*) > 1")
+            .map_err(|e| {
+                ClientError::DatabaseMigration(format!("Failed to scan duplicate profiles: {e}"))
+            })?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| {
+                ClientError::DatabaseMigration(format!("Failed to scan duplicate profiles: {e}"))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| {
+                ClientError::DatabaseMigration(format!("Failed to scan duplicate profiles: {e}"))
+            })?;
+        rows
+    };
+
+    for name in duplicates {
+        let ids: Vec<i64> = {
+            let mut statement = tx
+                .prepare("SELECT id FROM frps_profile WHERE name = ?1 ORDER BY id")
+                .map_err(|e| {
+                    ClientError::DatabaseMigration(format!("Failed to load duplicate rows: {e}"))
+                })?;
+            let rows = statement
+                .query_map([&name], |row| row.get::<_, i64>(0))
+                .map_err(|e| {
+                    ClientError::DatabaseMigration(format!("Failed to load duplicate rows: {e}"))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|e| {
+                    ClientError::DatabaseMigration(format!("Failed to load duplicate rows: {e}"))
+                })?;
+            rows
+        };
+        for (index, id) in ids.into_iter().skip(1).enumerate() {
+            let renamed = format!("{name}-{}", index + 2);
+            tx.execute(
+                "UPDATE frps_profile SET name = ?1 WHERE id = ?2",
+                rusqlite::params![renamed, id],
+            )
+            .map_err(|e| {
+                ClientError::DatabaseMigration(format!("Failed to rename duplicate profile: {e}"))
+            })?;
+        }
+        tracing::info!(name, "V18 renamed duplicate profile names");
+    }
+
+    tx.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_frps_profile_name ON frps_profile(name)",
+        [],
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to add profile name uniqueness: {e}"))
+    })?;
+    tracing::info!("V18 Migration: Enforce unique profile names");
+    Ok(())
+}
+
+/// V19: RustFRP runs a single fixed frp version, so the per-profile pin is gone.
+///
+/// The column is dropped rather than left unused: a stale per-profile version
+/// would suggest a capability the daemon no longer has.
+fn migrate_v19(tx: &rusqlite::Transaction) -> Result<()> {
+    if let Err(error) = tx.execute("ALTER TABLE profile_runtime DROP COLUMN frpc_version", []) {
+        // SQLite older than 3.35 cannot drop columns; clearing the values keeps
+        // the stale policy from being read.
+        if error.to_string().contains("syntax") || error.to_string().contains("near \"DROP\"") {
+            tx.execute("UPDATE profile_runtime SET frpc_version = NULL", [])
+                .map_err(|e| {
+                    ClientError::DatabaseMigration(format!(
+                        "Failed to clear per-profile frp version: {e}"
+                    ))
+                })?;
+            tracing::warn!("V19: SQLite cannot drop columns; cleared frpc_version instead");
+        } else {
+            return Err(ClientError::DatabaseMigration(format!(
+                "Failed to drop per-profile frp version: {error}"
+            )));
+        }
+    }
+    tracing::info!("V19 Migration: Remove per-profile frp version pinning");
+    Ok(())
+}
+
+/// V20: give proxies and server configurations a tenant, so API tokens issued for
+/// different tenants cannot see each other's data.
+///
+/// Membership used to be derived through `environment.tenant_id`, which forced
+/// every handler to repeat a two-hop join and let several handlers skip the check
+/// entirely. The tenant now lives on the row itself; visitors and bindings reach
+/// it through their `profile_id`, which already exists.
+///
+/// Existing rows inherit the tenant of the environment their profile belongs to,
+/// falling back to `default` for unassigned profiles and unbound proxies.
+fn migrate_v20(tx: &rusqlite::Transaction) -> Result<()> {
+    for statement in [
+        "ALTER TABLE frps_profile ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'",
+        "ALTER TABLE local_proxy ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'",
+    ] {
+        if let Err(error) = tx.execute(statement, []) {
+            if !error.to_string().contains("duplicate column") {
+                return Err(ClientError::DatabaseMigration(format!(
+                    "Failed to add tenant column: {error}"
+                )));
+            }
+            tracing::info!("V20 column already exists, skipping: {statement}");
+        }
+    }
+
+    tx.execute(
+        "UPDATE frps_profile
+            SET tenant_id = COALESCE((
+                SELECT e.tenant_id
+                  FROM profile_environment pe
+                  JOIN environment e ON e.id = pe.environment_id
+                 WHERE pe.profile_id = frps_profile.id
+            ), 'default')",
+        [],
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to backfill profile tenants: {e}"))
+    })?;
+
+    tx.execute(
+        "UPDATE local_proxy
+            SET tenant_id = COALESCE((
+                SELECT p.tenant_id
+                  FROM binding_rule b
+                  JOIN frps_profile p ON p.id = b.profile_id
+                 WHERE b.proxy_id = local_proxy.id
+                 LIMIT 1
+            ), 'default')",
+        [],
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to backfill proxy tenants: {e}"))
+    })?;
+
+    tx.execute(
+        "CREATE INDEX IF NOT EXISTS idx_frps_profile_tenant ON frps_profile(tenant_id)",
+        [],
+    )
+    .ok();
+    tx.execute(
+        "CREATE INDEX IF NOT EXISTS idx_local_proxy_tenant ON local_proxy(tenant_id)",
+        [],
+    )
+    .ok();
+    tracing::info!("V20 Migration: Add tenant ownership to profiles and proxies");
     Ok(())
 }
 

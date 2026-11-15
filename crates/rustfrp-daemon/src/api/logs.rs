@@ -9,13 +9,15 @@
 //! - `lines`: number of lines to read from end (default: 200, max: 1000)
 //! - `type`: log type - "combined" (default), "stdout", or "stderr"
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{BufRead, BufReader};
 
+use super::auth::AuthIdentity;
+use super::profiles::ensure_profile_tenant;
 use super::response::{ApiError, ApiResponse};
 use super::state::ApiState;
 
@@ -54,9 +56,12 @@ pub struct LogResponse {
 /// GET /api/v1/logs/{profile_id} — get logs for a specific profile
 pub async fn get_logs(
     State(state): State<ApiState>,
+    Extension(identity): Extension<AuthIdentity>,
     Path(profile_id): Path<i64>,
     Query(query): Query<LogQuery>,
 ) -> Result<Json<ApiResponse<LogResponse>>, (StatusCode, Json<ApiResponse<()>>)> {
+    ensure_profile_tenant(&state, profile_id, &identity.tenant).await?;
+
     // Validate lines parameter
     let lines = query.lines.clamp(1, 1000);
 

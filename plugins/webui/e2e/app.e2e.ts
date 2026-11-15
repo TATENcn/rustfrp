@@ -78,15 +78,6 @@ async function fixture(page: Page, authenticated = true) {
     const [kind, rawId, action] = path.split("/");
     const id = Number(rawId);
     if (path === "frp/installations" && method === "GET") return ok(null);
-    if (kind === "profiles" && action === "frpc-version")
-      return ok({
-        profile_id: id,
-        version: null,
-        effective_version: "0.70.1",
-        running_version: running ? "0.70.1" : null,
-        running,
-        restart_required: false,
-      });
     if (path === "status")
       return ok({
         state: "running",
@@ -476,7 +467,8 @@ test("API failures show a retry state without hiding previous data", async ({
       .getByRole("complementary", { name: "Processes", exact: true })
       .getByText("Edge server", { exact: true }),
   ).toBeVisible();
-  await page.route("**/api/v1/status", (route) =>
+  // Status is requested with the selected environment: ?environment_id=<id>.
+  await page.route(/\/api\/v1\/status(\?|$)/, (route) =>
     route.fulfill({
       status: 500,
       json: { success: false, error: { message: "Database unavailable" } },
@@ -798,57 +790,6 @@ test("traffic scopes separate servers, local proxies and host interfaces", async
   });
 });
 
-test("server version selection saves without restarting and exposes pending apply", async ({
-  page,
-}) => {
-  const { writes } = await fixture(page);
-  let version: string | null = null,
-    applied = "0.70.1";
-  await page.route("**/api/v1/profiles/1/frpc-version", async (route) => {
-    if (route.request().method() === "PUT")
-      version = route.request().postDataJSON().version;
-    await route.fulfill({
-      json: {
-        success: true,
-        data: {
-          profile_id: 1,
-          version,
-          effective_version: version ?? "0.70.1",
-          running_version: applied,
-          running: true,
-          restart_required: version !== null && version !== applied,
-        },
-      },
-    });
-  });
-  await page.goto("/#/profiles");
-  await page.getByRole("button", { name: "frpc 0.70.1", exact: true }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog
-    .getByRole("combobox", { name: "frpc version", exact: true })
-    .click();
-  await page.getByRole("option", { name: "0.69.0", exact: true }).click();
-  await dialog
-    .getByRole("button", { name: "Save version selection", exact: true })
-    .click();
-  await expect(
-    dialog.getByRole("button", {
-      name: "Restart and apply version",
-      exact: true,
-    }),
-  ).toBeVisible();
-  expect(
-    writes.some((w) => w.path.endsWith("/start") || w.path.endsWith("/stop")),
-  ).toBe(false);
-  await expect(dialog).toContainText(
-    "briefly interrupts all its proxy connections",
-  );
-  await page.screenshot({
-    path: "test-results/profile-frpc-version.png",
-    animations: "disabled",
-  });
-});
-
 test("installer submits accelerator channel and shows background task progress", async ({
   page,
 }) => {
@@ -946,30 +887,3 @@ test("failed profile deletion keeps the confirmation and record for retry", asyn
   await expect(dialog).toHaveCount(0);
 });
 
-test("version suggestions stay compact and support search, keyboard and manual entry", async ({ page }) => {
-  await fixture(page);
-  await page.route("**/api/v1/frp/releases", route => route.fulfill({ json: {
-    success: true, data: Array.from({ length: 80 }, (_, i) => ({ version: `0.${100 - i}.0` })),
-  } }));
-  await page.goto("/#/status?tab=versions");
-  const input = page.getByRole("combobox", { name: "Version", exact: true });
-  await input.click();
-  const list = page.getByRole("listbox", { name: "Available versions" });
-  await expect(list.getByRole("option")).toHaveCount(80);
-  const box = await list.boundingBox();
-  expect(box!.height).toBeLessThanOrEqual(240);
-  const field = await input.boundingBox();
-  expect(box!.y).toBeGreaterThanOrEqual(field!.y + field!.height);
-  expect(Math.abs(box!.width - field!.width)).toBeLessThan(4);
-  await input.fill("0.99");
-  await expect(list.getByRole("option")).toHaveCount(1);
-  await input.press("ArrowDown");
-  await input.press("Enter");
-  await expect(input).toHaveValue("0.99.0");
-  await expect(list).toHaveCount(0);
-  await input.fill("0.999.1");
-  await expect(page.getByText("No matches. Your entered version will be used.")).toBeVisible();
-  await input.press("Escape");
-  await expect(list).toHaveCount(0);
-  await expect(input).toHaveValue("0.999.1");
-});

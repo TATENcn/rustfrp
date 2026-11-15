@@ -7,30 +7,27 @@
 //! - PUT    /api/v1/visitors/{id}  — update a visitor
 //! - DELETE /api/v1/visitors/{id}  — delete a visitor
 
-use axum::extract::{Path, State};
+use axum::extract::{Extension, Path, State};
 use axum::Json;
 use chrono::Utc;
 use rustfrp_client::config::model::LocalVisitor;
 
-use super::response::ApiResponse;
+use super::auth::AuthIdentity;
+use super::response::{api_error, ApiResponse};
 use super::state::ApiState;
 
+/// Map a client-layer error into an API response, mirroring the inline
+/// `status_code`/`ApiError` construction used by the CRUD handlers.
 /// List all visitors
 pub async fn list(
     State(state): State<ApiState>,
+    Extension(identity): Extension<AuthIdentity>,
 ) -> Result<Json<ApiResponse<Vec<LocalVisitor>>>, (axum::http::StatusCode, Json<ApiResponse<()>>)> {
-    let visitors = state.db.list_visitors().await.map_err(|e| {
-        (
-            super::response::status_code(&e),
-            Json(ApiResponse::<()> {
-                success: false,
-                data: None,
-                count: None,
-                error: Some(super::response::ApiError::from_client_error(&e)),
-            }),
-        )
-    })?;
-
+    let visitors = state
+        .db
+        .list_visitors_for_tenant(&identity.tenant)
+        .await
+        .map_err(api_error)?;
     let count = visitors.len();
     Ok(Json(ApiResponse::ok_list(visitors, count)))
 }
@@ -63,6 +60,8 @@ pub async fn create(
     (axum::http::StatusCode, Json<ApiResponse<LocalVisitor>>),
     (axum::http::StatusCode, Json<ApiResponse<()>>),
 > {
+    visitor.validate().map_err(api_error)?;
+
     let now = Utc::now().to_rfc3339();
     visitor.created_at = now.clone();
     visitor.updated_at = now;
@@ -97,6 +96,7 @@ pub async fn update(
     if let Ok(existing) = state.db.get_visitor(id).await {
         visitor.created_at = existing.created_at;
     }
+    visitor.validate().map_err(api_error)?;
 
     state.db.update_visitor(&visitor).await.map_err(|e| {
         (

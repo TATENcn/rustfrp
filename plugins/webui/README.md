@@ -49,3 +49,17 @@ bun run test:e2e
 The browser tests start a local Vite server and mock **all** `/api/v1` requests. They exercise protected login, CRUD payloads, confirmation dialogs, assignment/start/stop, ANSI/HTML log handling, import/export, themes, language and responsive navigation without changing a real daemon's configuration. Browser screenshots and failure traces are written to ignored `test-results/`.
 
 Dependency installation uses `bun.lock`; production output is written to `dist/` for Rust's embedded WebUI. The API client never logs authentication tokens.
+
+## README screenshots
+
+From the repository root:
+
+```bash
+bun install --cwd plugins/webui --frozen-lockfile
+(cd plugins/webui && bun x playwright install chromium)
+bun run --cwd plugins/webui screenshots
+```
+
+The screenshot suite starts its own Vite server and intercepts every `/api/v1` request with fixtures in `screenshots/demo-data.ts`. It rejects mutations and unhandled requests, so no live daemon or database is needed. Three servers, six proxy rules, eight assignments, one hour of resource/traffic samples, installed versions and synthetic logs populate six screenshots in `docs/images/`.
+
+Use Chromium with Noto Sans CJK SC installed for consistent Chinese text. The suite fixes the clock, viewport, locale and light theme, waits for charts and fonts, and checks that populated content is visible before capturing. Fixtures are used only by Playwright and are not shipped in the production UI. These screenshots illustrate the interface; they are not benchmarks or real deployment records.

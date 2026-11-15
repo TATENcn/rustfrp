@@ -93,6 +93,16 @@ impl SignalHandler {
     pub fn is_shutdown_requested(&self) -> bool {
         self.shutdown_requested.load(Ordering::SeqCst)
     }
+
+    /// Request a graceful shutdown without a signal
+    ///
+    /// Embedded hosts (the desktop shell's tray "Quit" item) cannot send
+    /// themselves SIGTERM without also killing the webview, so they flip the
+    /// same flag the signal listener uses. `ClientCore::run` observes it and
+    /// tears down plugins and frpc children through the normal path.
+    pub fn request_shutdown(&self) {
+        self.shutdown_requested.store(true, Ordering::SeqCst);
+    }
 }
 
 impl Default for SignalHandler {
@@ -117,5 +127,13 @@ mod tests {
     async fn test_signal_handler_default_state() {
         let handler = SignalHandler::new();
         assert!(!handler.is_shutdown_requested());
+    }
+
+    #[tokio::test]
+    async fn request_shutdown_sets_the_flag_seen_by_run_loops() {
+        let handler = SignalHandler::new();
+        let observer = handler.clone();
+        handler.request_shutdown();
+        assert!(observer.is_shutdown_requested());
     }
 }

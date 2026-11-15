@@ -64,6 +64,16 @@ async fn main() -> anyhow::Result<()> {
         .db_path
         .unwrap_or_else(|| default_db_path().to_string_lossy().to_string());
 
+    // The database directory is the single owner of frpc children. Two daemons
+    // (or a daemon and the desktop shell) sharing it would each start their own
+    // frpc for the same profile, so claim it exclusively before opening SQLite.
+    let data_dir = std::path::Path::new(&db_path)
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let _instance_lock = rustfrp_daemon::InstanceLock::acquire(&data_dir)?;
+
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"),
         db_path = %db_path,

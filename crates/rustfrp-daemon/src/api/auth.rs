@@ -98,8 +98,14 @@ fn required_scope(method: &Method, path: &str) -> &'static str {
     if path == "/api/v1/metrics/traffic" {
         "telemetry:write"
     } else {
+        // Resources owned by a tenant. Everything else (the version registry,
+        // the full-database export, process-wide status) is platform state.
         let tenant_resource = path == "/api/v1/auth/whoami"
             || path.starts_with("/api/v1/profiles")
+            || path.starts_with("/api/v1/proxies")
+            || path.starts_with("/api/v1/visitors")
+            || path.starts_with("/api/v1/bindings")
+            || path.starts_with("/api/v1/logs")
             || path.starts_with("/api/v1/environments");
         match (
             tenant_resource,

@@ -69,6 +69,19 @@ export interface FrpsProfile {
   includes?: string[] | null
   store_path?: string | null
   feature_gates?: string | null
+  client_id?: string | null
+  wire_protocol?: string | null
+  auth_additional_scopes?: string[] | null
+  oidc_additional_params?: string | null
+  oidc_trusted_ca_file?: string | null
+  oidc_insecure_skip_verify?: boolean | null
+  oidc_proxy_url?: string | null
+  tls_server_name?: string | null
+  tls_disable_custom_first_byte?: boolean | null
+  log_to?: string | null
+  log_level?: string | null
+  log_max_days?: number | null
+  virtual_net_address?: string | null
   created_at: string
   updated_at: string
 }
@@ -112,6 +125,7 @@ export interface LocalProxy {
   health_check_interval_s: number
   health_check_path?: string | null
   health_check_http_headers?: HttpHeader[] | null
+  multiplexer?: string | null
   plugin_config?: Record<string, unknown> | null
   created_at: string
   updated_at: string
@@ -139,6 +153,23 @@ export interface ProfileRuntimeResponse {
   profile_id: number
   enabled_proxy_count: number
   config_pending: boolean
+}
+
+// ── Per-proxy live status from the frpc admin API ──
+export interface ProxyStatus {
+  proxy_type: string
+  name: string
+  status: string
+  error?: string
+  local_addr: string
+  remote_addr: string
+}
+
+export interface ProxyStatusReport {
+  profile_id: number
+  available: boolean
+  error?: string
+  proxies: ProxyStatus[]
 }
 
 // ── LocalVisitor (matches Rust LocalVisitor 1:1) ──

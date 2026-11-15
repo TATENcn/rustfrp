@@ -1,9 +1,9 @@
-import { ProfileVersionButton } from "../resources/profile-version";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   getProfileRuntime,
+  getProxyStatus,
   replaceProfileProxies,
   startProfile,
   stopProfile,
@@ -15,9 +15,8 @@ import {
   useBindings,
   useProfiles,
   useProxies,
-  useEnvironments,
+  useActiveEnvironment,
 } from "@/hooks/api";
-import { usePreferences } from "@/hooks/preferences";
 import { useI18n } from "@/i18n";
 import { AppIcon } from "@/components/icon/AppIcon";
 import { Button } from "@/components/ui/button";
@@ -47,8 +46,7 @@ export default function Bindings() {
     profiles = useProfiles(),
     proxies = useProxies(),
     bindings = useBindings(),
-    environments = useEnvironments(),
-    prefs = usePreferences();
+    { environments, environment } = useActiveEnvironment();
   const [active, setActive] = useState<FrpsProfile | null>(null),
     [selected, setSelected] = useState<number[]>([]),
     [search, setSearch] = useState("");
@@ -61,9 +59,6 @@ export default function Bindings() {
     (bindings.data ?? [])
       .filter((b) => b.profile_id === id && b.enabled)
       .map((b) => b.proxy_id);
-  const environment =
-    environments.data?.find((e) => e.id === prefs.environmentId) ??
-    environments.data?.find((e) => e.is_default);
   const visible = (profiles.data ?? []).filter(
     (p) => !environment || environment.profile_ids.includes(p.id!),
   );
@@ -229,6 +224,18 @@ function Assignment({
     queryFn: () => data(getProfileRuntime(profile.id!)),
     refetchInterval: 5000,
   });
+  // Per-proxy truth comes from frpc: a proxy can be rejected by frps while the
+  // process itself is healthy. Only ask while the instance is running.
+  const statuses = useQuery({
+    queryKey: ["proxy-status", profile.id],
+    queryFn: () => data(getProxyStatus(profile.id!)),
+    refetchInterval: 5000,
+    enabled: !!runtime.data?.running,
+  });
+  const statusFor = (name: string) =>
+    statuses.data?.available
+      ? statuses.data.proxies.find((p) => p.name === name)
+      : undefined;
   const action = useAction((kind: "start" | "stop") =>
     data(
       kind === "start" ? startProfile(profile.id!) : stopProfile(profile.id!),
@@ -252,11 +259,6 @@ function Assignment({
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-2">
             <CardTitle className="text-base">{profile.name}</CardTitle>
-            <ProfileVersionButton
-              id={profile.id!}
-              name={profile.name}
-              readonly
-            />
             <CardDescription className="font-mono text-xs">
               {profile.server_addr}:{profile.server_port}
             </CardDescription>
@@ -298,9 +300,34 @@ function Assignment({
                   />
                   <span className="truncate text-sm">{proxy.name}</span>
                 </div>
-                <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                  {proxy.proxy_type.toUpperCase()} :{proxy.local_port}
-                </span>
+                <div className="flex shrink-0 items-center gap-2">
+                  {(() => {
+                    const live = statusFor(proxy.name);
+                    if (!live) {
+                      return (
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {proxy.proxy_type.toUpperCase()} :{proxy.local_port}
+                        </span>
+                      );
+                    }
+                    const ok = live.status === "running";
+                    return (
+                      <>
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {live.remote_addr || `:${proxy.local_port}`}
+                        </span>
+                        <Badge
+                          variant={ok ? "secondary" : "destructive"}
+                          title={live.error || live.status}
+                        >
+                          {ok
+                            ? text("运行中", "Running")
+                            : live.status || text("异常", "Error")}
+                        </Badge>
+                      </>
+                    );
+                  })()}
+                </div>
               </div>
             ))
           ) : (

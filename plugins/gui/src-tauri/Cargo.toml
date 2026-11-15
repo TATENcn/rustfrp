@@ -1,0 +1,34 @@
+[package]
+name = "rustfrp-desktop"
+version = "0.5.0"
+edition = "2021"
+license = "AGPL-3.0-only"
+repository = "https://github.com/taten/rustfrp"
+rust-version = "1.95"
+description = "RustFRP desktop shell — Tauri window and tray over the local daemon"
+publish = false
+
+[lib]
+name = "rustfrp_desktop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rustfrp-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+rustfrp-common = { version = "0.5.0", path = "../../../crates/common" }
+rustfrp-daemon = { version = "0.5.0", path = "../../../crates/rustfrp-daemon" }
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-window-state = "2"
+# `watch` carries the embedded daemon's stop notification to the event loop.
+# Tauri re-exports its runtime's `watch`, but depending on it explicitly keeps
+# the channel version pinned to this crate rather than to tauri's internals.
+tokio = { version = "1", features = ["sync"] }
+serde_json = "1"
+tracing = "0.1"

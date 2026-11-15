@@ -17,7 +17,7 @@ use tokio::sync::RwLock;
 pub enum ProcessAction {
     /// 启动了新的 frpc 进程
     Started,
-    /// 对已运行的 frpc 发送了 SIGHUP 热重载
+    /// 对已运行的 frpc 执行了 `frpc reload` 热重载
     Reloaded,
     /// frpc 进程已停止
     Stopped,
@@ -61,7 +61,6 @@ pub struct ProcessManager {
     /// Profile ID → ProcessGuard
     guards: Arc<RwLock<HashMap<i64, ProcessGuard>>>,
     database: Option<crate::db::Database>,
-    versions: rustfrp_bin::manager::VersionManager,
     /// TOML 配置文件输出目录
     config_dir: PathBuf,
     /// rustfrp 托管的 frpc 二进制绝对路径
@@ -76,7 +75,6 @@ impl ProcessManager {
         Self {
             guards: Arc::new(RwLock::new(HashMap::new())),
             database: None,
-            versions: Default::default(),
             config_dir,
             frpc_path: Arc::new(RwLock::new(frpc_path)),
             signal_handler,
@@ -87,20 +85,12 @@ impl ProcessManager {
         self.database = Some(database);
         self
     }
-    pub fn with_version_manager(mut self, versions: rustfrp_bin::manager::VersionManager) -> Self {
-        self.versions = versions;
-        self
-    }
-    pub async fn selected_binary(&self, profile_id: i64) -> Result<PathBuf> {
-        if let Some(db) = &self.database {
-            if let Some(version) = db.profile_frpc_version(profile_id).await? {
-                return self
-                    .versions
-                    .installed_path(&version)
-                    .await
-                    .map_err(|e| ClientError::ProcessStart(e.to_string()));
-            }
-        }
+    /// Binary used for every profile.
+    ///
+    /// RustFRP runs one fixed frp version: per-profile pinning was removed
+    /// because a single daemon cannot validate generated TOML against several
+    /// binary versions at once.
+    pub async fn selected_binary(&self, _profile_id: i64) -> Result<PathBuf> {
         Ok(self.frpc_path.read().await.clone())
     }
     pub async fn running_binary(&self, profile_id: i64) -> Option<PathBuf> {
@@ -121,9 +111,8 @@ impl ProcessManager {
     ///
     /// 若该 profile_id 已有运行中实例，先停止旧的再启动新的。
     pub async fn start(&self, profile_id: i64, profile_name: &str) -> Result<()> {
-        let toml_path = self
-            .config_dir
-            .join(sanitize_filename(profile_name) + ".toml");
+        let toml_path =
+            crate::config::generator::profile_toml_path(&self.config_dir, profile_id, profile_name);
 
         if !toml_path.exists() {
             return Err(ClientError::ProcessStart(format!(
@@ -141,7 +130,7 @@ impl ProcessManager {
             toml_path.clone(),
             binary,
             self.signal_handler.clone(),
-            profile_name.to_string(),
+            crate::config::generator::profile_artifact_id(profile_id, profile_name),
         );
         guard.start().await?;
 
@@ -164,14 +153,13 @@ impl ProcessManager {
     /// 确保指定 Profile 的 frpc 在运行。
     ///
     /// - 未运行 → 启动新进程，返回 `ProcessAction::Started`
-    /// - 已运行 → 热重载（SIGHUP），返回 `ProcessAction::Reloaded`
+    /// - 已运行 → 热重载（`frpc reload`），返回 `ProcessAction::Reloaded`
     pub async fn ensure_running(
         &self,
         profile_id: i64,
         profile_name: &str,
     ) -> Result<ProcessAction> {
-        let selected = self.selected_binary(profile_id).await?;
-        if self.running_binary(profile_id).await.as_ref() == Some(&selected) {
+        if self.running_binary(profile_id).await.is_some() {
             self.reload(profile_id).await?;
             Ok(ProcessAction::Reloaded)
         } else {
@@ -308,8 +296,6 @@ impl ProcessManager {
             .join("logs")
     }
 }
-
-use crate::config::generator::sanitize_filename;
 
 #[cfg(test)]
 mod tests {

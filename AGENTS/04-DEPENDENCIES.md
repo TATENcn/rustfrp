@@ -194,51 +194,55 @@ prometheus = "0.13"           # Prometheus 客户端库
 
 ---
 
-## 七、GUI 插件 `plugins/gui` 依赖
+## 七、桌面端 `plugins/gui` 依赖
 
-### 6.1 Rust 侧（Tauri）
+桌面端不重写前端：`plugins/webui` 的构建产物同时服务浏览器、容器和桌面窗口，
+`plugins/gui` 只提供原生外壳。两个包的依赖见 `plugins/webui/package.json` 与
+`plugins/gui/src-tauri/Cargo.toml`，此处记录**为何选这几个**。
+
+### 7.1 Rust 侧（`plugins/gui/src-tauri/Cargo.toml`）
 
 ```toml
-# plugins/gui/src-tauri/Cargo.toml
-[dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
-tauri-plugin-shell = "2"
-tauri-plugin-notification = "2"
-tauri-plugin-autostart = "2"
-tauri-plugin-store = "2"      # 本地 KV 存储（窗口位置等 UI 状态）
+tauri-build = "2"
+tauri-plugin-single-instance = "2"   # 第二次启动聚焦已有窗口后退出
+tauri-plugin-window-state = "2"      # 窗口位置/大小持久化
+tauri-plugin-dialog = "2"            # 启动失败时的阻塞式错误提示
 
-rustfrp-core = { path = "../../../crates/rustfrp-core" }
-rustfrp-frp = { path = "../../../crates/rustfrp-frp" }
-
-ts-rs = "8"                   # Rust → TypeScript 类型导出
+rustfrp-daemon = { path = "../../../crates/rustfrp-daemon" }  # DesktopSession
+rustfrp-common = { path = "../../../crates/common" }          # 日志 / panic hook
 ```
 
-### 6.2 前端（npm）
+**未采用的插件**（原设计列出，实际不需要）：
 
-```json
-{
-  "dependencies": {
-    "vue": "^3.5",
-    "pinia": "^2.2",
-    "vue-router": "^4.4",
-    "naive-ui": "^2.40",
-    "ofetch": "^1.4"
-  },
-  "devDependencies": {
-    "typescript": "~6.0",
-    "vite": "^8.0",
-    "@vitejs/plugin-vue": "^6.0",
-    "tailwindcss": "^4.3",
-    "@tailwindcss/vite": "^4.3",
-    "unplugin-icons": "^23.0",
-    "@iconify-json/lucide": "^1.2"
-  }
-}
-```
+| 插件 | 不用的理由 |
+|---|---|
+| `tauri-plugin-shell` | 只会扩大 IPC 攻击面；"打开数据目录"用平台 `xdg-open`/`open`/`explorer` 一行命令即可 |
+| `tauri-plugin-notification` | 断线告警走已有插件系统与 WebUI，不在外壳重复实现 |
+| `tauri-plugin-autostart` | 首版不做开机自启；需要时单加一个插件，成本不变 |
+| `tauri-plugin-store` | 窗口状态由 window-state 负责，其余偏好存在 WebUI 的 `localStorage` |
+| `ts-rs` | 无 IPC command，就没有 Rust→TS 类型需要同步；API 契约在 OpenAPI/`api/types.ts` |
 
-Tailwind 与 Iconify 都仅在构建阶段工作：Tailwind 输出实际使用的 CSS，Iconify 将注册表中实际导入的 Lucide 图标编译为 Vue SVG 组件。WebUI 不访问 Iconify API，也不携带图标运行时或完整图标集。
+`tauri-plugin-single-instance` 在 Linux 依赖 D-Bus 会话总线；总线不可用时插件
+只记一条 warning 并正常启动（已核对其实现），此时互斥仍由 `instance.lock` 兜底。
 
----
+### 7.2 构建期工具
+
+| 工具 | 用途 |
+|---|---|
+| `@tauri-apps/cli`（`plugins/gui` devDependency） | `tauri dev` / `tauri build` / `tauri icon` |
+| `bun` | 执行 WebUI 与外壳的 npm 脚本 |
+| `rsvg-convert`（仅重新生成图标时需要） | 由 `app-icon.svg` 渲染 1024px 母版 |
+
+### 7.3 系统依赖（Linux）
+
+| 包 | 用途 |
+|---|---|
+| `libwebkit2gtk-4.1-0` | WebView 运行时 |
+| `libayatana-appindicator3-1` | 托盘图标 |
+| `libgtk-3-0` | 窗口 |
+
+deb 自动声明这三项；AppImage 不声明，运行时缺失会导致启动失败。
 
 ## 八、开发/测试/构建依赖
 
@@ -308,7 +312,7 @@ loom = "0.7"                  # 并发 bug 检测（可选，编译慢）
 
 ---
 
-## 十一、不引入的依赖
+## 十二、不引入的依赖
 
 | 不引入 | 原因 |
 |---|---|
@@ -340,6 +344,16 @@ Iconify 插件。保留 Tailwind CSS 4、ofetch、ansi_up 和 Intl 格式化。
 ### Linux 流量采集（2026-10）
 
 守护进程增加仅 Linux 目标的 `libc` 直接依赖（锁文件已有该版本），用于只读 TCP SOCK_DIAG 查询。无需 eBPF 工具、额外后台进程或新的核心层依赖。
+
+### 桌面端外壳（2026-11）
+
+新增 `plugins/gui`（Tauri v2）**不改变** Rust 依赖图：它只依赖 `rustfrp-daemon`
+的 `DesktopSession` 与 `rustfrp-common` 的日志/panic hook，没有引入新的网络、
+持久化或异步运行时依赖。该 crate 在根 `Cargo.toml` 中 `exclude`，因此
+`tauri`、`tauri-plugin-*` 及其 GTK/WebKit 构建链不会进入 workspace 锁文件，
+也不会成为无桌面机器与 CI runner 的前置条件。删除了原设计里未使用的
+`tauri-plugin-shell`/`-notification`/`-autostart`/`-store` 与 `ts-rs`（无 IPC
+command，无需类型导出）。
 
 ### v0.4.0 发布依赖修复
 
