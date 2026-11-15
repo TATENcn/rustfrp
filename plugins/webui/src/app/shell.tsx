@@ -6,9 +6,10 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useI18n } from "@/i18n";
-import { useActiveEnvironment, useStatus } from "@/hooks/api";
+import { healthCheck } from "@/api/system";
+import { data, useActiveEnvironment, useStatus } from "@/hooks/api";
 import { usePreferences, type ThemeMode } from "@/hooks/preferences";
 import { isDesktop } from "@/lib/desktop";
 import { AppIcon, type IconName } from "@/components/icon/AppIcon";
@@ -80,6 +81,14 @@ function Navigation() {
   const { setOpenMobile } = useSidebar();
   const prefs = usePreferences(),
     { environments, environment: active } = useActiveEnvironment();
+  // Read the running daemon's version rather than hardcoding it: the build in
+  // the window is whatever that daemon serves, so a literal here drifts on every
+  // release (v0.5.0 shipped a sidebar still claiming v0.4.0).
+  const version = useQuery({
+    queryKey: ["health"],
+    queryFn: () => data(healthCheck()).then((health) => health.version),
+    staleTime: Infinity,
+  }).data;
   return (
     <Sidebar collapsible="icon" variant="inset">
       <SidebarHeader className="p-3">
@@ -155,7 +164,7 @@ function Navigation() {
         <div className="flex items-center gap-2 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
           <AppIcon name="shield" />
           <span>
-            RustFRP <span className="ml-1">v0.4.0</span>
+            RustFRP <span className="ml-1">v{version ?? "—"}</span>
           </span>
         </div>
       </SidebarFooter>
