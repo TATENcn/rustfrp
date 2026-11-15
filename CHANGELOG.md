@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.4] - 2026-11-15
+
+### Fixed
+
+- The desktop app no longer dies when the tray icon cannot be created. The error
+  was returned from Tauri's `setup` hook, which turns it into a panic that kills
+  the process before any window or data directory exists — observed on Windows as
+  `Failed to setup app: ... tray icon error: Access is denied`. A tray is a
+  convenience, so a failure now logs a warning and the window works as usual.
+
 ## [0.5.3] - 2026-11-15
 
 ### Fixed
