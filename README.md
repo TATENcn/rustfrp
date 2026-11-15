@@ -96,7 +96,7 @@ RustFRP 的核心链路是：**SQLite 保存期望状态 → 生成并校验 TOM
 
 ### Docker 单容器
 
-使用 [v0.4.0](https://github.com/TATENcn/rustfrp/releases/tag/v0.4.0) 镜像（Linux amd64 / arm64）：
+使用 [v0.5.0](https://github.com/TATENcn/rustfrp/releases/tag/v0.5.0) 镜像（Linux amd64 / arm64）：
 
 ```bash
 export RUSTFRP_API_TOKEN="$(openssl rand -hex 32)"
@@ -107,7 +107,7 @@ docker run -d --name rustfrp --restart unless-stopped \
   -p 127.0.0.1:7900:7900 \
   -v rustfrp-data:/data \
   -e RUSTFRP_API_TOKEN \
-  ghcr.io/tatencn/rustfrp:0.4.0
+  ghcr.io/tatencn/rustfrp:0.5.0
 ```
 
 打开 <http://127.0.0.1:7900/>，输入上面的 Token。容器默认不下载 frpc，即使尚未安装 frpc，也能打开前端、编辑配置和使用管理 API。数据保存在 `rustfrp-data` 卷中。

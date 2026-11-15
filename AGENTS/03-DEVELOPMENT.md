@@ -107,29 +107,19 @@ rustfrp-manager/
 │           ├── Cargo.toml
 │           └── src/
 ├── plugins/                      # 官方插件
-│   ├── gui/                      # Tauri GUI
-│   │   ├── src-tauri/
-│   │   │   ├── Cargo.toml
-│   │   │   ├── tauri.conf.json
-│   │   │   ├── icons/
-│   │   │   └── src/
-│   │   │       ├── main.rs       # Tauri 入口
-│   │   │       ├── commands.rs   # Tauri IPC commands（薄层，调用 Core）
-│   │   │       └── state.rs      # 全局 AppState
-│   │   ├── src/                  # Vue 前端
-│   │   │   ├── App.vue
-│   │   │   ├── main.ts
-│   │   │   ├── router/
-│   │   │   ├── stores/           # Pinia stores
-│   │   │   ├── components/       # 可复用组件
-│   │   │   ├── views/            # 页面视图
-│   │   │   ├── locales/          # i18n 翻译文件（zh-CN/ + en/）
-│   │   │   └── assets/
-│   │   ├── index.html
-│   │   ├── package.json
-│   │   ├── vite.config.ts
-│   │   ├── tailwind.config.js
-│   │   └── tsconfig.json
+│   ├── gui/                      # 桌面端（Tauri v2 外壳）
+│   │   ├── app-icon.png          # 1024px 图标母版（just desktop icons 重新生成各平台图标）
+│   │   ├── app-icon.svg
+│   │   ├── package.json          # 仅 @tauri-apps/cli，脚本转发到 src-tauri
+│   │   └── src-tauri/            # 不在根 workspace 内，见第十四节
+│   │       ├── Cargo.toml
+│   │       ├── build.rs
+│   │       ├── tauri.conf.json
+│   │       ├── icons/
+│   │       └── src/
+│   │           ├── main.rs       # 日志/panic hook + 启动外壳
+│   │           └── lib.rs        # 托盘、窗口、退出握手（无 IPC command）
+│   ├── webui/                    # 前端（浏览器 / 容器 / 桌面共用同一份产物）
 │   ├── traffic-monitor/          # WASM 流量监控插件
 │   │   ├── Cargo.toml
 │   │   ├── manifest.json
@@ -1212,3 +1202,99 @@ impl FrpBinary {
 - [ ] 新增 CoreError 变体是否定义了错误码（`code()`）和 i18n 键（`user_message_key()`）？
 - [ ] 日志中是否对敏感字段使用了 `#[instrument(skip(...))]`？
 - [ ] 是否在 `#[cfg(debug_assertions)]` 下添加了调试命令？
+
+## 十四、桌面端（Tauri 外壳）
+
+### 14.1 决策：外壳复用 daemon 的 HTTP API，不引入 IPC
+
+桌面端**不重写业务层**，也不注册任何 `#[tauri::command]`。窗口是一个指向
+`http://127.0.0.1:<port>/` 的 webview，后端就是现有 daemon 进程内的 axum 服务
+（`rustfrp_daemon::DesktopSession`）。原 `commands.rs` 薄层设计因此作废。
+
+| 维度 | 复用 HTTP（采用） | 重写 IPC commands（否决） |
+|---|---|---|
+| 前端改动 | 2 处（隐藏登出、401 不清 token） | 13 个 `api/*.ts` 全改 `invoke` |
+| 后端代码 | 0 行业务逻辑 | 镜像 40+ 端点，双份真相 |
+| 文件上传/下载 | 原生 HTTP 直通 | 需插件 + 权限 |
+| 浏览器/容器部署 | 完全不变 | 语义分叉风险 |
+
+前端同一份产物服务三种运行形态，用 `window.__RUSTFRP_DESKTOP__` 区分（`plugins/webui/src/lib/desktop.ts`）。
+
+### 14.2 生命周期
+
+```
+单实例插件（DBus 名 com.tatencn.rustfrp.SingleInstance）
+  ↓ 第二次启动 → 聚焦已有窗口并退出
+InstanceLock::acquire(~/.rustfrp/instance.lock)   ← 与 CLI daemon 互斥
+  ↓ 失败 → 弹窗说明"另一个实例正在使用该数据目录"，退出码 1
+ClientCore::new_with_frpc(db, runtime, None, auto_download=false)
+  ↓
+bind_api_listener("127.0.0.1:0") → 拿到 OS 分配端口
+  ↓
+serve_with_listener(core, listener, BearerToken(随机 256bit), "desktop bearer token")
+  ↓
+WebviewWindowBuilder(WebviewUrl::External(url))
+  .initialization_script("localStorage.setItem('api_token', …); window.__RUSTFRP_DESKTOP__ = true")
+```
+
+退出：`RunEvent::ExitRequested` → `api.prevent_exit()` → `SignalHandler::request_shutdown()`
+→ `ClientCore::run` 观察到标志 → `plugin_manager.stop_all()` + `process_manager.shutdown_all()`
+（逐个 SIGTERM → 等 3s → SIGKILL）→ `AppHandle::exit(0)`。
+
+**不用真信号**：给自己发 SIGTERM 会连 webview 一起杀掉，teardown 来不及完成。
+`SignalHandler::request_shutdown()` 就是为了这条路径新增的。
+
+窗口关闭按钮 = 隐藏到托盘，frpc 继续跑。托盘菜单：显示主窗口 / 打开数据目录 / 退出。
+
+### 14.3 安全边界
+
+| 项 | 决策 |
+|---|---|
+| 监听地址 | 固定 `127.0.0.1`，端口由 OS 分配（dev 模式固定 7900，供 Vite 代理） |
+| 鉴权 | 启动时生成 256bit token（两个 v4 UUID），仅存于内存与 webview 的 `localStorage` |
+| token 传递 | `initialization_script` 注入；**绝不进 URL**（否则落 history / referer） |
+| IPC surface | 0 个 command、0 个 capability 权限、`withGlobalTauri: false` |
+| 数据目录 | `RUSTFRP_DATA_DIR` 可覆盖，默认 `~/.rustfrp` |
+
+残留风险：任何本地进程都能连上 loopback 端口，token 是唯一屏障；
+`/api/v1/config/export` 会导出含 token 的整库，故 token 必须保密。
+
+### 14.4 为什么不在根 workspace 内
+
+`plugins/gui/src-tauri` 在根 `Cargo.toml` 的 `exclude` 里。理由：GTK/WebKit 系统依赖
+不应成为 `cargo build`/`cargo test` 在所有机器（含无桌面的 CI runner）上的前置条件。
+
+代价与对应措施：
+
+- 第二份 `Cargo.lock` → 桌面 job 单独跑 `cargo clippy -D warnings`
+- 主 workspace 的 `cargo fmt --check` 不覆盖 → `.github/workflows/desktop.yml` 单独跑 fmt
+
+### 14.5 本地开发
+
+```
+just desktop setup        # 安装 webui + Tauri CLI 依赖
+just desktop dev          # Vite:5173 + API:127.0.0.1:7900 + 原生窗口
+```
+
+`tauri dev` 固定占用 `127.0.0.1:7900`（Vite 代理指向它），因此**不能与
+`just dev daemon` 同时运行**——两者会争同一端口，且共用 `~/.rustfrp` 时
+`instance.lock` 会拒绝第二个进程。开发桌面端时请先停掉 dev daemon。
+
+```
+just desktop build-linux  # 构建 deb + AppImage
+just desktop check        # cargo fmt --check + clippy
+just desktop icons        # 用 app-icon.png 重新生成各平台图标
+```
+
+Linux 需要系统依赖（Arch）：
+
+```
+sudo pacman -S --needed webkit2gtk-4.1 base-devel openssl librsvg \
+  libappindicator-gtk3 xdotool patchelf
+```
+
+### 14.6 调试
+
+`just desktop dev` 下窗口加载 Vite dev server（热更新），API 仍是真实 daemon。
+`RUSTFRP_LOG_MODE=console just desktop dev` 让日志回到 stderr；默认写入
+`~/.rustfrp/logs/rustfrp.log`（JSON），因为 GUI 进程在 Windows/macOS 上没有控制台。
