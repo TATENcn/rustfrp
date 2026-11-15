@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.5.3] - 2026-11-15
+
+### Fixed
+
+- The desktop app no longer flashes a console window. It is a GUI process, and
+  on Windows a console child of a windowless parent either shows its own window
+  or fails with `STATUS_DLL_INIT_FAILED`; every `frpc` invocation (`verify`,
+  `reload`, the supervised instance, and each restart) hit this. All four spawn
+  sites now set `CREATE_NO_WINDOW` through one shared helper. Measured from a
+  real GUI-subsystem parent: without the flag the child exits `-1073741502`
+  (`0xC0000142`), with it the child reports `GetConsoleWindow() == 0` and
+  succeeds.
+- Startup restores only the profiles the user left running, instead of every
+  profile that has a generated TOML. A profile whose frps was unreachable
+  retried on every launch (one spawn plus three backoffs), which on the desktop
+  shell meant a window appearing and vanishing in a loop. The intent is already
+  persisted in `profile_runtime.desired_running` by the start/stop switch and
+  the API.
+
 ## [0.5.2] - 2026-11-15
 
 ### Fixed

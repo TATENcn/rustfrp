@@ -134,6 +134,41 @@ impl ClientCore {
         })
     }
 
+    /// Start an frpc instance for every profile the user left running.
+    ///
+    /// `desired_running` is the user's intent, written by the start/stop switch
+    /// (GUI) and by `POST /api/v1/profiles/{id}/start|stop`. Restoring on intent
+    /// rather than on "a TOML exists" matters for unreachable servers: a failed
+    /// `frpc` costs four spawns (initial + three backoffs), and doing that on
+    /// every launch makes the desktop shell flash a window each time for a
+    /// profile the user may not even care about.
+    ///
+    /// Returns `(started, skipped)` where `skipped` counts profiles the user had
+    /// stopped.
+    async fn restore_desired_running(&self) -> Result<(u32, u32)> {
+        let mut started = 0;
+        let mut skipped = 0;
+        for profile in self.db.list_profiles().await? {
+            let Some(id) = profile.id else { continue };
+            if !self.db.profile_desired_running(id).await? {
+                skipped += 1;
+                continue;
+            }
+            if !profile_toml_path(&self.config_dir, id, &profile.name).exists() {
+                continue;
+            }
+            match self.process_manager.start(id, &profile.name).await {
+                Ok(()) => started += 1,
+                Err(error) => tracing::warn!(
+                    profile_id = id,
+                    %error,
+                    "frpc unavailable; keep management API available for repair"
+                ),
+            }
+        }
+        Ok((started, skipped))
+    }
+
     /// Access the database (for daemon crate / API handlers).
     pub fn db(&self) -> &Database {
         &self.db
@@ -194,22 +229,13 @@ impl ClientCore {
             tracing::info!(count = toml_files.len(), "frpc TOML configs generated");
         }
 
-        // 3. Start frpc for each profile that has a generated TOML
-        let profiles = self.db.list_profiles().await?;
-        let mut started = 0;
-        for profile in &profiles {
-            let Some(id) = profile.id else { continue };
-            let toml_path = profile_toml_path(&self.config_dir, id, &profile.name);
-            if toml_path.exists() {
-                {
-                    match self.process_manager.start(id, &profile.name).await {
-                        Ok(()) => started += 1,
-                        Err(error) => {
-                            tracing::warn!(profile_id=id, %error, "frpc unavailable; keep management API available for repair")
-                        }
-                    }
-                }
-            }
+        // 3. Start frpc for each profile the user left running.
+        let (started, skipped) = self.restore_desired_running().await?;
+        if skipped > 0 {
+            tracing::info!(
+                count = skipped,
+                "profiles not started (stopped by the user)"
+            );
         }
 
         if started == 0 {
@@ -314,6 +340,81 @@ fn expand_tilde(path: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Startup restores what the user left running, not "everything with a TOML".
+    ///
+    /// A stopped profile still has its generated TOML; restoring on TOML presence
+    /// is what made an unreachable server retry on every launch.
+    #[tokio::test]
+    async fn restore_starts_only_profiles_the_user_left_running() {
+        let temp = tempfile::tempdir().unwrap();
+        let runtime = temp.path().join("runtime");
+        std::fs::create_dir_all(&runtime).unwrap();
+
+        // A stub frpc that records every invocation, so "was it attempted" is
+        // observable without a real FRP binary.
+        let marker = temp.path().join("invocations");
+        let stub = temp
+            .path()
+            .join(if cfg!(windows) { "frpc.cmd" } else { "frpc" });
+        #[cfg(unix)]
+        std::fs::write(
+            &stub,
+            format!("#!/bin/sh\necho \"$2\" >> {}\nexit 0\n", marker.display()),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let core = ClientCore::new_with_manager(
+            temp.path().join("config.db").to_str().unwrap(),
+            runtime.to_str().unwrap(),
+            Some(stub.clone()),
+            false,
+            rustfrp_bin::manager::VersionManager::new(temp.path().join("versions")),
+        )
+        .await
+        .unwrap();
+
+        let mut ids = Vec::new();
+        for (name, desired) in [("kept-running", true), ("user-stopped", false)] {
+            let profile = crate::config::model::FrpsProfile {
+                name: name.into(),
+                ..Default::default()
+            };
+            let id = core.db().insert_profile(&profile).await.unwrap();
+            core.db()
+                .set_profile_desired_running(id, desired)
+                .await
+                .unwrap();
+            // Both have a generated TOML: presence alone must not decide.
+            std::fs::write(
+                crate::config::generator::profile_toml_path(&runtime, id, name),
+                "",
+            )
+            .unwrap();
+            ids.push((id, name));
+        }
+
+        let (_, skipped) = core.restore_desired_running().await.unwrap();
+        assert_eq!(skipped, 1, "only the user-stopped profile is skipped");
+
+        #[cfg(unix)]
+        {
+            let recorded = std::fs::read_to_string(&marker).unwrap_or_default();
+            assert!(
+                recorded.contains(&ids[0].0.to_string()),
+                "the kept profile must be attempted, got: {recorded:?}"
+            );
+            assert!(
+                !recorded.contains(&ids[1].0.to_string()),
+                "the stopped profile must never be attempted, got: {recorded:?}"
+            );
+        }
+    }
 
     #[tokio::test]
     async fn offline_initialization_without_frpc() {
