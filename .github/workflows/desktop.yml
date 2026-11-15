@@ -1,0 +1,96 @@
+name: Desktop
+
+# The desktop shell lives outside the Cargo workspace (its GTK/WebKit system
+# dependencies must not become a prerequisite for every Rust job) and outside the
+# WebUI workflow (it packs a native window around those assets). Pull requests
+# therefore run the full chain on Linux only; the other platforms are built when
+# a release tag is pushed, in release.yml.
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [dev, main]
+    paths:
+      - '.github/workflows/desktop.yml'
+      - 'crates/rustfrp-daemon/**'
+      - 'crates/client/**'
+      - 'crates/common/**'
+      - 'plugins/webui/**'
+      - 'plugins/gui/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Build Linux desktop bundles
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      # Tauri needs WebKitGTK and an appindicator implementation; the release job
+      # for the same set of packages lives in release.yml.
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev libssl-dev patchelf libfuse2 file
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            plugins/gui/src-tauri -> target
+          key: desktop-${{ runner.os }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3'
+
+      - name: Install WebUI dependencies
+        working-directory: plugins/webui
+        run: bun install --frozen-lockfile
+
+      # `rustfrp-daemon` embeds this directory at compile time, so it must exist
+      # before any cargo command that builds the dependency (ci.yml does the same).
+      - name: Build embedded WebUI prerequisite
+        working-directory: plugins/webui
+        run: bun run build
+
+      # The shell crate is outside the workspace, so the workspace quality gate
+      # (ci.yml) does not cover it. Format and lint it here instead.
+      - name: Format
+        working-directory: plugins/gui/src-tauri
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        working-directory: plugins/gui/src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Install shell dependencies
+        working-directory: plugins/gui
+        run: bun install --frozen-lockfile
+
+      - name: Build bundles
+        working-directory: plugins/gui
+        run: bun run build:linux
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: rustfrp-desktop-linux
+          path: |
+            plugins/gui/src-tauri/target/release/bundle/deb/*.deb
+            plugins/gui/src-tauri/target/release/bundle/appimage/*.AppImage
+          # A silent empty artifact would look like a passing build.
+          if-no-files-found: error
+          retention-days: 7

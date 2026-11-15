@@ -203,8 +203,89 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  desktop:
+    name: Desktop bundle (${{ matrix.name }})
+    needs: [verify-tag, webui]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-amd64
+            os: ubuntu-22.04
+            bundles: deb,appimage
+            artifact: rustfrp_desktop_linux_amd64
+          # Tauri bundles cannot be cross-compiled: each platform runs its own
+          # runner and produces its own installers.
+          - name: windows-amd64
+            os: windows-latest
+            bundles: nsis,msi
+            artifact: rustfrp_desktop_windows_amd64
+          - name: darwin-amd64
+            os: macos-15-intel
+            bundles: dmg
+            artifact: rustfrp_desktop_darwin_amd64
+          - name: darwin-arm64
+            os: macos-15
+            bundles: dmg
+            artifact: rustfrp_desktop_darwin_arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: embedded-webui
+          path: plugins/webui/dist
+
+      - name: Install Tauri system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev libssl-dev patchelf libfuse2 file
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            plugins/gui/src-tauri -> target
+          key: desktop-${{ matrix.name }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3'
+
+      # `tauri build` runs the `beforeBuildCommand`, which reinstalls and
+      # rebuilds the WebUI; the artifact above only primes the cargo build of the
+      # daemon crates that embed it.
+      - name: Install shell dependencies
+        working-directory: plugins/gui
+        run: bun install --frozen-lockfile
+
+      # Code signing is not wired yet, and an empty `APPLE_*` value is not the
+      # same as an absent one: Tauri treats `APPLE_CERTIFICATE=""` as a real
+      # certificate and fails decoding it. Adding these secrets later means
+      # adding them here as well.
+      - name: Build desktop bundles
+        working-directory: plugins/gui
+        run: bun run tauri build --bundles ${{ matrix.bundles }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            plugins/gui/src-tauri/target/release/bundle/deb/*.deb
+            plugins/gui/src-tauri/target/release/bundle/appimage/*.AppImage
+            plugins/gui/src-tauri/target/release/bundle/nsis/*.exe
+            plugins/gui/src-tauri/target/release/bundle/msi/*.msi
+            plugins/gui/src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+
   release:
-    needs: [build, container]
+    needs: [build, container, desktop]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -214,7 +295,10 @@ jobs:
           path: artifacts
       - name: Flatten artifacts
         run: |
-          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.sha256' \) -exec cp {} . \;
+          find artifacts -type f \( \
+            -name '*.tar.gz' -o -name '*.zip' -o -name '*.sha256' \
+            -o -name '*.deb' -o -name '*.AppImage' -o -name '*.msi' -o -name '*.exe' -o -name '*.dmg' \
+          \) -exec cp {} . \;
           ls -la
       - uses: softprops/action-gh-release@v3
         with:
@@ -223,4 +307,9 @@ jobs:
             *.tar.gz.sha256
             *.zip
             *.zip.sha256
+            *.deb
+            *.AppImage
+            *.msi
+            *.exe
+            *.dmg
           generate_release_notes: true
