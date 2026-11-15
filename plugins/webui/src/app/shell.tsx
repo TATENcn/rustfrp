@@ -8,8 +8,9 @@ import {
 } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useI18n } from "@/i18n";
-import { useEnvironments, useStatus } from "@/hooks/api";
+import { useActiveEnvironment, useStatus } from "@/hooks/api";
 import { usePreferences, type ThemeMode } from "@/hooks/preferences";
+import { isDesktop } from "@/lib/desktop";
 import { AppIcon, type IconName } from "@/components/icon/AppIcon";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -78,10 +79,7 @@ function Navigation() {
   const location = useLocation();
   const { setOpenMobile } = useSidebar();
   const prefs = usePreferences(),
-    environments = useEnvironments();
-  const active =
-    environments.data?.find((e) => e.id === prefs.environmentId) ??
-    environments.data?.find((e) => e.is_default);
+    { environments, environment: active } = useActiveEnvironment();
   return (
     <Sidebar collapsible="icon" variant="inset">
       <SidebarHeader className="p-3">
@@ -249,6 +247,9 @@ function Header() {
           variant="ghost"
           size="icon"
           aria-label={t("auth.logout")}
+          // The desktop shell injects its own token on every launch; a logout
+          // there would strand the window on a login page it cannot satisfy.
+          className={isDesktop() ? "hidden" : undefined}
           onClick={() => {
             localStorage.removeItem("api_token");
             client.clear();
