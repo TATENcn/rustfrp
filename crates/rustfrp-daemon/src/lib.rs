@@ -6,6 +6,9 @@
 
 #[cfg(feature = "http-api")]
 pub mod api;
+#[cfg(feature = "http-api")]
+pub mod desktop;
+pub mod instance;
 pub mod metrics;
 pub mod traffic;
 
@@ -13,4 +16,7 @@ pub mod traffic;
 pub mod web;
 
 #[cfg(feature = "http-api")]
-pub use api::{serve, serve_with_auth, serve_with_policy};
+pub use api::{bind_api_listener, serve, serve_with_auth, serve_with_listener, serve_with_policy};
+#[cfg(feature = "http-api")]
+pub use desktop::{DesktopError, DesktopOptions, DesktopSession};
+pub use instance::{InstanceLock, InstanceLockError};

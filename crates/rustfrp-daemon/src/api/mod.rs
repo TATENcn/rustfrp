@@ -356,17 +356,27 @@ pub fn create_router(state: ApiState, auth: impl AuthMiddleware) -> Router {
         ))
 }
 
-/// Start the HTTP API server.
+/// Bind the HTTP API listener without accepting connections yet.
 ///
-/// Launches the axum server on the given listen address and runs the client core
-/// lifecycle concurrently. Either side exiting triggers graceful shutdown of the
-/// other via `tokio::select!`.
+/// Splitting the bind from the serve loop lets an embedding host (the desktop
+/// shell) learn the actual port before a webview navigates to it. Passing
+/// `127.0.0.1:0` asks the OS for a free port, which keeps the desktop API
+/// unreachable from well-known addresses.
+pub async fn bind_api_listener(listen_addr: &str) -> anyhow::Result<TcpListener> {
+    let addr: SocketAddr = listen_addr.parse()?;
+    Ok(TcpListener::bind(addr).await?)
+}
+
+/// Start the HTTP API server on an already bound listener.
+///
+/// Runs the axum server and the client core lifecycle concurrently. Either
+/// side exiting triggers graceful shutdown of the other via `tokio::select!`.
 ///
 /// `auth` selects the credential check; every other detail is identical, so the
 /// entry points below differ only in this argument.
-pub async fn serve_with(
+pub async fn serve_with_listener(
     core: ClientCore,
-    listen_addr: &str,
+    listener: TcpListener,
     auth: impl AuthMiddleware,
     auth_description: &str,
 ) -> anyhow::Result<()> {
@@ -385,10 +395,9 @@ pub async fn serve_with(
 
     let router = create_router(state, auth);
 
-    let addr: SocketAddr = listen_addr.parse()?;
+    let addr = listener.local_addr()?;
     tracing::info!(%addr, auth = auth_description, "HTTP API server starting");
 
-    let listener = TcpListener::bind(addr).await?;
     let api_server = axum::serve(listener, router.into_make_service());
 
     tokio::select! {
@@ -406,6 +415,19 @@ pub async fn serve_with(
 
     tracing::info!("Daemon shut down");
     Ok(())
+}
+
+/// Start the HTTP API server on the given listen address.
+///
+/// Binds the address and delegates to [`serve_with_listener`].
+pub async fn serve_with(
+    core: ClientCore,
+    listen_addr: &str,
+    auth: impl AuthMiddleware,
+    auth_description: &str,
+) -> anyhow::Result<()> {
+    let listener = bind_api_listener(listen_addr).await?;
+    serve_with_listener(core, listener, auth, auth_description).await
 }
 
 /// Serve without authentication.

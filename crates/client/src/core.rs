@@ -157,6 +157,14 @@ impl ClientCore {
         &self.state
     }
 
+    /// Access the shutdown flag observed by [`ClientCore::run`].
+    ///
+    /// Embedded hosts (desktop tray) request shutdown through this handle
+    /// instead of sending themselves a signal.
+    pub fn signal_handler(&self) -> &SignalHandler {
+        &self.signal_handler
+    }
+
     /// Run the full client lifecycle:
     ///
     /// 1. Load plugins
