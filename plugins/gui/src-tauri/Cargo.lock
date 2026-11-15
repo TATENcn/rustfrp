@@ -3562,7 +3562,7 @@ dependencies = [
 
 [[package]]
 name = "rustfrp-bin"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "dirs 5.0.1",
  "flate2",
@@ -3579,7 +3579,7 @@ dependencies = [
 
 [[package]]
 name = "rustfrp-client"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3603,7 +3603,7 @@ dependencies = [
 
 [[package]]
 name = "rustfrp-common"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -3617,7 +3617,7 @@ dependencies = [
 
 [[package]]
 name = "rustfrp-daemon"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "anyhow",
  "axum",
@@ -3645,7 +3645,7 @@ dependencies = [
 
 [[package]]
 name = "rustfrp-desktop"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "rustfrp-common",
  "rustfrp-daemon",

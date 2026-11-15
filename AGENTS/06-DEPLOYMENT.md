@@ -148,10 +148,10 @@ rustfrp-agent
 
 ```bash
 # Debian / Ubuntu
-sudo apt install ./RustFRP_0.5.3_amd64.deb
+sudo apt install ./RustFRP_0.5.4_amd64.deb
 
 # 任意发行版（无 root）
-chmod +x RustFRP_0.5.3_amd64.AppImage && ./RustFRP_0.5.3_amd64.AppImage
+chmod +x RustFRP_0.5.4_amd64.AppImage && ./RustFRP_0.5.4_amd64.AppImage
 ```
 
 Linux 运行时依赖：`libwebkit2gtk-4.1-0`、`libayatana-appindicator3-1`、`libgtk-3-0`。
@@ -255,18 +255,18 @@ volumes:
 ### Windows
 
 ```
-RustFRP_0.5.3_x64_en-US.msi
+RustFRP_0.5.4_x64_en-US.msi
   ├── 安装位置：%ProgramFiles%\RustFRP\
   ├── 开始菜单快捷方式
   └── 卸载：控制面板 → 程序和功能（不删除 %USERPROFILE%\.rustfrp 数据目录）
 
-RustFRP_0.5.3_x64-setup.exe   # NSIS，可无管理员权限安装到用户目录
+RustFRP_0.5.4_x64-setup.exe   # NSIS，可无管理员权限安装到用户目录
 ```
 
 ### macOS
 
 ```
-RustFRP_0.5.3_aarch64.dmg
+RustFRP_0.5.4_aarch64.dmg
   ├── 拖入 /Applications/
   ├── 首次打开需右键 → 打开（未签名构建）
   └── 已签名/公证构建可直接打开
@@ -275,8 +275,8 @@ RustFRP_0.5.3_aarch64.dmg
 ### Linux
 
 ```
-RustFRP_0.5.3_amd64.deb        # 推荐：自动拉取 WebKitGTK 与 AppIndicator 依赖
-RustFRP_0.5.3_amd64.AppImage   # 无 root：chmod +x 后运行；宿主需 libfuse2
+RustFRP_0.5.4_amd64.deb        # 推荐：自动拉取 WebKitGTK 与 AppIndicator 依赖
+RustFRP_0.5.4_amd64.AppImage   # 无 root：chmod +x 后运行；宿主需 libfuse2
 
 deb 内容：
   ├── /usr/bin/rustfrp-desktop
