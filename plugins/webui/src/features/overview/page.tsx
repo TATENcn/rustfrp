@@ -2,8 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { getMetricsHistory } from "@/api/metrics";
-import { data, useEnvironments, useStatus } from "@/hooks/api";
-import { usePreferences } from "@/hooks/preferences";
+import { data, useActiveEnvironment, useStatus } from "@/hooks/api";
 import { useI18n } from "@/i18n";
 import { formatBytes, formatDuration, formatPercent } from "@/i18n/format";
 import { extrapolateUptime } from "@/stores/uptime";
@@ -29,14 +28,10 @@ import { TrafficPanel } from "./traffic-panel";
 export default function Overview() {
   const { t, text, locale } = useI18n(),
     status = useStatus(),
-    prefs = usePreferences(),
-    environments = useEnvironments();
+    { environments, environment } = useActiveEnvironment();
   const [period, setPeriod] = useState("60"),
     [metric, setMetric] = useState("cpu"),
     [now, setNow] = useState(Date.now());
-  const environment =
-    environments.data?.find((e) => e.id === prefs.environmentId) ??
-    environments.data?.find((e) => e.is_default);
   const metrics = useQuery({
     queryKey: ["metrics", environment?.id],
     queryFn: () => data(getMetricsHistory(environment?.id)),

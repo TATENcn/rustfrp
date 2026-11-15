@@ -135,7 +135,7 @@ fn hidden_resource() -> (StatusCode, Json<ApiResponse<()>>) {
     )
 }
 
-async fn ensure_environment_tenant(
+pub(crate) async fn ensure_environment_tenant(
     state: &ApiState,
     id: i64,
     tenant: &str,

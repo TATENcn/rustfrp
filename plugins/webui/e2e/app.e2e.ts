@@ -467,7 +467,8 @@ test("API failures show a retry state without hiding previous data", async ({
       .getByRole("complementary", { name: "Processes", exact: true })
       .getByText("Edge server", { exact: true }),
   ).toBeVisible();
-  await page.route("**/api/v1/status", (route) =>
+  // Status is requested with the selected environment: ?environment_id=<id>.
+  await page.route(/\/api\/v1\/status(\?|$)/, (route) =>
     route.fulfill({
       status: 500,
       json: { success: false, error: { message: "Database unavailable" } },

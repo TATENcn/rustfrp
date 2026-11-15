@@ -6,14 +6,25 @@
 //! - GET  /api/v1/reload/{task_id} — check reload task status
 //! - GET  /api/v1/health           — health check
 
-use axum::extract::{Path, State};
+use std::collections::HashSet;
+
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use rustfrp_client::process::diagnostic::ProcessFailure;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
+use super::auth::AuthIdentity;
 use super::response::ApiResponse;
 use super::state::{ApiState, ReloadPhase, ReloadTaskStatus};
+
+/// Query parameters for the status endpoint.
+#[derive(Debug, Default, Deserialize)]
+pub struct StatusQuery {
+    /// Restrict profile-derived counts and process info to one environment.
+    /// Proxies are reusable across profiles, so `total_proxies` stays tenant-wide.
+    pub environment_id: Option<i64>,
+}
 
 /// Status response payload
 #[derive(Debug, Serialize)]
@@ -41,13 +52,21 @@ pub struct ProcessInfoResponse {
 }
 
 /// GET /api/v1/status — daemon and frpc process status
+///
+/// Counts and process info are tenant-scoped, and profile-derived values
+/// (`total_profiles`, `total_bindings`, `total_visitors`, `active_frpc_instances`,
+/// `processes`) are additionally narrowed to `environment_id` when supplied.
+/// `total_proxies` stays tenant-wide: a proxy is reusable across profiles and so
+/// has no single owning environment.
 pub async fn status(
     State(state): State<ApiState>,
+    Extension(identity): Extension<AuthIdentity>,
+    Query(query): Query<StatusQuery>,
 ) -> Result<Json<ApiResponse<StatusResponse>>, (StatusCode, Json<ApiResponse<()>>)> {
     let app_state = state.app_state.read().await;
     let state_str = app_state.to_string();
 
-    let profiles = state.db.list_profiles().await.map_err(|e| {
+    let fail = |e: rustfrp_client::error::ClientError| {
         (
             super::response::status_code(&e),
             Json(ApiResponse {
@@ -57,45 +76,59 @@ pub async fn status(
                 error: Some(super::response::ApiError::from_client_error(&e)),
             }),
         )
-    })?;
+    };
 
-    let proxies = state.db.list_proxies().await.map_err(|e| {
-        (
-            super::response::status_code(&e),
-            Json(ApiResponse {
-                success: false,
-                data: None,
-                count: None,
-                error: Some(super::response::ApiError::from_client_error(&e)),
-            }),
-        )
-    })?;
+    // An unknown or foreign environment is reported like any other foreign id:
+    // hidden rather than confirmed absent.
+    let scoped: Option<HashSet<i64>> = match query.environment_id {
+        Some(id) => {
+            super::environments::ensure_environment_tenant(&state, id, &identity.tenant).await?;
+            Some(
+                state
+                    .db
+                    .environment_profile_ids(id)
+                    .await
+                    .map_err(fail)?
+                    .into_iter()
+                    .collect(),
+            )
+        }
+        None => None,
+    };
+    let in_scope = |profile_id: i64| scoped.as_ref().is_none_or(|ids| ids.contains(&profile_id));
 
-    let bindings = state.db.list_bindings().await.map_err(|e| {
-        (
-            super::response::status_code(&e),
-            Json(ApiResponse {
-                success: false,
-                data: None,
-                count: None,
-                error: Some(super::response::ApiError::from_client_error(&e)),
-            }),
-        )
-    })?;
+    let profiles = state
+        .db
+        .list_profiles_for_tenant(&identity.tenant)
+        .await
+        .map_err(fail)?;
+    let profiles = profiles
+        .into_iter()
+        .filter(|p| p.id.is_none_or(in_scope))
+        .count();
 
-    let visitors = state.db.list_visitors().await.map_err(|e| {
-        (
-            super::response::status_code(&e),
-            Json(ApiResponse {
-                success: false,
-                data: None,
-                count: None,
-                error: Some(super::response::ApiError::from_client_error(&e)),
-            }),
-        )
-    })?;
+    let proxies = state
+        .db
+        .list_proxies_for_tenant(&identity.tenant)
+        .await
+        .map_err(fail)?;
+
+    let bindings = state
+        .db
+        .list_bindings_for_tenant(&identity.tenant)
+        .await
+        .map_err(fail)?;
+    let bindings = bindings.iter().filter(|b| in_scope(b.profile_id)).count();
+
+    let visitors = state
+        .db
+        .list_visitors_for_tenant(&identity.tenant)
+        .await
+        .map_err(fail)?;
+    let visitors = visitors.iter().filter(|v| in_scope(v.profile_id)).count();
 
     let mut process_infos = state.process_manager.list_running().await;
+    process_infos.retain(|info| in_scope(info.profile_id));
 
     // Fill in profile names
     for info in &mut process_infos {
@@ -125,10 +158,10 @@ pub async fn status(
         state: state_str,
         uptime_secs,
         active_frpc_instances: active_count,
-        total_profiles: profiles.len(),
+        total_profiles: profiles,
         total_proxies: proxies.len(),
-        total_bindings: bindings.len(),
-        total_visitors: visitors.len(),
+        total_bindings: bindings,
+        total_visitors: visitors,
         processes,
     })))
 }
@@ -266,4 +299,145 @@ pub async fn health() -> Json<ApiResponse<HealthResponse>> {
 pub struct HealthResponse {
     pub status: String,
     pub version: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::auth::AuthIdentity;
+    use rustfrp_client::config::model::{BindingRule, FrpsProfile, LocalProxy, LocalVisitor};
+    use rustfrp_client::db::{environment::Environment, migrate, Database};
+    use rustfrp_client::process::manager::ProcessManager;
+    use rustfrp_client::ClientState;
+    use rustfrp_common::signal::SignalHandler;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    /// Counts and process rows follow `environment_id`, while proxies stay
+    /// tenant-wide because a proxy can be bound by profiles in any environment.
+    #[tokio::test]
+    async fn status_counts_and_processes_follow_the_selected_environment() {
+        let root = tempfile::tempdir().unwrap();
+        let db = Database::open(root.path().join("test.db").to_str().unwrap())
+            .await
+            .unwrap();
+        migrate::run(&*db.lock().await).unwrap();
+
+        let first = db
+            .insert_profile(&FrpsProfile {
+                name: "first".into(),
+                server_addr: "127.0.0.1".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let second = db
+            .insert_profile(&FrpsProfile {
+                name: "second".into(),
+                server_addr: "127.0.0.1".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let other = db
+            .insert_environment(&Environment {
+                name: "other".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        db.set_profile_environment(second, other).await.unwrap();
+
+        let proxy = db
+            .insert_proxy(&LocalProxy {
+                name: "shared".into(),
+                local_port: 8080,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        for profile_id in [first, second] {
+            db.insert_binding(&BindingRule {
+                profile_id,
+                proxy_id: proxy,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+            db.insert_visitor(&LocalVisitor {
+                name: format!("visitor-{profile_id}"),
+                server_name: "server".into(),
+                profile_id,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        }
+
+        let state = ApiState::new(
+            db,
+            ProcessManager::new(
+                root.path().into(),
+                "/unused/frpc".into(),
+                SignalHandler::new(),
+            ),
+            root.path().into(),
+            Arc::new(RwLock::new(ClientState::Ready)),
+        );
+        let identity = AuthIdentity {
+            name: "test".into(),
+            tenant: "default".into(),
+            scopes: vec!["*".into()],
+        };
+
+        let all = status(
+            State(state.clone()),
+            Extension(identity.clone()),
+            Query(StatusQuery::default()),
+        )
+        .await
+        .unwrap()
+        .0
+        .data
+        .unwrap();
+        assert_eq!(all.total_profiles, 2);
+        assert_eq!(all.total_proxies, 1);
+        assert_eq!(all.total_bindings, 2);
+        assert_eq!(all.total_visitors, 2);
+
+        let scoped = status(
+            State(state.clone()),
+            Extension(identity.clone()),
+            Query(StatusQuery {
+                environment_id: Some(other),
+            }),
+        )
+        .await
+        .unwrap()
+        .0
+        .data
+        .unwrap();
+        assert_eq!(scoped.total_profiles, 1);
+        assert_eq!(scoped.total_bindings, 1);
+        assert_eq!(scoped.total_visitors, 1);
+        assert_eq!(
+            scoped.total_proxies, 1,
+            "proxies are reusable across environments"
+        );
+        assert!(scoped.processes.iter().all(|p| p.profile_id == second));
+
+        // A foreign environment id behaves like any other hidden resource.
+        let foreign = status(
+            State(state),
+            Extension(AuthIdentity {
+                tenant: "elsewhere".into(),
+                ..identity
+            }),
+            Query(StatusQuery {
+                environment_id: Some(other),
+            }),
+        )
+        .await;
+        assert_eq!(foreign.unwrap_err().0, StatusCode::NOT_FOUND);
+    }
 }

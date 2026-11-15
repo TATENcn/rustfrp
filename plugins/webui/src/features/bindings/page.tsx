@@ -15,9 +15,8 @@ import {
   useBindings,
   useProfiles,
   useProxies,
-  useEnvironments,
+  useActiveEnvironment,
 } from "@/hooks/api";
-import { usePreferences } from "@/hooks/preferences";
 import { useI18n } from "@/i18n";
 import { AppIcon } from "@/components/icon/AppIcon";
 import { Button } from "@/components/ui/button";
@@ -47,8 +46,7 @@ export default function Bindings() {
     profiles = useProfiles(),
     proxies = useProxies(),
     bindings = useBindings(),
-    environments = useEnvironments(),
-    prefs = usePreferences();
+    { environments, environment } = useActiveEnvironment();
   const [active, setActive] = useState<FrpsProfile | null>(null),
     [selected, setSelected] = useState<number[]>([]),
     [search, setSearch] = useState("");
@@ -61,9 +59,6 @@ export default function Bindings() {
     (bindings.data ?? [])
       .filter((b) => b.profile_id === id && b.enabled)
       .map((b) => b.proxy_id);
-  const environment =
-    environments.data?.find((e) => e.id === prefs.environmentId) ??
-    environments.data?.find((e) => e.is_default);
   const visible = (profiles.data ?? []).filter(
     (p) => !environment || environment.profile_ids.includes(p.id!),
   );

@@ -10,10 +10,9 @@ import {
   data,
   useAction,
   useBindings,
-  useEnvironments,
   useProfiles,
+  useActiveEnvironment,
 } from "@/hooks/api";
-import { usePreferences } from "@/hooks/preferences";
 import { useI18n } from "@/i18n";
 import {
   defaultProfile,
@@ -40,15 +39,14 @@ import { BatchDialog } from "./batch";
 export default function Resources({ kind }: { kind: EntityKind }) {
   const { t, text } = useI18n(),
     navigate = useNavigate(),
-    location = useLocation(),
-    prefs = usePreferences();
+    location = useLocation();
   const query = useQuery({
     queryKey: [kind],
     queryFn: () => data(apiGet<Entity[]>(`/${kind}`)),
   });
   const profiles = useProfiles(),
     bindings = useBindings(),
-    environments = useEnvironments();
+    { environments, environment: active } = useActiveEnvironment();
   const [search, setSearch] = useState(""),
     [protocol, setProtocol] = useState("all"),
     [editing, setEditing] = useState<Entity | null>(null),
@@ -93,9 +91,6 @@ export default function Resources({ kind }: { kind: EntityKind }) {
     ({ id, environment }: { id: number; environment: number }) =>
       data(assignProfile(id, environment)),
   );
-  const active =
-    environments.data?.find((e) => e.id === prefs.environmentId) ??
-    environments.data?.find((e) => e.is_default);
   const getProtocol = (row: Entity) =>
     "transport_protocol" in row
       ? row.transport_protocol

@@ -8,6 +8,7 @@ import { listProxies } from "@/api/proxies";
 import { listVisitors } from "@/api/visitors";
 import { listBindings } from "@/api/bindings";
 import { listEnvironments } from "@/api/environments";
+import { usePreferences } from "@/hooks/preferences";
 export async function data<T>(request: Promise<ApiEnvelope<T>>): Promise<T> {
   const response = await request;
   if (!response.success || response.data === undefined)
@@ -26,10 +27,24 @@ export async function command(request: Promise<ApiEnvelope<unknown>>): Promise<v
       response.error?.code,
     );
 }
+/**
+ * Resolve the environment selected in the sidebar, falling back to the tenant's
+ * default. Every page that scopes data by environment goes through this so the
+ * dropdown, the queries, and their cache keys cannot disagree.
+ */
+export function useActiveEnvironment() {
+  const prefs = usePreferences();
+  const environments = useEnvironments();
+  const environment =
+    environments.data?.find((e) => e.id === prefs.environmentId) ??
+    environments.data?.find((e) => e.is_default);
+  return { environments, environment };
+}
 export function useStatus() {
+  const { environment } = useActiveEnvironment();
   return useQuery({
-    queryKey: ["status"],
-    queryFn: () => data(getStatus()),
+    queryKey: ["status", environment?.id ?? null],
+    queryFn: () => data(getStatus(environment?.id)),
     refetchInterval: (q) =>
       q.state.fetchFailureCount
         ? Math.min(60000, 3000 * 2 ** q.state.fetchFailureCount)
