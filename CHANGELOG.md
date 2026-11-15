@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.2] - 2026-11-15
+
+### Fixed
+
+- The desktop application ships its own icon. It previously carried the Vue
+  logo: the green triangle came from the favicon `plugins/webui` was initialised
+  with, and this is not a Vue project. The mark is now three stacked rounded
+  squares, authored as `plugins/gui/app-icon.svg` and rendered into every
+  platform icon and a real multi-size `favicon.ico` (16 through 256 px).
+- Launching the Windows build no longer opens an extra console window.
+  `main.rs` was missing `#![cfg_attr(not(debug_assertions), windows_subsystem =
+  "windows")]`, so the release binary was linked as a console program.
+
 ## [0.5.1] - 2026-11-15
 
 ### Fixed
