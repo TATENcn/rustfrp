@@ -142,6 +142,10 @@ jobs:
     permissions:
       contents: read
       packages: write
+    # The multi-arch push runs arm64 under QEMU. On 2026-11-15 it pushed the image
+    # and then hung in the build-push post-steps for 40+ minutes, which held the
+    # whole release hostage. Bound it so a stuck push fails this job instead.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
 
@@ -285,7 +289,11 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [build, container, desktop]
+    # `container` is deliberately absent: a stuck image push must not withhold
+    # the installers and CLI archives from the release. The workflow still fails
+    # overall, so a broken image stays visible.
+    needs: [build, desktop]
+    if: always() && needs.build.result == 'success' && needs.desktop.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
