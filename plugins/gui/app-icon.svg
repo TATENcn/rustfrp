@@ -1,14 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="1024" height="1024">
-  <!-- RustFRP mark: equilateral green triangle, dark inner triangle, notch at the base.
-       Geometry was fitted against plugins/webui/public/favicon.ico (matches at 32px). -->
-  <defs>
-    <mask id="notch">
-      <rect width="32" height="32" fill="#fff"/>
-      <path fill="#000" d="M16 23 L20.6 30.7 L11.4 30.7 Z"/>
-    </mask>
-  </defs>
-  <g mask="url(#notch)">
-    <path fill="#41b883" d="M16 2.2 L32 29.9 L0 29.9 Z"/>
-    <path fill="#34495e" d="M16 13.4 L25.757 30.3 L6.243 30.3 Z"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254" width="1254" height="1254">
+  <rect width="1254" height="1254" fill="#ffffff"/>
+  <rect x="199"  y="563" width="437" height="437" rx="26" fill="#c3c7d4"/>
+  <rect x="408"  y="391" width="437" height="437" rx="26" fill="#12b3a0"/>
+  <rect x="617"  y="219" width="437" height="437" rx="26" fill="#0b1220"/>
 </svg>
