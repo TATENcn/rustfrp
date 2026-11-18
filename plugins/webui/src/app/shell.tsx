@@ -54,7 +54,9 @@ type NavKey =
   | "proxies"
   | "bindings"
   | "visitors"
+  | "certificates"
   | "logs"
+  | "downloads"
   | "status";
 const sections: { key: string; items: [NavKey, string][] }[] = [
   { key: "overview", items: [["dashboard", "/"]] },
@@ -65,12 +67,14 @@ const sections: { key: string; items: [NavKey, string][] }[] = [
       ["proxies", "/proxies"],
       ["bindings", "/bindings"],
       ["visitors", "/visitors"],
+      ["certificates", "/certificates"],
     ],
   },
   {
     key: "management",
     items: [
       ["logs", "/logs"],
+      ["downloads", "/downloads"],
       ["status", "/status"],
     ],
   },
