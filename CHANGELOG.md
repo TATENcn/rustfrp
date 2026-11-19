@@ -39,6 +39,10 @@
   for fields the form does not model.
 - `GET /api/v1/status` reports `config_dir`, so the UI can suggest certificate
   paths the daemon is able to create.
+- The certificates page groups its push and pull channels behind two summary
+  cards — the ingest listener's live address and the pull sources' health —
+  and each card opens one dialog holding the endpoint settings, tokens and
+  pull sources. They no longer stack as full-width panels under the list.
 - FRP version downloads have their own page under 「运维管理 → 版本下载」. It
   reads the official release list and shows each build's archive size for this
   platform, download count and publish date, with a channel picker (official /
