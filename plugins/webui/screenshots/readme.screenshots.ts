@@ -28,6 +28,15 @@ test("capture populated documentation pages without contacting a daemon", async 
       effective_version: id === 2 ? "0.69.1" : "0.70.1",
       running_version: id === 2 ? "0.69.1" : "0.70.1", running: true, restart_required: false,
     });
+    if (path.endsWith("/proxy-status")) return ok({
+      profile_id: id, available: true,
+      proxies: bindings.filter(b => b.profile_id === id).map(b => ({
+        proxy_type: proxies.find(p => p.id === b.proxy_id)?.type ?? "tcp",
+        name: proxies.find(p => p.id === b.proxy_id)?.name ?? "",
+        status: "running", local_addr: "127.0.0.1:8080",
+        remote_addr: `example.com:${19000 + b.proxy_id!}`,
+      })),
+    });
     if (path.endsWith("/runtime")) return ok({ profile_id: id, running: true, desired_running: true, config_pending: false,
       enabled_proxy_count: bindings.filter(b => b.profile_id === id).length, process_status: "running" });
     if (path.startsWith("logs/")) return ok({ profile_id: id, profile_name: profiles.find(p => p.id === id)?.name,
@@ -35,8 +44,22 @@ test("capture populated documentation pages without contacting a daemon", async 
     const responses: Record<string, unknown> = {
       status, profiles, proxies, bindings, visitors: [], "metrics/history": metrics,
       environments: [{ id: 1, name: "演示环境", description: "README 示例数据", profile_ids: [1,2,3], is_default: true, color: "#2563eb" }],
-      "frp/versions": versions, "frp/installations": null,
-      "frp/releases": ["0.70.1", "0.70.0", "0.69.1", "0.69.0", "0.68.1"].map(version => ({ version, published_at: null })),
+      "frp/versions": versions, "frp/installations": [],
+      certificates: [{
+        id: 1, primary_domain: "example.com", sans: ["example.com", "*.example.com"],
+        not_after: "2027-01-14T00:00:00Z", days_remaining: 56, source: "certd_pull",
+        source_detail: "certd.example.com", key_algo: "ECDSA P-256",
+        fingerprint_sha256: "aa11bb33cc55dd77ee99ff11223344556677889900aabbccddeeff1122334455",
+        bindings: [],
+      }],
+      "cert-ingest": { enabled: true, expose: false, port: 7901, listen: "127.0.0.1:7901", address: "127.0.0.1:7901", error: null, url: "http://127.0.0.1:7901/ingest/v1/certs" },
+      "cert-ingest-tokens": [],
+      "cert-pull-sources": [{ id: 1, name: "演示 Certd", kind: "certd", base_url: "https://certd.example.com", domain: "example.com", last_run_at: "2026-11-18T09:30:00Z", last_error: null }],
+      "frp/releases": ["0.71.1", "0.70.1", "0.70.0", "0.69.1", "0.69.0", "0.68.1"].map((version, i) => ({
+        version, tag: `v${version}`, published_at: ["2026-10-14", "2026-08-14", "2026-07-23", "2026-06-01", "2026-04-18", "2026-02-09"][i],
+        asset_size: 13500000 + i * 420_000, download_count: 166_576 - i * 24_000,
+        asset_name: `frp_${version}_linux_amd64.tar.gz`,
+      })),
       health: { status: "ok", version: "0.4.0" },
     };
     if (path in responses) return ok(responses[path]);
@@ -70,15 +93,18 @@ test("capture populated documentation pages without contacting a daemon", async 
 
   await page.goto("/#/bindings");
   await expect(page.getByText("香港 · 主节点", { exact: true })).toBeVisible();
-  await expect(page.getByText("0.69.1", { exact: false }).first()).toBeVisible();
   await capture("webui-proxy-assignments.png");
 
-  await page.goto("/#/status?tab=versions");
-  await expect(page.getByRole("cell", { name: "0.69.1", exact: false })).toBeVisible();
+  await page.goto("/#/downloads");
+  await expect(page.getByRole("heading", { name: "v0.71.1", exact: true })).toBeVisible();
   await page.getByRole("combobox", { name: "下载渠道" }).click();
   await page.getByRole("option", { name: "GHFast · ghfast.top" }).click();
-  await page.getByRole("heading", { name: "系统状态", exact: true }).click();
+  await page.keyboard.press("Escape");
   await capture("webui-versions.png");
+
+  await page.goto("/#/certificates");
+  await expect(page.getByRole("cell", { name: "example.com *.example.com" })).toBeVisible();
+  await capture("webui-certificates.png");
 
   await page.goto("/#/logs");
   await expect(page.getByText(/login to server success/)).toBeVisible();
