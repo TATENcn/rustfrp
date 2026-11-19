@@ -1,5 +1,56 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Certificate management for `https` proxies. FRP does not terminate TLS on the
+  server — `frps` only reads the SNI and routes — so the domain certificate has
+  to exist on the frpc host at the `crtPath` / `keyPath` its `https2http` plugin
+  declares. The daemon now stores certificates, writes those files atomically
+  with `0600` permissions and `rename`, and rolls back to the previous file when
+  a write fails. Certificates are imported by pasting PEM, reading a local path,
+  webhook push, or an automatic pull from the Certd open API or a plain URL.
+  There is deliberately no download, export, or PFX route: a certificate and its
+  key never leave the host and never appear in an API response.
+- Certificate bodies and keys are stored as XChaCha20-Poly1305 blobs keyed by a
+  per-installation master key in `cert_store.key` (mode `0600`) beside the
+  database, so a copied database file does not leak a private key.
+- The certificate ingest listener is configured from the UI and enabled by
+  default on loopback. That endpoint never returns certificate material, every
+  request needs a token, and a token can only cover the domains it was issued
+  for, so requiring an operator to switch it on first would make Certd
+  integration look broken. Enabling "reachable from other hosts" rebinds it to
+  `0.0.0.0` and takes effect immediately, without restarting the daemon. A port
+  conflict is reported in the panel and never stops the daemon from starting.
+  It exposes exactly two routes (`POST /ingest/v1/certs` and
+  `GET /ingest/v1/healthz`), authenticating only through the
+  `X-Cert-Ingest-Token` header — never a URL path, which callers' logs would
+  record. A token only accepts certificates whose every SAN it is allowed to
+  serve; a wildcard covers one label, matching TLS wildcard semantics.
+  `--cert-ingest-listen` remains as a pin for container deployments that must
+  fix the address.
+- In the Compose stack the ingest port is published to the host loopback only,
+  not to every interface. A Certd in the same stack reaches the daemon over the
+  Compose network (`http://daemon:7901/ingest/v1/certs`); an external one needs
+  `RUSTFRP_CERT_INGEST_BIND=0.0.0.0`.
+- The proxy editor now offers a structured certificate picker for
+  `https2http` / `https2https` plugins, with the raw plugin JSON still available
+  for fields the form does not model.
+- `GET /api/v1/status` reports `config_dir`, so the UI can suggest certificate
+  paths the daemon is able to create.
+- FRP version downloads have their own page under 「运维管理 → 版本下载」. It
+  reads the official release list and shows each build's archive size for this
+  platform, download count and publish date, with a channel picker (official /
+  GHFast / GH-Proxy / custom HTTPS) and card and list layouts. Rows are dense:
+  version and status badges, one line of metadata, the archive URL as a plain
+  link, then the actions, so the whole list fits without scrolling.
+- Several versions download concurrently and each row shows its own progress
+  bar and byte counter. The daemon now keeps a task per version instead of one
+  global task, so a slow download no longer blocks the next one. Requesting a
+  version that is already downloading returns `FRP_INSTALL_BUSY`, and that
+  version cannot be deleted until its download finishes.
+
 ## [0.5.4] - 2026-11-15
 
 ### Fixed

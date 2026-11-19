@@ -23,11 +23,13 @@ export function DataTable<T>({
   columns,
   rowKey,
   paginate = true,
+  dense = false,
 }: {
   rows: T[];
   columns: Column<T>[];
   rowKey: (row: T) => string | number;
   paginate?: boolean;
+  dense?: boolean;
 }) {
   const { text } = useI18n();
   const [sort, setSort] = useState({ key: "", direction: 1 });
@@ -95,7 +97,7 @@ export function DataTable<T>({
                 {columns.map((c) => (
                   <TableCell
                     key={c.key}
-                    className={`py-3 ${c.className ?? ""}`}
+                    className={`${dense ? "py-1.5" : "py-3"} ${c.className ?? ""}`}
                   >
                     {c.cell(row)}
                   </TableCell>
