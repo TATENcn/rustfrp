@@ -28,8 +28,17 @@ export interface IngestSettings {
   address: string | null;
   /** Last bind failure, e.g. the port is taken. */
   error: string | null;
-  /** Ready-to-copy endpoint when the listener is bound. */
+  /**
+   * Ready-to-copy endpoint. The daemon derives it from the address this browser
+   * used, so it never shows loopback to someone on another host.
+   */
   url: string | null;
+  /** Where `url` came from: `public_url`, `request`, `bind` or `none`. */
+  url_source: "public_url" | "request" | "bind" | "none";
+  /** The push route on the control API, reachable wherever the UI is. */
+  api_path: string;
+  /** Set when the environment pins the public URL. */
+  public_url: string | null;
 }
 
 export function getIngestSettings(): Promise<ApiEnvelope<IngestSettings>> {
@@ -70,10 +79,10 @@ export function IngestSettingsCard() {
   if (!current) return null;
 
   const bound = current.address;
-  const origin = window.location.hostname;
-  const url = bound
-    ? `http://${current.expose ? origin : bound.split(":")[0]}:${current.port}/ingest/v1/certs`
-    : null;
+  // The daemon already resolved this against the request origin, so the UI must
+  // not second-guess it with `window.location`: doing so produced a loopback URL
+  // for an operator who was not on the host.
+  const url = current.url;
 
   return (
     <div className="space-y-4 rounded-lg border p-4">
@@ -122,8 +131,8 @@ export function IngestSettingsCard() {
             </Label>
             <p className="text-xs text-muted-foreground">
               {text(
-                "开启后监听 0.0.0.0，Certd 才能真正连进来。",
-                "Binds 0.0.0.0 so Certd can actually connect.",
+                "把 7901 监听放到 0.0.0.0；经控制 API 推送不需要这个开关。",
+                "Binds 7901 on 0.0.0.0; pushing through the control API does not need it.",
               )}
             </p>
           </div>
@@ -156,8 +165,8 @@ export function IngestSettingsCard() {
         {!current.expose && (
           <p className="pb-2 text-xs text-muted-foreground">
             {text(
-              "当前只在本机监听，Docker / 桌面端外部访问需打开上面的开关。",
-              "Loopback only; enable the switch above for Docker or an external Certd.",
+              "7901 端口只在本机监听；推送地址走的是控制 API，无需打开上面的开关。只有需要直接连 7901（Docker 内 Certd、独立端口映射）时才打开。",
+              "Port 7901 is loopback only; the push URL above goes through the control API, so the switch is not needed. Enable it only to reach 7901 directly (a Certd inside Docker, a published port).",
             )}
           </p>
         )}
@@ -167,6 +176,22 @@ export function IngestSettingsCard() {
         <div className="space-y-1">
           <Label className="text-xs">{text("推送地址", "Push URL")}</Label>
           <code className="block break-all rounded bg-muted p-2 font-mono text-xs">{url}</code>
+          <p className="text-xs text-muted-foreground">
+            {current.url_source === "public_url"
+              ? text(
+                  "来自环境变量 RUSTFRP_CERT_INGEST_PUBLIC_URL",
+                  "From the RUSTFRP_CERT_INGEST_PUBLIC_URL environment variable",
+                )
+              : current.url_source === "request"
+                ? text(
+                    "按当前浏览器访问的地址推导；换一个地址打开本页会显示对应的地址。",
+                    "Derived from the address this browser used; open the page from another host and it shows that host's address.",
+                  )
+                : text(
+                    "按监听地址推导，未使用浏览器地址。",
+                    "Derived from the bind address, not from the browser.",
+                  )}
+          </p>
         </div>
       )}
 

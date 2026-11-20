@@ -6,11 +6,23 @@ services:
     restart: unless-stopped
     ports:
       - "${RUSTFRP_PORT:-7900}:7900"
+      # Certificate ingest endpoint for Certd. Published to the host loopback
+      # only: a Certd running in this Compose stack reaches it over the Compose
+      # network at http://daemon:7901/ingest/v1/certs and needs no host port at
+      # all. Set RUSTFRP_CERT_INGEST_BIND=0.0.0.0 (or a specific interface) when
+      # an external Certd has to connect. The container port stays 7901 so the
+      # mapping and the listener cannot disagree.
+      - "${RUSTFRP_CERT_INGEST_BIND:-127.0.0.1}:${RUSTFRP_CERT_INGEST_PORT:-7901}:7901"
     volumes:
       - rustfrp-data:/data
     environment:
       RUSTFRP_API_TOKEN_FILE: /run/secrets/rustfrp_api_token
       RUST_LOG: ${RUST_LOG:-rustfrp=info}
+      # Inside a container the ingest endpoint must bind all interfaces, or the
+      # published port reaches nothing. The container port is fixed at 7901 to
+      # match the mapping above; whether the listener runs at all still comes
+      # from the stored setting, which defaults to enabled.
+      RUSTFRP_CERT_INGEST_LISTEN: 0.0.0.0:7901
     secrets:
       - rustfrp_api_token
     healthcheck:

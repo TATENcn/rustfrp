@@ -3,23 +3,22 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   applyCertificate,
+  attachSource,
   bindCertificate,
-  createIngestToken,
-  createPullSource,
+  createSource,
   deleteCertificate,
-  deleteIngestToken,
-  deletePullSource,
+  deleteSource,
   importFromPath,
   importPem,
   listCertificates,
-  listIngestTokens,
-  listPullSources,
-  runPullSource,
+  listSources,
+  promoteSource,
+  runSource,
   unbindCertificate,
   type Certificate,
-  type CreatedIngestToken,
-  type PullKind,
-  type PullSource,
+  type CertificateSource,
+  type CreatedSource,
+  type SourceKind,
 } from "@/api/certificates";
 import { command, data, useAction, useProxies } from "@/hooks/api";
 import { useI18n } from "@/i18n";
@@ -30,13 +29,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { DataTable, type Column } from "@/components/common/data-table";
 import {
   Choice,
@@ -46,23 +38,51 @@ import {
   PageLoading,
 } from "@/components/common/page";
 import { DeleteDialog, EditorDialog } from "@/components/common/dialogs";
-import { getIngestSettings, IngestSettingsCard } from "./ingest-settings";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
+/** Sort order for the status column: problems first, healthy last. */
+const STATUS_ORDER: Record<Certificate["status"], number> = {
+  expired: 0,
+  not_yet_valid: 1,
+  pending: 2,
+  expiring_soon: 3,
+  active: 4,
+};
 
 export default function Certificates() {
   const { t, text } = useI18n();
   const [importing, setImporting] = useState(false);
   const [deleting, setDeleting] = useState<Certificate | null>(null);
-  const [sources, setSources] = useState(false);
+  const [channelsFor, setChannelsFor] = useState<Certificate | null>(null);
 
   const certificates = useQuery({
     queryKey: ["certificates"],
     queryFn: () => data(listCertificates()),
+  });
+  // One request for every channel: the table needs to say how each certificate
+  // is kept up to date, and asking per row would be a request per certificate.
+  const sources = useQuery({
+    queryKey: ["certificate-sources", "all"],
+    queryFn: () => data(listSources()),
   });
 
   const remove = useAction(
     (id: number) => command(deleteCertificate(id)),
     text("证书已删除", "Certificate deleted"),
   );
+  const apply = useAction(
+    (id: number) => data(applyCertificate(id)),
+    text("证书已写入配置文件", "Certificate written to the configured files"),
+  );
+  // Bind and unbind share one dialog: the row menu offers whichever applies.
+  const [binding, setBinding] = useState<Certificate | null>(null);
+  const bindTarget = (row: Certificate) => setBinding(row);
 
   if (certificates.isLoading) return <PageLoading />;
   if (certificates.error)
@@ -74,17 +94,23 @@ export default function Certificates() {
     );
 
   const rows = certificates.data ?? [];
+  // Unattached channels (an older shape, or one whose certificate was deleted)
+  // are surfaced in the empty state instead of being silently invisible.
+  const orphans = (sources.data ?? []).filter(
+    (source) => source.certificate_id === null,
+  );
 
   const columns: Column<Certificate>[] = [
     {
       key: "domain",
       title: text("域名", "Domain"),
       sort: (row) => row.primary_domain,
+      className: "max-w-40",
       cell: (row) => (
         <div className="space-y-1">
-          <div className="font-medium">{row.primary_domain}</div>
+          <div className="truncate font-medium">{row.primary_domain}</div>
           {row.sans.length > 1 && (
-            <div className="text-xs text-muted-foreground">
+            <div className="truncate text-xs text-muted-foreground">
               {row.sans.filter((san) => san !== row.primary_domain).join(", ")}
             </div>
           )}
@@ -92,17 +118,44 @@ export default function Certificates() {
       ),
     },
     {
-      key: "expiry",
-      title: text("到期", "Expires"),
-      sort: (row) => row.days_remaining,
+      key: "status",
+      title: text("状态", "Status"),
+      sort: (row) => STATUS_ORDER[row.status],
       cell: (row) => (
         <div className="space-y-1">
-          <Badge variant={expiryVariant(row.days_remaining)}>
-            {expiryLabel(row.days_remaining, text)}
+          <Badge
+            variant={
+              row.status === "active"
+                ? "secondary"
+                : row.status === "expiring_soon"
+                  ? "outline"
+                  : row.status === "pending"
+                    ? "outline"
+                    : "destructive"
+            }
+          >
+            {{
+              active: text("可用", "Active"),
+              expiring_soon: text("即将到期", "Expiring soon"),
+              expired: text("已过期", "Expired"),
+              not_yet_valid: text("尚未生效", "Not yet valid"),
+              pending: text("待拉取", "Pending"),
+            }[row.status]}
           </Badge>
-          <div className="text-xs text-muted-foreground">
-            {row.not_after.slice(0, 10)}
-          </div>
+          {row.status === "pending" ? (
+            /* A pending certificate is not broken, it is waiting — and the
+               reason it is still waiting is a channel failure, so show that. */
+            <div
+              className="max-w-48 truncate text-xs text-destructive"
+              title={row.channel_error ?? undefined}
+            >
+              {row.channel_error ?? text("等待首次推送或拉取", "Waiting for the first push or fetch")}
+            </div>
+          ) : (
+            <div className="text-xs text-muted-foreground">
+              {row.status_reason ?? row.not_after.slice(0, 10)}
+            </div>
+          )}
         </div>
       ),
     },
@@ -110,29 +163,96 @@ export default function Certificates() {
       key: "source",
       title: text("来源", "Source"),
       sort: (row) => row.source,
-      cell: (row) => (
-        <div className="text-sm">
-          {sourceLabel(row.source, text)}
-          {row.source_detail && (
-            <div className="max-w-56 truncate text-xs text-muted-foreground">
-              {row.source_detail}
-            </div>
-          )}
-        </div>
-      ),
+      className: "max-w-44",
+      cell: (row) =>
+        row.material_id === null ? (
+          <span className="text-xs text-muted-foreground">
+            {text("尚未导入", "No material yet")}
+          </span>
+        ) : (
+          <div className="text-sm">
+            {{
+              manual: text("手动粘贴", "Pasted"),
+              upload: text("上传文件", "Uploaded"),
+              local_path: text("本机路径", "Local path"),
+              webhook: text("推送", "Push"),
+              certd_pull: text("Certd 拉取", "Certd pull"),
+              url_pull: text("URL 拉取", "URL pull"),
+            }[row.source] ?? row.source}
+            {row.source_detail && (
+              <div className="truncate text-xs text-muted-foreground">
+                {row.source_detail}
+              </div>
+            )}
+          </div>
+        ),
     },
     {
       key: "key",
       title: text("密钥", "Key"),
       sort: (row) => row.key_algo,
-      cell: (row) => (
-        <div className="space-y-1 text-sm">
-          <div>{row.key_algo}</div>
-          <div className="font-mono text-xs text-muted-foreground">
-            {row.fingerprint_sha256.slice(0, 16)}
+      cell: (row) =>
+        row.material_id === null ? (
+          <span className="text-xs text-muted-foreground">—</span>
+        ) : (
+          <div className="space-y-1 text-sm">
+            <div>{row.key_algo}</div>
+            <div className="font-mono text-xs text-muted-foreground">
+              {row.fingerprint_sha256.slice(0, 16)}
+            </div>
           </div>
-        </div>
-      ),
+        ),
+    },
+    {
+      key: "channels",
+      title: text("更新方式", "Updates"),
+      className: "max-w-40",
+      cell: (row) => {
+        const mine = (sources.data ?? []).filter(
+          (source) => source.certificate_id === row.id,
+        );
+        if (mine.length === 0)
+          return (
+            <span className="text-xs text-muted-foreground">
+              {text("仅手动", "Manual only")}
+            </span>
+          );
+        return (
+          <div className="space-y-1">
+            {mine.map((source) => (
+              <div key={source.id} className="flex items-center gap-2 text-xs">
+                <span>
+                  {{
+                    push: text("推送", "Push"),
+                    certd: text("Certd 拉取", "Certd pull"),
+                    url: text("URL 拉取", "URL pull"),
+                  }[source.kind]}
+                </span>
+                {source.is_primary && (
+                  <Badge variant="outline">{text("优先", "Preferred")}</Badge>
+                )}
+                {source.last_status === "failed" ? (
+                  <Badge variant="destructive">
+                    {text("失败", "Failed")}
+                  </Badge>
+                ) : source.enabled === false ? (
+                  <Badge variant="outline">{text("已停用", "Disabled")}</Badge>
+                ) : null}
+              </div>
+            ))}
+            {mine.some((source) => source.next_run_at) && (
+              <div className="text-xs text-muted-foreground">
+                {text("下次检查", "Next check")}{" "}
+                {mine
+                  .map((source) => source.next_run_at)
+                  .filter(Boolean)
+                  .sort()[0]
+                  ?.slice(0, 16)}
+              </div>
+            )}
+          </div>
+        );
+      },
     },
     {
       key: "bindings",
@@ -149,7 +269,8 @@ export default function Certificates() {
                 <span>{binding.proxy_name || `#${binding.proxy_id}`}</span>
                 {binding.last_error ? (
                   <Badge variant="destructive">{text("失败", "Failed")}</Badge>
-                ) : binding.applied_fingerprint === row.fingerprint_sha256 ? (
+                ) : row.fingerprint_sha256 &&
+                  binding.applied_fingerprint === row.fingerprint_sha256 ? (
                   <Badge variant="secondary">{text("已生效", "Applied")}</Badge>
                 ) : (
                   <Badge variant="outline">{text("待应用", "Pending")}</Badge>
@@ -162,19 +283,35 @@ export default function Certificates() {
     {
       key: "actions",
       title: "",
+      // One button keeps the table from scrolling horizontally; the four
+      // actions do not fit as a row at this width.
+      className: "w-12",
       cell: (row) => (
-        <div className="flex flex-wrap gap-2">
-          <ApplyButton certId={row.id} disabled={row.bindings.length === 0} />
-          <BindButton certificate={row} />
-          <Button
-            variant="outline"
-            size="sm"
-            className="text-destructive"
-            onClick={() => setDeleting(row)}
-          >
-            {t("common.delete")}
-          </Button>
-        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" aria-label={t("common.actions")}>
+              <AppIcon name="more" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuItem onSelect={() => setChannelsFor(row)}>
+              {text("更新方式", "Channels")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={row.bindings.length === 0 || !row.usable}
+              onSelect={() => apply.mutate(row.id)}
+            >
+              {text("应用到文件", "Apply to files")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => bindTarget(row)}>
+              {row.bindings.length ? text("解绑", "Unbind") : text("绑定代理", "Bind proxy")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(row)}>
+              {t("common.delete")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       ),
     },
   ];
@@ -184,8 +321,8 @@ export default function Certificates() {
       <PageHeading
         title={text("证书", "Certificates")}
         description={text(
-          "为 https 代理提供域名证书。只支持导入与查看，不提供下载或导出。",
-          "Domain certificates for https proxies. Import and inspect only — no download or export.",
+          "为 https 代理提供域名证书。导入后可选推送或自动拉取来更新它。",
+          "Domain certificates for https proxies. Choose push or automatic pull to keep one updated.",
         )}
       >
         <Button onClick={() => setImporting(true)}>
@@ -195,47 +332,89 @@ export default function Certificates() {
       </PageHeading>
 
       {rows.length === 0 ? (
-        <EmptyState
-          title={text("还没有证书", "No certificates yet")}
-          description={text(
-            "粘贴 PEM、上传文件、引用本机路径，或配置自动拉取。",
-            "Paste PEM, upload a file, reference a local path, or set up an automatic pull.",
+        <div className="space-y-4">
+          <EmptyState
+            title={text("还没有证书", "No certificates yet")}
+            description={text(
+              "粘贴 PEM、引用本机路径，或直接配置推送 / 自动拉取。",
+              "Paste PEM, reference a local path, or configure push / automatic pull.",
+            )}
+          />
+          {/* A channel whose first fetch failed used to leave this page looking
+              untouched, which reads as "my configuration was not saved". */}
+          {orphans.length > 0 && (
+            <div className="space-y-3 rounded-lg border p-4">
+              <div className="space-y-1">
+                <h3 className="text-sm font-semibold">
+                  {text(
+                    "已配置更新方式，但还没有拉到证书",
+                    "A channel is configured but has not delivered a certificate",
+                  )}
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  {text(
+                    "证书会在首次成功推送或拉取后出现在上面。失败原因如下。",
+                    "The certificate appears above once a push or fetch succeeds. Here is why it has not yet.",
+                  )}
+                </p>
+              </div>
+              {orphans.map((source) => (
+                <div key={source.id} className="space-y-1 rounded-md border p-3 text-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">{source.name}</span>
+                    <Badge variant="outline">
+                      {{ push: text("推送", "Push"), certd: "Certd", url: "URL" }[source.kind]}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">{source.domain}</span>
+                    {source.last_status === "failed" && (
+                      <Badge variant="destructive">{text("失败", "Failed")}</Badge>
+                    )}
+                  </div>
+                  {source.last_error && (
+                    <p className="text-xs text-destructive">{source.last_error}</p>
+                  )}
+                  {source.next_run_at && (
+                    <p className="text-xs text-muted-foreground">
+                      {text("下次检查", "Next check")} {source.next_run_at.slice(0, 16)}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
           )}
-        />
+        </div>
       ) : (
         <DataTable rows={rows} columns={columns} rowKey={(row) => row.id} />
       )}
 
-      <SourceSummaryCards onOpen={() => setSources(true)} />
+      {binding && (
+        <BindDialog
+          certificate={binding}
+          onClose={() => setBinding(null)}
+          onDone={() => {
+            setBinding(null);
+            void certificates.refetch();
+          }}
+        />
+      )}
 
-      <ImportDialog open={importing} onClose={() => setImporting(false)} />
+      <ImportDialog
+        open={importing}
+        onClose={() => {
+          setImporting(false);
+          void sources.refetch();
+        }}
+      />
 
-      <EditorDialog
-        open={sources}
-        title={text("证书来源", "Certificate sources")}
-        description={text(
-          "接收端点接受 Certd 推送；自动拉取从 Certd 或任意 HTTPS 地址取回证书。",
-          "The ingest endpoint accepts Certd pushes; automatic pull fetches from Certd or any HTTPS endpoint.",
-        )}
-        onClose={() => setSources(false)}
-      >
-        <Tabs defaultValue="ingest" className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="ingest">
-              {text("接收端点", "Ingest endpoint")}
-            </TabsTrigger>
-            <TabsTrigger value="pull">
-              {text("自动拉取", "Automatic pull")}
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="ingest">
-            <IngestPanel />
-          </TabsContent>
-          <TabsContent value="pull">
-            <PullPanel />
-          </TabsContent>
-        </Tabs>
-      </EditorDialog>
+      {channelsFor && (
+        <ChannelsDialog
+          certificate={channelsFor}
+          onClose={() => {
+            setChannelsFor(null);
+            void sources.refetch();
+          }}
+        />
+      )}
 
       <DeleteDialog
         open={deleting !== null}
@@ -258,111 +437,108 @@ export default function Certificates() {
   );
 }
 
-function ApplyButton({ certId, disabled }: { certId: number; disabled: boolean }) {
-  const { text } = useI18n();
-  const apply = useAction(
-    (id: number) => data(applyCertificate(id)),
-    text("证书已写入配置文件", "Certificate written to the configured files"),
-  );
-  return (
-    <Button
-      variant="outline"
-      size="sm"
-      disabled={disabled || apply.isPending}
-      onClick={() => apply.mutate(certId)}
-    >
-      <AppIcon name="refresh" className={apply.isPending ? "animate-spin" : ""} />
-      {text("应用", "Apply")}
-    </Button>
-  );
-}
 
-function BindButton({ certificate }: { certificate: Certificate }) {
+
+/** Bind a certificate to a proxy, or unbind the one it already has. */
+function BindDialog({
+  certificate,
+  onClose,
+  onDone,
+}: {
+  certificate: Certificate;
+  onClose: () => void;
+  onDone: () => void;
+}) {
   const { text } = useI18n();
   const proxies = useProxies();
-  const [open, setOpen] = useState(false);
   const [proxyId, setProxyId] = useState("");
+  const bound = certificate.bindings[0];
 
   // Only proxies that can actually hold a certificate are offered.
   const candidates = (proxies.data ?? []).filter(
     (proxy) =>
-      proxy.proxy_type === "https" &&
       typeof proxy.plugin_config === "object" &&
       proxy.plugin_config !== null &&
-      ["https2http", "https2https"].includes(
+      ["https2http", "https2https", "tls2raw"].includes(
         String((proxy.plugin_config as Record<string, unknown>).type ?? ""),
       ),
   );
-  const bound = certificate.bindings.find((binding) => binding.id);
   const bind = useAction(
     (body: { cert_id: number; proxy_id: number }) => data(bindCertificate(body)),
     text("已绑定", "Bound"),
-    () => {
-      setOpen(false);
-      setProxyId("");
-    },
+    onDone,
   );
   const unbind = useAction(
     (id: number) => command(unbindCertificate(id, false)),
     text("已解绑，目标文件已保留", "Unbound; files kept on disk"),
+    onDone,
   );
 
-  return (
-    <>
-      {bound ? (
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={unbind.isPending}
-          onClick={() => unbind.mutate(bound.id)}
-        >
-          {text("解绑", "Unbind")}
-        </Button>
-      ) : (
-        <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-          {text("绑定", "Bind")}
-        </Button>
-      )}
+  if (bound) {
+    return (
       <EditorDialog
-        open={open}
-        title={text("绑定到代理", "Bind to a proxy")}
+        open
+        title={text("解绑", "Unbind")}
         description={text(
-          "只列出配置了 https2http / https2https 插件的代理。证书会写入该代理声明的 crtPath 与 keyPath。",
-          "Only proxies with an https2http / https2https plugin are listed. The certificate is written to the paths that plugin declares.",
+          "解除后目标文件保留在磁盘上，证书本身不被删除。",
+          "The files stay on disk; the certificate itself is not deleted.",
         )}
-        busy={bind.isPending}
-        onClose={() => setOpen(false)}
+        busy={unbind.isPending}
+        onClose={onClose}
       >
         <div className="space-y-4">
-          {candidates.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {text(
-                "没有可用的 https 代理。请先在代理规则中把类型设为 https，并添加 https2http 插件与证书路径。",
-                "No eligible https proxy. Set a proxy's type to https and add an https2http plugin with certificate paths first.",
-              )}
-            </p>
-          ) : (
-            <Choice
-              label={text("代理", "Proxy")}
-              value={proxyId}
-              options={candidates.map((proxy) => ({
-                label: proxy.name,
-                value: String(proxy.id),
-              }))}
-              onChange={setProxyId}
-            />
-          )}
-          <Button
-            disabled={!proxyId || bind.isPending}
-            onClick={() =>
-              bind.mutate({ cert_id: certificate.id, proxy_id: Number(proxyId) })
-            }
-          >
-            {text("确认绑定", "Bind")}
+          <p className="text-sm">
+            {text("当前绑定到", "Currently bound to")}{" "}
+            <span className="font-medium">{bound.proxy_name || `#${bound.proxy_id}`}</span>
+          </p>
+          <Button disabled={unbind.isPending} onClick={() => unbind.mutate(bound.id)}>
+            {text("确认解绑", "Unbind")}
           </Button>
         </div>
       </EditorDialog>
-    </>
+    );
+  }
+
+  return (
+    <EditorDialog
+      open
+      title={text("绑定到代理", "Bind to a proxy")}
+      description={text(
+        "只列出配置了 https2http / https2https / tls2raw 插件的代理。证书会写入该代理声明的 crtPath 与 keyPath。",
+        "Only proxies with an https2http / https2https / tls2raw plugin are listed. The certificate is written to the paths that plugin declares.",
+      )}
+      busy={bind.isPending}
+      onClose={onClose}
+    >
+      <div className="space-y-4">
+        {candidates.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            {text(
+              "没有可用的代理。请先在代理规则中添加 https2http / https2https / tls2raw 插件与证书路径。",
+              "No eligible proxy. Add an https2http / https2https / tls2raw plugin with certificate paths first.",
+            )}
+          </p>
+        ) : (
+          <Choice
+            label={text("代理", "Proxy")}
+            value={proxyId}
+            options={candidates.map((proxy) => ({
+              value: String(proxy.id),
+              label: proxy.name,
+            }))}
+            onChange={setProxyId}
+          />
+        )}
+        <Button
+          disabled={!proxyId || bind.isPending}
+          onClick={() =>
+            bind.mutate({ cert_id: certificate.id, proxy_id: Number(proxyId) })
+          }
+        >
+          {text("确认绑定", "Bind")}
+        </Button>
+      </div>
+    </EditorDialog>
   );
 }
 
@@ -375,12 +551,27 @@ function ImportDialog({ open, onClose }: { open: boolean; onClose: () => void })
   const [keyPath, setKeyPath] = useState("");
   const [note, setNote] = useState("");
 
+  // Channel-first import: the certificate is created before any material
+  // exists, and the channel that will supply it is configured in the same step.
+  const [channelKind, setChannelKind] = useState<SourceKind>("certd");
+  const [domain, setDomain] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [keyId, setKeyId] = useState("");
+  const [keySecret, setKeySecret] = useState("");
+  const [allowDomains, setAllowDomains] = useState("");
+  const client = useQueryClient();
+
   const reset = () => {
     setCert("");
     setKey("");
     setCrtPath("");
     setKeyPath("");
     setNote("");
+    setDomain("");
+    setBaseUrl("");
+    setKeyId("");
+    setKeySecret("");
+    setAllowDomains("");
   };
   const done = () => {
     reset();
@@ -399,6 +590,30 @@ function ImportDialog({ open, onClose }: { open: boolean; onClose: () => void })
     done,
   );
 
+  // A channel-only import needs no material, so it uses the channel endpoint
+  // directly and lets the first fetch fill the certificate in.
+  const createChannel = useMutation({
+    mutationFn: (body: Parameters<typeof createSource>[0]) =>
+      data(createSource(body)),
+    onSuccess: async (result) => {
+      if (result.source.kind === "push" && result.plaintext) {
+        setCreatedToken(result);
+      } else {
+        toast.success(text("更新方式已配置", "Channel configured"));
+        done();
+      }
+      await client.invalidateQueries();
+    },
+    onError: (error) => toast.error(extractApiError(error).message),
+  });
+  const [createdToken, setCreatedToken] = useState<CreatedSource | null>(null);
+
+  // Push is configured against a domain allowlist; certd/url against one domain.
+  const channelReady =
+    channelKind === "push"
+      ? allowDomains.trim().length > 0
+      : domain.trim().length > 0 && baseUrl.trim().length > 0;
+
   return (
     <EditorDialog
       open={open}
@@ -407,13 +622,14 @@ function ImportDialog({ open, onClose }: { open: boolean; onClose: () => void })
         "证书与私钥只存于本机，加密保存；界面不会再次显示内容，也不提供下载。",
         "The certificate and key stay on this host, encrypted at rest. They are never shown again and cannot be downloaded.",
       )}
-      busy={importPasted.isPending || importPath.isPending}
+      busy={importPasted.isPending || importPath.isPending || createChannel.isPending}
       onClose={onClose}
     >
       <Tabs value={tab} onValueChange={setTab} className="space-y-4">
         <TabsList>
           <TabsTrigger value="pem">{text("粘贴 PEM", "Paste PEM")}</TabsTrigger>
           <TabsTrigger value="path">{text("本机路径", "Local path")}</TabsTrigger>
+          <TabsTrigger value="channel">{text("推送 / 自动拉取", "Push / pull")}</TabsTrigger>
         </TabsList>
         <TabsContent value="pem" className="space-y-3">
           <div className="space-y-1.5">
@@ -491,463 +707,292 @@ function ImportDialog({ open, onClose }: { open: boolean; onClose: () => void })
             {text("导入", "Import")}
           </Button>
         </TabsContent>
+        <TabsContent value="channel" className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            {text(
+              "现在只配置来源：证书条目会先建立，等推送或首次拉取到达时才有内容。拉取到的证书必须覆盖下面填写的域名，否则会被拒绝。",
+              "Configure the source only. The certificate entry is created now; its material arrives with the first push or fetch. A fetched certificate must cover the domain below or it is refused.",
+            )}
+          </p>
+          <div className="space-y-1.5">
+            <Label>{text("类型", "Kind")}</Label>
+            <Choice
+              label={text("类型", "Kind")}
+              value={channelKind}
+              options={[
+                { value: "push", label: text("推送（Certd webhook）", "Push (Certd webhook)") },
+                { value: "certd", label: text("自动拉取（Certd）", "Pull (Certd)") },
+                { value: "url", label: text("自动拉取（HTTPS）", "Pull (HTTPS)") },
+              ]}
+              onChange={(next) => setChannelKind(next as SourceKind)}
+            />
+          </div>
+          {channelKind === "push" ? (
+            <div className="space-y-1.5">
+              <Label htmlFor="allow-domains">
+                {text("允许的域名（逗号分隔）", "Allowed domains (comma separated)")}
+              </Label>
+              <Input
+                id="allow-domains"
+                placeholder="*.example.com"
+                value={allowDomains}
+                onChange={(event) => setAllowDomains(event.target.value)}
+              />
+            </div>
+          ) : (
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="channel-domain">{text("域名", "Domain")}</Label>
+                <Input
+                  id="channel-domain"
+                  placeholder="example.com"
+                  value={domain}
+                  onChange={(event) => setDomain(event.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="channel-url">
+                  {channelKind === "certd"
+                    ? text("Certd 地址", "Certd base URL")
+                    : text("证书地址", "Certificate URL")}
+                </Label>
+                <Input
+                  id="channel-url"
+                  placeholder={
+                    channelKind === "certd"
+                      ? "https://certd.example.com"
+                      : "https://example.com/bundle.json"
+                  }
+                  value={baseUrl}
+                  onChange={(event) => setBaseUrl(event.target.value)}
+                />
+              </div>
+              {channelKind === "certd" && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="channel-key-id">keyId</Label>
+                    <Input
+                      id="channel-key-id"
+                      value={keyId}
+                      onChange={(event) => setKeyId(event.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="channel-key-secret">keySecret</Label>
+                    <Input
+                      id="channel-key-secret"
+                      type="password"
+                      value={keySecret}
+                      onChange={(event) => setKeySecret(event.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+          {createdToken?.plaintext ? (
+            <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3">
+              <p className="text-sm font-medium">
+                {text("令牌只显示这一次", "This token is shown once")}
+              </p>
+              <code className="block break-all rounded bg-background p-2 font-mono text-xs">
+                {createdToken.plaintext}
+              </code>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setCreatedToken(null);
+                  done();
+                }}
+              >
+                {text("我已保存", "Saved it")}
+              </Button>
+            </div>
+          ) : (
+            <Button
+              disabled={!channelReady || createChannel.isPending}
+              onClick={() =>
+                createChannel.mutate({
+                  kind: channelKind,
+                  name: `certd-${Date.now()}`,
+                  ...(channelKind === "push"
+                    ? {
+                        domains: allowDomains
+                          .split(",")
+                          .map((value) => value.trim())
+                          .filter(Boolean),
+                      }
+                    : {
+                        domain: domain.trim(),
+                        base_url: baseUrl.trim(),
+                        ...(channelKind === "certd"
+                          ? {
+                              key_id: keyId.trim() || undefined,
+                              key_secret: keySecret || undefined,
+                            }
+                          : {}),
+                      }),
+                })
+              }
+            >
+              {text("创建", "Create")}
+            </Button>
+          )}
+        </TabsContent>
       </Tabs>
     </EditorDialog>
   );
 }
 
-/** Two status cards for the push/pull channels; each opens the dialog. */
-function SourceSummaryCards({ onOpen }: { onOpen: () => void }) {
+/** Channels for one certificate: show, switch primary, run, detach, delete. */
+function ChannelsDialog({
+  certificate,
+  onClose,
+}: {
+  certificate: Certificate;
+  onClose: () => void;
+}) {
   const { text } = useI18n();
-  const ingest = useQuery({
-    queryKey: ["cert-ingest"],
-    queryFn: () => data(getIngestSettings()),
-  });
-  const pull = useQuery({
-    queryKey: ["pull-sources"],
-    queryFn: () => data(listPullSources()),
-    retry: false,
-  });
-  const pulls = pull.data ?? [];
-  const pulling = pulls.filter((source: PullSource) => !source.last_error).length;
-  const cards: [string, string, string, string][] = [
-    [
-      text("接收端点（推送）", "Ingest endpoint (push)"),
-      ingest.data?.address
-        ? text("监听中", "Listening")
-        : text("已停止", "Stopped"),
-      ingest.data?.address
-        ? ingest.data.url ??
-          `:${ingest.data.port}/ingest/v1/certs`
-        : text("默认仅本机 7901 端口可用", "Loopback 7901 by default"),
-      ingest.data?.error ?? "",
-    ],
-    [
-      text("自动拉取", "Automatic pull"),
-      pulls.length
-        ? text(`${pulling} / ${pulls.length} 个源`, `${pulling} / ${pulls.length} sources`)
-        : text("未配置", "Not configured"),
-      pulls.length
-        ? (pulls[0] as PullSource).base_url
-        : text("从 Certd 或任意 HTTPS 地址定时取回", "Fetch from Certd or any HTTPS endpoint"),
-      pulls.find((source: PullSource) => source.last_error)?.last_error ?? "",
-    ],
-  ];
-  return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      {cards.map(([title, badge, detail, error]) => (
-        <Card key={title} className="shadow-none">
-          <CardHeader className="flex-row items-start justify-between gap-2 [.border-b]:pb-0">
-            <div className="space-y-1">
-              <CardTitle className="text-sm">{title}</CardTitle>
-              <CardDescription className="truncate">{detail}</CardDescription>
-            </div>
-            <Badge variant={badge === text("已停止", "Stopped") ? "outline" : "secondary"}>
-              {badge}
-            </Badge>
-          </CardHeader>
-          <CardContent className="flex items-center justify-between gap-2">
-            {error ? (
-              <p className="truncate text-xs text-destructive" title={error}>
-                {error}
-              </p>
-            ) : (
-              <span className="text-xs text-muted-foreground">
-                {text("正常", "OK")}
-              </span>
-            )}
-            <Button variant="outline" size="sm" onClick={onOpen}>
-              {text("配置", "Configure")}
-            </Button>
-          </CardContent>
-        </Card>
-      ))}
-    </div>
-  );
-}
-
-function IngestPanel() {
-  const { text } = useI18n();
-  const [creating, setCreating] = useState(false);
-  const [name, setName] = useState("");
-  const [domains, setDomains] = useState("");
-  const [created, setCreated] = useState<CreatedIngestToken | null>(null);
-
-  const tokens = useQuery({
-    queryKey: ["ingest-tokens"],
-    queryFn: () => data(listIngestTokens()),
-  });
-  // Created with useMutation rather than useAction: the plaintext token exists
-  // only in this response, so it has to be captured here and shown once.
-  const client = useQueryClient();
-  const create = useMutation({
-    mutationFn: (body: { name: string; domains: string[] }) =>
-      data(createIngestToken(body)),
-    onSuccess: async (result) => {
-      setCreated(result);
-      setCreating(false);
-      setName("");
-      setDomains("");
-      toast.success(text("接收令牌已创建", "Ingest token created"));
-      await client.invalidateQueries();
-    },
-    onError: async (error) => {
-      toast.error(extractApiError(error).message);
-      await client.invalidateQueries();
-    },
-  });
-  const remove = useAction(
-    (id: number) => command(deleteIngestToken(id)),
-    text("令牌已删除", "Token deleted"),
-  );
-
-  // The push URL is derived from whatever the listener is bound to, so the
-  // snippet cannot drift from the configured port or exposure.
-  const ingestSettings = useQuery({
-    queryKey: ["cert-ingest"],
-    queryFn: () => data(getIngestSettings()),
-  });
-  const ingestPort = ingestSettings.data?.port ?? 7901;
-  const ingestHost = ingestSettings.data?.expose
-    ? window.location.hostname
-    : (ingestSettings.data?.address?.split(":")[0] ?? window.location.hostname);
-  const ingestOrigin = `http://${ingestHost}:${ingestPort}`;
-
-  return (
-    <div className="space-y-4 rounded-lg border p-4">
-      <IngestSettingsCard />
-
-      {created?.plaintext && (
-        <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3">
-          <p className="text-sm font-medium">
-            {text("令牌只显示这一次", "This token is shown once")}
-          </p>
-          <code className="block break-all rounded bg-background p-2 font-mono text-xs">
-            {created.plaintext}
-          </code>
-          <p className="text-xs text-muted-foreground">
-            {text("Certd 的 webhook 部署任务按下面填写；消息体保持默认即可。",
-              "Configure the Certd webhook deploy task as below; leave its body template at the default.")}
-          </p>
-          <div className="space-y-1 font-mono text-xs">
-            <div>POST {ingestOrigin}/ingest/v1/certs</div>
-            <div>Content-Type: application/json</div>
-            <div>X-Cert-Ingest-Token: {created.plaintext}</div>
-          </div>
-          <Button variant="outline" size="sm" onClick={() => setCreated(null)}>
-            {text("我已保存", "Saved it")}
-          </Button>
-        </div>
-      )}
-
-      {creating ? (
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="token-name">{text("名称", "Name")}</Label>
-            <Input
-              id="token-name"
-              placeholder="certd"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="token-domains">
-              {text("允许的域名（逗号分隔，支持 *.example.com）", "Allowed domains (comma separated, *.example.com supported)")}
-            </Label>
-            <Input
-              id="token-domains"
-              placeholder="example.com, *.example.com"
-              value={domains}
-              onChange={(event) => setDomains(event.target.value)}
-            />
-          </div>
-          <div className="flex gap-2">
-            <Button
-              disabled={!name.trim() || !domains.trim() || create.isPending}
-              onClick={() =>
-                create.mutate({
-                  name: name.trim(),
-                  domains: domains
-                    .split(",")
-                    .map((domain) => domain.trim())
-                    .filter(Boolean),
-                })
-              }
-            >
-              {text("创建令牌", "Create token")}
-            </Button>
-            <Button variant="outline" onClick={() => setCreating(false)}>
-              {text("取消", "Cancel")}
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <Button variant="outline" onClick={() => setCreating(true)}>
-          <AppIcon name="plus" />
-          {text("创建接收令牌", "Create ingest token")}
-        </Button>
-      )}
-
-      {(tokens.data ?? []).length > 0 && (
-        <div className="space-y-2">
-          {(tokens.data ?? []).map((token) => (
-            <div
-              key={token.id}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-sm"
-            >
-              <div>
-                <div className="font-medium">{token.name}</div>
-                <div className="text-xs text-muted-foreground">
-                  {token.domains.join(", ")} · {text("使用", "used")} {token.use_count}{" "}
-                  {text("次", "times")}
-                  {token.last_used_at && ` · ${token.last_used_at.slice(0, 19)}`}
-                </div>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-destructive"
-                disabled={remove.isPending}
-                onClick={() => remove.mutate(token.id)}
-              >
-                {text("删除", "Delete")}
-              </Button>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PullPanel() {
-  const { text } = useI18n();
-  const [creating, setCreating] = useState(false);
-  const [kind, setKind] = useState<PullKind>("certd");
-  const [name, setName] = useState("");
-  const [baseUrl, setBaseUrl] = useState("");
-  const [domain, setDomain] = useState("");
-  const [keyId, setKeyId] = useState("");
-  const [keySecret, setKeySecret] = useState("");
-
   const client = useQueryClient();
   const sources = useQuery({
-    queryKey: ["pull-sources"],
-    queryFn: () => data(listPullSources()),
+    queryKey: ["certificate-sources", certificate.id],
+    queryFn: () => data(listSources(certificate.id)),
   });
-  const create = useAction(
-    (body: Parameters<typeof createPullSource>[0]) => data(createPullSource(body)),
-    text("拉取源已创建", "Pull source created"),
-    () => {
-      setCreating(false);
-      setName("");
-      setBaseUrl("");
-      setDomain("");
-      setKeyId("");
-      setKeySecret("");
-    },
+
+  const refresh = () => client.invalidateQueries();
+  const run = useAction(
+    (id: number) => data(runSource(id)),
+    text("拉取完成", "Pull finished"),
+    () => void refresh(),
+  );
+  const promote = useAction(
+    (id: number) => data(promoteSource(id)),
+    text("已设为优先", "Preferred channel updated"),
+    () => void refresh(),
+  );
+  const detach = useAction(
+    (id: number) => data(attachSource(id, null)),
+    text("已解除关联", "Channel detached"),
+    () => void refresh(),
   );
   const remove = useAction(
-    (id: number) => command(deletePullSource(id)),
-    text("拉取源已删除", "Pull source deleted"),
+    (id: number) => command(deleteSource(id)),
+    text("已删除", "Channel deleted"),
+    () => void refresh(),
   );
-  // Shows what the pull actually produced (domain and expiry) instead of a
-  // generic toast, and leaves error reporting to one place.
-  const run = useMutation({
-    mutationFn: (id: number) => data(runPullSource(id)),
-    onSuccess: async (report) => {
-      toast.success(report.message);
-      await client.invalidateQueries();
-    },
-    onError: async (error) => {
-      toast.error(extractApiError(error).message);
-      await client.invalidateQueries();
-    },
-  });
-
-  const reset = () => {
-    setName("");
-    setBaseUrl("");
-    setDomain("");
-    setKeyId("");
-    setKeySecret("");
-  };
 
   return (
-    <div className="space-y-4 rounded-lg border p-4">
-      <div className="space-y-1">
-        <h3 className="text-sm font-semibold">{text("自动拉取（Pull）", "Automatic pull")}</h3>
-        <p className="text-sm text-muted-foreground">
-          {text(
-            "从 Certd 开放接口或任意 HTTPS 地址取回证书。不需要把本机暴露出去。",
-            "Fetch certificates from the Certd open API or any HTTPS endpoint. This host stays unexposed.",
-          )}
-        </p>
-      </div>
-
-      {creating ? (
-        <div className="space-y-3">
-          <Choice
-            label={text("类型", "Type")}
-            value={kind}
-            options={[
-              { label: "Certd", value: "certd" },
-              { label: text("通用 URL", "Generic URL"), value: "url" },
-            ]}
-            onChange={(value) => setKind(value as PullKind)}
-          />
-          <div className="space-y-1.5">
-            <Label htmlFor="pull-name">{text("名称", "Name")}</Label>
-            <Input id="pull-name" value={name} onChange={(e) => setName(e.target.value)} />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="pull-url">
-              {kind === "certd" ? "Certd 地址" : text("证书地址", "Certificate URL")}
-            </Label>
-            <Input
-              id="pull-url"
-              placeholder={kind === "certd" ? "https://certd.example.com" : "https://example.com/fullchain.pem"}
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="pull-domain">{text("域名", "Domain")}</Label>
-            <Input
-              id="pull-domain"
-              placeholder="www.example.com"
-              value={domain}
-              onChange={(e) => setDomain(e.target.value)}
-            />
-          </div>
-          {kind === "certd" && (
-            <>
-              <div className="space-y-1.5">
-                <Label htmlFor="pull-key-id">Key ID</Label>
-                <Input id="pull-key-id" value={keyId} onChange={(e) => setKeyId(e.target.value)} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="pull-key-secret">Key Secret</Label>
-                <Input
-                  id="pull-key-secret"
-                  type="password"
-                  value={keySecret}
-                  onChange={(e) => setKeySecret(e.target.value)}
-                />
-              </div>
-            </>
-          )}
-          <div className="flex gap-2">
-            <Button
-              disabled={!name.trim() || !baseUrl.trim() || !domain.trim() || create.isPending}
-              onClick={() =>
-                create.mutate({
-                  name: name.trim(),
-                  kind,
-                  base_url: baseUrl.trim(),
-                  domain: domain.trim(),
-                  key_id: keyId.trim() || undefined,
-                  key_secret: keySecret || undefined,
-                })
-              }
-            >
-              {text("保存", "Save")}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setCreating(false);
-                reset();
-              }}
-            >
-              {text("取消", "Cancel")}
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <Button variant="outline" onClick={() => setCreating(true)}>
-          <AppIcon name="plus" />
-          {text("添加拉取源", "Add pull source")}
-        </Button>
+    <EditorDialog
+      open
+      title={text("更新方式", "Channels")}
+      description={text(
+        "这个证书的更新渠道。推送由证书管理器发起；自动拉取由本服务每天检查一次。",
+        "How this certificate gets updated. Push is driven by the certificate manager; pull is checked once a day.",
       )}
-
-      {(sources.data ?? []).map((source: PullSource) => (
-        <div
-          key={source.id}
-          className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-sm"
-        >
-          <div className="space-y-1">
-            <div className="font-medium">
-              {source.name} <Badge variant="outline">{source.kind}</Badge>
-            </div>
-            <div className="text-xs text-muted-foreground">
-              {source.base_url} · {source.domain}
-              {source.last_run_at && ` · ${source.last_run_at.slice(0, 19)}`}
-            </div>
-            {source.last_error && (
-              <div className="text-xs text-destructive">{source.last_error}</div>
+      onClose={onClose}
+    >
+      <div className="space-y-3">
+        {sources.isLoading && <p className="text-sm text-muted-foreground">…</p>}
+        {(sources.data ?? []).length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            {text(
+              "还没有更新方式。用「导入证书 → 推送 / 自动拉取」新建一个。",
+              "No channel yet. Create one from Import → Push / pull.",
             )}
-          </div>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={run.isPending}
-              onClick={() => run.mutate(source.id)}
-            >
-              {text("立即拉取", "Pull now")}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-destructive"
-              disabled={remove.isPending}
-              onClick={() => remove.mutate(source.id)}
-            >
-              {text("删除", "Delete")}
-            </Button>
-          </div>
-        </div>
-      ))}
-    </div>
+          </p>
+        )}
+        {(sources.data ?? []).map((source) => (
+          <ChannelRow
+            key={source.id}
+            source={source}
+            busy={
+              run.isPending || promote.isPending || detach.isPending || remove.isPending
+            }
+            onRun={() => run.mutate(source.id)}
+            onPromote={() => promote.mutate(source.id)}
+            onDetach={() => detach.mutate(source.id)}
+            onDelete={() => remove.mutate(source.id)}
+          />
+        ))}
+      </div>
+    </EditorDialog>
   );
 }
 
-function expiryVariant(days: number): "default" | "secondary" | "destructive" | "outline" {
-  if (days < 0) return "destructive";
-  if (days <= 7) return "destructive";
-  if (days <= 30) return "secondary";
-  return "outline";
-}
+function ChannelRow({
+  source,
+  busy,
+  onRun,
+  onPromote,
+  onDetach,
+  onDelete,
+}: {
+  source: CertificateSource;
+  busy: boolean;
+  onRun: () => void;
+  onPromote: () => void;
+  onDetach: () => void;
+  onDelete: () => void;
+}) {
+  const { text } = useI18n();
+  const kindLabel = {
+    push: text("推送", "Push"),
+    certd: text("Certd 拉取", "Certd pull"),
+    url: text("URL 拉取", "URL pull"),
+  }[source.kind];
 
-function expiryLabel(
-  days: number,
-  text: (zh: string, en: string) => string,
-): string {
-  if (days < 0) return text("已过期", "Expired");
-  if (days === 0) return text("今天到期", "Expires today");
-  return text(`${days} 天`, `${days} days`);
-}
-
-function sourceLabel(
-  source: string,
-  text: (zh: string, en: string) => string,
-): string {
-  switch (source) {
-    case "manual":
-      return text("手动粘贴", "Pasted");
-    case "upload":
-      return text("上传文件", "Uploaded");
-    case "local_path":
-      return text("本机路径", "Local path");
-    case "webhook":
-      return text("Webhook 推送", "Webhook push");
-    case "certd_pull":
-      return "Certd";
-    case "url_pull":
-      return text("URL 拉取", "URL pull");
-    default:
-      return source;
-  }
+  return (
+    <div className="space-y-2 rounded-md border p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="space-y-0.5">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            {kindLabel}
+            {source.is_primary && (
+              <Badge variant="secondary">{text("优先", "Preferred")}</Badge>
+            )}
+            {source.last_status === "failed" && (
+              <Badge variant="destructive">{text("上次失败", "Last run failed")}</Badge>
+            )}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {source.domain || source.domains.join(", ")}
+            {source.base_url && ` · ${source.base_url}`}
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {source.kind !== "push" && (
+            <Button variant="outline" size="sm" disabled={busy} onClick={onRun}>
+              {text("立即拉取", "Fetch now")}
+            </Button>
+          )}
+          {!source.is_primary && (
+            <Button variant="outline" size="sm" disabled={busy} onClick={onPromote}>
+              {text("设为优先", "Make preferred")}
+            </Button>
+          )}
+          <Button variant="outline" size="sm" disabled={busy} onClick={onDetach}>
+            {text("解除关联", "Detach")}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-destructive"
+            disabled={busy}
+            onClick={onDelete}
+          >
+            {text("删除", "Delete")}
+          </Button>
+        </div>
+      </div>
+      {source.last_error && (
+        <p className="text-xs text-destructive">{source.last_error}</p>
+      )}
+      {source.next_run_at && !source.last_error && (
+        <p className="text-xs text-muted-foreground">
+          {text("下次检查", "Next check")} {source.next_run_at.slice(0, 16)}
+        </p>
+      )}
+    </div>
+  );
 }

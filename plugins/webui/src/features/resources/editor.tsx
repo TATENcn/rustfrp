@@ -19,6 +19,11 @@ import {
   FieldLegend,
 } from "@/components/ui/field";
 import { ActionButton, Choice, ErrorState } from "@/components/common/page";
+import {
+  CertificatePluginEditor,
+  JsonTextArea,
+  PluginTypeControl,
+} from "./certificate-plugin";
 const chinese: Record<string, string> = {
   name: "名称",
   server_addr: "服务器地址",
@@ -168,12 +173,13 @@ export function ResourceEditor({
       fields: fields.filter((f) => !connectionKeys.has(f.key)),
     },
   ];
+  const update = (key: string, v: unknown) =>
+    setForm((old) => ({ ...old, [key]: v }));
   function control(field: FieldSchema) {
     const id = `${prefix}-${field.key}`,
       value = form[field.key],
       label = text(chinese[field.key] ?? field.label, field.label);
-    const update = (v: unknown) =>
-      setForm((old) => ({ ...old, [field.key]: v }));
+    const setValue = (v: unknown) => update(field.key, v);
     return (
       <Field
         key={field.key}
@@ -197,7 +203,7 @@ export function ResourceEditor({
             checked={!!value}
             disabled={busy}
             aria-controls={field.key === "tls_enable" && value ? `${prefix}-tls-options` : undefined}
-            onCheckedChange={update}
+            onCheckedChange={setValue}
           />
         ) : field.kind === "select" ? (
           <Choice
@@ -220,7 +226,7 @@ export function ResourceEditor({
                     label: v.toUpperCase(),
                   }))
             }
-            onChange={(v) => update(field.key === "profile_id" ? Number(v) : v)}
+            onChange={(v) => setValue(field.key === "profile_id" ? Number(v) : v)}
           />
         ) : (
           <Input
@@ -246,7 +252,7 @@ export function ResourceEditor({
                   : undefined
             }
             onChange={(e) =>
-              update(
+              setValue(
                 field.kind === "number"
                   ? e.target.value === ""
                     ? null
@@ -316,7 +322,13 @@ export function ResourceEditor({
           </div>
           <div className="grid items-start gap-x-5 gap-y-5 sm:grid-cols-2">
             {section.fields
-              .filter((f) => f.kind !== "switch" && !f.key.startsWith("tls_") && (!f.when || f.when(form)))
+              .filter(
+                (f) =>
+                  f.kind !== "switch" &&
+                  f.key !== "plugin_config" &&
+                  !f.key.startsWith("tls_") &&
+                  (!f.when || f.when(form)),
+              )
               .map(control)}
           </div>
           {section.fields.some(
@@ -342,6 +354,36 @@ export function ResourceEditor({
           )}
         </FieldSet>
       ))}
+      {kind === "proxies" && (
+        <FieldSet disabled={busy} className="gap-4 border-t pt-5">
+          <div>
+            <FieldLegend className="mb-1">
+              {text("FRP 原生插件", "FRP client plugin")}
+            </FieldLegend>
+            <p className="text-xs text-muted-foreground">
+              {text(
+                "https 代理需要在插件里指定证书路径；其它插件的完整参数仍在下方 JSON 中编辑。",
+                "An https proxy names its certificate files in the plugin. Other plugin fields stay editable as JSON below.",
+              )}
+            </p>
+          </div>
+          <CertificatePluginEditor
+            value={form.plugin_config}
+            busy={busy}
+            onChange={(next) => update("plugin_config", next)}
+          />
+          <PluginTypeControl
+            value={form.plugin_config}
+            busy={busy}
+            onChange={(next) => update("plugin_config", next)}
+          />
+          <JsonTextArea
+            value={form.plugin_config}
+            busy={busy}
+            onChange={(next) => update("plugin_config", next)}
+          />
+        </FieldSet>
+      )}
       <div className="sticky -bottom-6 -mx-6 flex justify-end gap-2 border-t bg-background px-6 py-4">
         <Button
           type="button"

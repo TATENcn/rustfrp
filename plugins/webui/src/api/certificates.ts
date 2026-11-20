@@ -1,4 +1,4 @@
-import { apiDelete, apiGet, apiPost } from '@/api/client'
+import { apiDelete, apiGet, apiPost, apiPut } from '@/api/client'
 import type { ApiEnvelope } from '@/api/types'
 
 /**
@@ -6,6 +6,10 @@ import type { ApiEnvelope } from '@/api/types'
  *
  * This type intentionally has no certificate or key fields: the daemon never
  * sends them, and there is no endpoint to fetch them.
+ *
+ * A certificate exists before it has material, which is why the fields that
+ * only a bundle can supply are nullable: `material_id` is `null` until the first
+ * import, and `days_remaining` follows it.
  */
 export interface Certificate {
   id: number
@@ -18,7 +22,16 @@ export interface Certificate {
   key_algo: string
   not_before: string
   not_after: string
-  days_remaining: number
+  /** Material row these fields came from; null before the first import. */
+  material_id: number | null
+  days_remaining: number | null
+  /** Derived state. `usable` is exactly `status !== expired|not_yet_valid|pending`. */
+  status: 'active' | 'expiring_soon' | 'expired' | 'not_yet_valid' | 'pending'
+  /** Why it cannot be used, when it cannot. */
+  status_reason: string | null
+  usable: boolean
+  /** Last failure on any attached channel, so a pending certificate can explain itself. */
+  channel_error: string | null
   source: string
   source_detail: string | null
   created_at: string
@@ -40,51 +53,57 @@ export interface CertificateBinding {
   updated_at: string
 }
 
-export interface IngestToken {
+/** How a certificate gets updated. */
+export type SourceKind = 'push' | 'certd' | 'url'
+
+/**
+ * One channel for one certificate.
+ *
+ * A channel can be unbound (`certificate_id: null`) until it is attached; that is
+ * what the legacy global tokens became after the upgrade.
+ */
+export interface CertificateSource {
   id: number
   tenant_id: string
+  certificate_id: number | null
+  kind: SourceKind
   name: string
+  domain: string
+  base_url: string
+  /** Allowed domains, for a push token only. */
   domains: string[]
+  /** Whether a credential is stored; the credential itself is never sent. */
+  has_secret: boolean
+  is_primary: boolean
+  enabled: boolean
   expires_at: string | null
   revoked_at: string | null
   last_used_at: string | null
   use_count: number
-  created_at: string
-}
-
-export interface CreatedIngestToken {
-  token: IngestToken
-  /** Present only in the creation response. */
-  plaintext: string | null
-}
-
-export type PullKind = 'certd' | 'url'
-
-export interface PullSource {
-  id: number
-  tenant_id: string
-  name: string
-  kind: PullKind
-  base_url: string
-  domain: string
-  key_id?: string | null
-  has_secret: boolean
-  enabled: boolean
   last_run_at: string | null
   last_status: string | null
   last_error: string | null
+  next_run_at: string | null
   created_at: string
   updated_at: string
 }
 
-export interface PullSourceInput {
+export interface SourceInput {
+  certificate_id?: number | null
+  kind: SourceKind
   name: string
-  kind: PullKind
-  base_url: string
-  domain: string
+  domain?: string
+  base_url?: string
+  domains?: string[]
   key_id?: string
   key_secret?: string
   enabled?: boolean
+}
+
+export interface CreatedSource {
+  source: CertificateSource
+  /** Shown once, for a push channel only. */
+  plaintext: string | null
 }
 
 export interface ApplyReport {
@@ -97,6 +116,7 @@ export interface PullReport {
   status: string
   certificate_id: number | null
   primary_domain: string | null
+  applied: number
   message: string
 }
 
@@ -147,37 +167,39 @@ export function unbindCertificate(
   id: number,
   removeFiles = false,
 ): Promise<ApiEnvelope<null>> {
-  return apiDelete(`/certificate-bindings/${id}${removeFiles ? '?remove_files=true' : ''}`)
+  return apiDelete(`/certificate-bindings/${id}?remove_files=${removeFiles}`)
 }
 
-export function listIngestTokens(): Promise<ApiEnvelope<IngestToken[]>> {
-  return apiGet<IngestToken[]>('/cert-ingest-tokens')
+// === Channels ===
+
+export function listSources(certificateId?: number): Promise<ApiEnvelope<CertificateSource[]>> {
+  const qs =
+    certificateId === undefined ? '' : `?certificate_id=${certificateId}`
+  return apiGet<CertificateSource[]>(`/certificate-sources${qs}`)
 }
 
-export function createIngestToken(body: {
-  name: string
-  domains: string[]
-  expires_at?: string | null
-}): Promise<ApiEnvelope<CreatedIngestToken>> {
-  return apiPost<CreatedIngestToken>('/cert-ingest-tokens', body)
+export function createSource(body: SourceInput): Promise<ApiEnvelope<CreatedSource>> {
+  return apiPost<CreatedSource>('/certificate-sources', body)
 }
 
-export function deleteIngestToken(id: number): Promise<ApiEnvelope<null>> {
-  return apiDelete(`/cert-ingest-tokens/${id}`)
+export function deleteSource(id: number): Promise<ApiEnvelope<null>> {
+  return apiDelete(`/certificate-sources/${id}`)
 }
 
-export function listPullSources(): Promise<ApiEnvelope<PullSource[]>> {
-  return apiGet<PullSource[]>('/cert-pull-sources')
+/** Attach to a certificate, or detach with `null`. */
+export function attachSource(
+  id: number,
+  certificateId: number | null,
+): Promise<ApiEnvelope<CertificateSource>> {
+  return apiPut<CertificateSource>(`/certificate-sources/${id}/certificate`, {
+    certificate_id: certificateId,
+  })
 }
 
-export function createPullSource(body: PullSourceInput): Promise<ApiEnvelope<PullSource>> {
-  return apiPost<PullSource>('/cert-pull-sources', body)
+export function promoteSource(id: number): Promise<ApiEnvelope<CertificateSource>> {
+  return apiPost<CertificateSource>(`/certificate-sources/${id}/primary`)
 }
 
-export function deletePullSource(id: number): Promise<ApiEnvelope<null>> {
-  return apiDelete(`/cert-pull-sources/${id}`)
-}
-
-export function runPullSource(id: number): Promise<ApiEnvelope<PullReport>> {
-  return apiPost<PullReport>(`/cert-pull-sources/${id}/run`)
+export function runSource(id: number): Promise<ApiEnvelope<PullReport>> {
+  return apiPost<PullReport>(`/certificate-sources/${id}/run`)
 }

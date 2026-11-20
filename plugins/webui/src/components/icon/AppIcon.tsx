@@ -21,6 +21,7 @@ import {
   LoaderCircle,
   LogOut,
   Menu,
+  EllipsisVertical,
   Network,
   Palette,
   Play,
@@ -30,6 +31,7 @@ import {
   Server,
   Settings,
   Shield,
+  ShieldCheck,
   Square,
   Trash2,
   Upload,
@@ -37,6 +39,7 @@ import {
   type LucideProps,
 } from "lucide-react";
 const icons = {
+  more: EllipsisVertical,
   activity: Activity,
   alert: CircleAlert,
   info: Info,
@@ -52,6 +55,7 @@ const icons = {
   copy: Copy,
   cpu: Cpu,
   download: Download,
+  downloads: Download,
   logs: FileText,
   visitors: Globe,
   memory: HardDrive,
@@ -68,11 +72,13 @@ const icons = {
   profiles: Server,
   status: Settings,
   shield: Shield,
+  "shield-check": ShieldCheck,
   stop: Square,
   trash: Trash2,
   upload: Upload,
   close: X,
   bindings: Network,
+  certificates: ShieldCheck,
 };
 export type IconName = keyof typeof icons;
 export function AppIcon({ name, ...props }: LucideProps & { name: IconName }) {
