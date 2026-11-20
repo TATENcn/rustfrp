@@ -8,7 +8,16 @@ use sysinfo::{Pid, ProcessesToUpdate, System};
 use tokio::sync::RwLock;
 
 pub const RESOURCE_SAMPLE_INTERVAL_SECS: u64 = 1;
+/// Nominal one-hour window at one sample per second.
 pub const METRICS_HISTORY_CAPACITY: usize = 3_600;
+
+/// Wall-clock window the resource buffer claims to cover.
+///
+/// The count and the window disagree whenever the clock is not monotonic: an
+/// eight-hour RTC correction left 3_600 samples spanning nine hours, so "last
+/// hour" contained only the two minutes after the jump. Evicting by age as well
+/// as by count keeps the label honest.
+pub const METRICS_HISTORY_WINDOW: chrono::Duration = chrono::Duration::hours(1);
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ProcessResourceSample {
@@ -142,6 +151,12 @@ impl MetricsStore {
 
     pub async fn push_resource(&self, sample: ResourceSample) {
         let mut resources = self.resources.write().await;
+        // Drop anything older than the advertised window before appending, so a
+        // clock jump cannot stretch the buffer past the range the UI offers.
+        let cutoff = sample.timestamp - METRICS_HISTORY_WINDOW;
+        while resources.front().is_some_and(|s| s.timestamp < cutoff) {
+            resources.pop_front();
+        }
         push_bounded(&mut resources, sample, self.capacity);
     }
 
@@ -281,5 +296,75 @@ mod tests {
         assert!(status.available);
         assert_eq!(status.pinned_objects, 1);
         assert_eq!(status.unprivileged_disabled, Some(2));
+    }
+}
+
+#[cfg(test)]
+mod window_tests {
+    use super::*;
+
+    fn sample(at: chrono::DateTime<chrono::Utc>) -> ResourceSample {
+        ResourceSample {
+            timestamp: at,
+            daemon_cpu_percent: 0.0,
+            daemon_memory_bytes: 0,
+            system_cpu_percent: 0.0,
+            system_memory_used_bytes: 0,
+            system_memory_total_bytes: 0,
+            ebpf: EbpfStatus {
+                available: false,
+                pinned_objects: 0,
+                unprivileged_disabled: None,
+            },
+            processes: Vec::new(),
+        }
+    }
+
+    /// A clock jump must not stretch the buffer past the window the UI offers:
+    /// the count bound alone allowed nine hours of samples to masquerade as one.
+    #[tokio::test]
+    async fn samples_older_than_the_window_are_evicted() {
+        let store = MetricsStore::new(METRICS_HISTORY_CAPACITY);
+        let start = chrono::Utc::now();
+
+        // Fill half the buffer an hour ago, as a skewed clock would have.
+        for i in 0..100 {
+            store
+                .push_resource(sample(start - chrono::Duration::hours(9) + chrono::Duration::seconds(i)))
+                .await;
+        }
+        assert_eq!(store.resources(usize::MAX).await.len(), 100);
+
+        // One sample "now" must discard all of them.
+        store.push_resource(sample(start)).await;
+        let kept = store.resources(usize::MAX).await;
+        assert_eq!(kept.len(), 1, "only the current sample is inside the window");
+        assert_eq!(kept[0].timestamp, start);
+    }
+
+    #[tokio::test]
+    async fn samples_inside_the_window_are_kept() {
+        let store = MetricsStore::new(METRICS_HISTORY_CAPACITY);
+        let start = chrono::Utc::now();
+        for i in 0..60 {
+            store
+                .push_resource(sample(start - chrono::Duration::minutes(59) + chrono::Duration::seconds(i)))
+                .await;
+        }
+        store.push_resource(sample(start)).await;
+        assert_eq!(store.resources(usize::MAX).await.len(), 61);
+    }
+
+    /// The count bound still applies: capacity is the hard ceiling.
+    #[tokio::test]
+    async fn capacity_still_bounds_the_buffer() {
+        let store = MetricsStore::new(10);
+        let start = chrono::Utc::now();
+        for i in 0..50 {
+            store
+                .push_resource(sample(start + chrono::Duration::seconds(i)))
+                .await;
+        }
+        assert_eq!(store.resources(usize::MAX).await.len(), 10);
     }
 }
