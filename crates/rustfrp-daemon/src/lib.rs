@@ -7,6 +7,9 @@
 #[cfg(feature = "http-api")]
 pub mod api;
 #[cfg(feature = "http-api")]
+pub mod cert_ingest;
+pub mod cert_pull;
+#[cfg(feature = "http-api")]
 pub mod desktop;
 pub mod instance;
 pub mod metrics;

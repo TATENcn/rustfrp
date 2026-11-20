@@ -56,6 +56,9 @@ pub struct ApiState {
     /// take `frp_version_operation` and consult this map first.
     pub frp_install:
         Arc<std::sync::RwLock<std::collections::HashMap<String, super::frp_versions::InstallTask>>>,
+    /// The certificate ingest listener, so the settings API can start, stop, or
+    /// move it without a restart.
+    pub ingest: Arc<crate::cert_ingest::IngestServer>,
 }
 
 impl ApiState {
@@ -66,6 +69,7 @@ impl ApiState {
         config_dir: PathBuf,
         app_state: Arc<RwLock<ClientState>>,
     ) -> Self {
+        let db_for_ingest = db.clone();
         Self {
             process_manager: process_manager.with_database(db.clone()),
             db,
@@ -77,6 +81,9 @@ impl ApiState {
             frp_version_operation: Arc::new(tokio::sync::Mutex::new(())),
             metrics: MetricsStore::new(METRICS_HISTORY_CAPACITY),
             frp_install: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            ingest: Arc::new(crate::cert_ingest::IngestServer::new(
+                crate::cert_ingest::IngestState { db: db_for_ingest },
+            )),
         }
     }
 }

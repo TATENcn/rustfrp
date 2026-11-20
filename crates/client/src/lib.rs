@@ -3,6 +3,7 @@
 //! Provides configuration management, TOML generation, and frpc process supervision.
 //! Uses `rustfrp_common` for plugin infrastructure and signal handling.
 
+pub mod cert;
 pub mod config;
 pub mod core;
 pub mod db;

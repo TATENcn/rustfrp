@@ -106,7 +106,14 @@ fn required_scope(method: &Method, path: &str) -> &'static str {
             || path.starts_with("/api/v1/visitors")
             || path.starts_with("/api/v1/bindings")
             || path.starts_with("/api/v1/logs")
-            || path.starts_with("/api/v1/environments");
+            || path.starts_with("/api/v1/environments")
+            // Certificates and their credentials belong to a tenant: one token
+            // must never see another tenant's domain certificates.
+            || path.starts_with("/api/v1/certificates")
+            || path.starts_with("/api/v1/certificate-bindings")
+            || path.starts_with("/api/v1/cert-ingest")
+            || path.starts_with("/api/v1/cert-ingest-tokens")
+            || path.starts_with("/api/v1/cert-pull-sources");
         match (
             tenant_resource,
             matches!(*method, Method::GET | Method::HEAD),

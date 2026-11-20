@@ -10,15 +10,21 @@
 //! - `proxy.rs` — LocalProxy CRUD
 //! - `binding.rs` — BindingRule CRUD
 //! - `visitor.rs` — LocalVisitor CRUD
+//! - `certificate.rs` — Certificate metadata, encrypted material, bindings
+//! - `cert_ingest.rs` — Ingest tokens and pull sources for certificate import
 
 pub mod admin_endpoint;
 pub mod binding;
+pub mod cert_ingest;
+pub mod certificate;
 pub mod environment;
 pub mod migrate;
 pub mod profile;
 pub mod proxy;
+pub mod settings;
 pub mod visitor;
 
+use crate::cert::CertCipher;
 use crate::error::{ClientError, Result};
 use rusqlite::Connection;
 use std::path::PathBuf;
@@ -75,6 +81,21 @@ impl Database {
     /// 获取数据库文件路径
     pub fn path(&self) -> &PathBuf {
         &self.db_path
+    }
+
+    /// Load the certificate master key stored next to the database file.
+    ///
+    /// Loading is per call rather than cached: the key file is small, reads are
+    /// infrequent (import / apply), and this keeps `Database` free of another
+    /// shared handle whose lifetime would have to be reasoned about on rotate.
+    pub fn cert_cipher(&self) -> Result<CertCipher> {
+        let dir = self
+            .db_path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
+        CertCipher::load_or_create(&dir)
     }
 
     /// 获取内部连接（用于需要在锁内执行多个操作的情况）

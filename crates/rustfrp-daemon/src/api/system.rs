@@ -37,6 +37,9 @@ pub struct StatusResponse {
     pub total_bindings: usize,
     pub total_visitors: usize,
     pub processes: Vec<ProcessInfoResponse>,
+    /// Directory generated frpc TOMLs are written to. The UI uses it to suggest
+    /// default certificate paths that the daemon can actually create.
+    pub config_dir: String,
 }
 
 /// Process info in status response (avoids circular dependency by re-defining)
@@ -163,6 +166,7 @@ pub async fn status(
         total_bindings: bindings,
         total_visitors: visitors,
         processes,
+        config_dir: state.config_dir.to_string_lossy().to_string(),
     })))
 }
 

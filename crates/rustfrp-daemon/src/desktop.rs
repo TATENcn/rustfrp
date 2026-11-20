@@ -50,6 +50,22 @@ pub struct DesktopOptions {
     pub frpc_path: Option<PathBuf>,
 }
 
+impl DesktopOptions {
+    /// Options for `~/.rustfrp` with an OS-assigned loopback API port.
+    ///
+    /// The desktop shell passes its own paths; this exists so tests and
+    /// embedders have one definition instead of repeating the defaults.
+    pub fn with_data_dir(data_dir: impl Into<PathBuf>, listen: impl Into<String>) -> Self {
+        let data_dir = data_dir.into();
+        Self {
+            config_dir: data_dir.join("runtime"),
+            data_dir,
+            listen: listen.into(),
+            frpc_path: None,
+        }
+    }
+}
+
 /// Errors that stop a desktop session from starting.
 #[derive(Debug, thiserror::Error)]
 pub enum DesktopError {
@@ -70,6 +86,8 @@ pub struct DesktopSession {
     data_dir: PathBuf,
     token: String,
     url: String,
+    /// Address the certificate push endpoint is listening on, if it started.
+    ingest: Option<String>,
     shutdown: rustfrp_common::signal::SignalHandler,
     server: JoinHandle<anyhow::Result<()>>,
     // Flipped to `true` when the server task ends, however it ends. The shell
@@ -108,6 +126,28 @@ impl DesktopSession {
             listener.local_addr().map_err(anyhow::Error::from)?
         );
 
+        // The push endpoint is started here too: a desktop install is the case
+        // where Certd has no other way to reach the machine, and the endpoint is
+        // the same three-route surface with the same token check.
+        let ingest_state = crate::cert_ingest::IngestState {
+            db: core.db().clone(),
+        };
+        let ingest_server = crate::cert_ingest::IngestServer::new(ingest_state.clone());
+        let ingest = match rustfrp_client::db::settings::IngestConfig::load(&ingest_state.db).await
+        {
+            Ok(config) => match ingest_server.apply(&config).await {
+                Ok(address) => address,
+                Err(error) => {
+                    tracing::warn!(%error, "certificate ingest endpoint is not listening");
+                    None
+                }
+            },
+            Err(error) => {
+                tracing::warn!(%error, "could not read ingest settings");
+                None
+            }
+        };
+
         let auth = BearerToken::new(token.clone());
         let (stop_tx, stopped) = watch::channel(false);
         let server = tokio::spawn(async move {
@@ -118,12 +158,18 @@ impl DesktopSession {
             result
         });
 
-        tracing::info!(%url, data_dir = %options.data_dir.display(), "desktop session started");
+        tracing::info!(
+            %url,
+            data_dir = %options.data_dir.display(),
+            ingest = ingest.as_deref().unwrap_or("none"),
+            "desktop session started"
+        );
 
         Ok(Self {
             data_dir: options.data_dir,
             token,
             url,
+            ingest,
             shutdown,
             server,
             stopped,
@@ -139,6 +185,14 @@ impl DesktopSession {
     /// Bearer token for API calls from the webview.
     pub fn token(&self) -> &str {
         &self.token
+    }
+
+    /// Address the certificate push endpoint listens on, once it is up.
+    ///
+    /// A desktop user needs this to paste into Certd; it is loopback unless the
+    /// stored settings were changed to expose the endpoint.
+    pub fn ingest_address(&self) -> Option<&str> {
+        self.ingest.as_deref()
     }
 
     /// Data directory (`config.db`, `logs/`, `frp/`).

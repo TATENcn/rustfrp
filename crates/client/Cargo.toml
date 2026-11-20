@@ -30,6 +30,10 @@ sha2 = "0.10"
 anyhow.workspace = true
 clap = { workspace = true }
 dirs = "5"
+x509-parser = "0.18"
+chacha20poly1305 = "0.10"
+base64 = "0.22"
+ring = "0.17"
 
 # Unix signal handling
 [target.'cfg(unix)'.dependencies]
