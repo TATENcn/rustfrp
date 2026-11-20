@@ -29,7 +29,13 @@ pub struct VersionListResponse {
 #[derive(Debug, Serialize)]
 pub struct AvailableVersionResponse {
     pub version: String,
+    pub tag: String,
     pub published_at: Option<String>,
+    /// Archive size for this daemon's platform, when the release ships one.
+    pub asset_size: Option<u64>,
+    pub download_count: Option<u64>,
+    /// Archive filename, so the UI can show the exact URL per channel.
+    pub asset_name: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -94,15 +100,37 @@ pub async fn list(State(state): State<ApiState>) -> ApiResult<VersionListRespons
 }
 
 pub async fn available(State(state): State<ApiState>) -> ApiResult<Vec<AvailableVersionResponse>> {
+    let platform = rustfrp_bin::platform::Platform::detect()
+        .ok_or_else(|| {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "FRP_PLATFORM",
+                "Unsupported platform",
+            )
+        })?
+        .slug;
     let versions = state
         .frp_versions
         .list_available()
         .await
         .map_err(binary_error)?
         .into_iter()
-        .map(|version| AvailableVersionResponse {
-            version: version.version().to_owned(),
-            published_at: version.published_at,
+        .map(|version| {
+            let asset = version.asset_for(&platform);
+            let asset_size = asset.map(|asset| asset.size).filter(|size| *size > 0);
+            let download_count = asset.map(|asset| asset.download_count);
+            let tag = version.tag().to_owned();
+            AvailableVersionResponse {
+                version: version.version().to_owned(),
+                asset_name: rustfrp_bin::download::asset_filename(
+                    &rustfrp_bin::FrpVersion::from_tag(&tag),
+                    &platform,
+                ),
+                tag,
+                published_at: version.published_at,
+                asset_size,
+                download_count,
+            }
         })
         .collect::<Vec<_>>();
     let count = versions.len();
@@ -137,6 +165,20 @@ pub async fn install(
         request.mirror_base.as_deref(),
     )
     .map_err(binary_error)?;
+    let requested = request.version.trim().trim_start_matches('v').to_owned();
+    if state
+        .frp_install
+        .read()
+        .map_err(|_| registry_error())?
+        .get(&requested)
+        .is_some_and(|task| task.status == "running")
+    {
+        return Err(api_error(
+            StatusCode::CONFLICT,
+            "FRP_INSTALL_BUSY",
+            "This version is already being installed",
+        ));
+    }
     state
         .frp_versions
         .install(&request.version, Some(&base))
@@ -224,6 +266,20 @@ pub async fn activate(
 
 pub async fn remove(State(state): State<ApiState>, Path(version): Path<String>) -> ApiResult<()> {
     let _operation = state.frp_version_operation.lock().await;
+    let version = version.trim_start_matches('v').to_owned();
+    if state
+        .frp_install
+        .read()
+        .map_err(|_| registry_error())?
+        .get(&version)
+        .is_some_and(|task| task.status == "running")
+    {
+        return Err(api_error(
+            StatusCode::CONFLICT,
+            "FRP_INSTALL_BUSY",
+            "Version is being installed; wait for the download to finish",
+        ));
+    }
     let target = state
         .frp_versions
         .version_path(&version)
@@ -319,39 +375,62 @@ pub struct InstallTask {
     pub downloaded_bytes: u64,
     pub total_bytes: Option<u64>,
     pub error: Option<String>,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    pub finished_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-pub async fn installation(State(state): State<ApiState>) -> ApiResult<Option<InstallTask>> {
-    let task = state
+fn registry_error() -> (StatusCode, Json<ApiResponse<()>>) {
+    api_error(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "INSTALL_STATUS",
+        "Install status unavailable",
+    )
+}
+
+/// Mutate the task for `version` if it is still the same task instance.
+fn update_task(
+    state: &ApiState,
+    version: &str,
+    task_id: &str,
+    apply: impl FnOnce(&mut InstallTask),
+) {
+    if let Ok(mut tasks) = state.frp_install.write() {
+        if let Some(task) = tasks.get_mut(version).filter(|task| task.id == task_id) {
+            apply(task);
+        }
+    }
+}
+
+/// Every install task known to this daemon, newest first.
+///
+/// Downloads are independent, so more than one can be running. The UI pairs a
+/// task with an installed version by name instead of assuming a single global
+/// task.
+pub async fn installation(State(state): State<ApiState>) -> ApiResult<Vec<InstallTask>> {
+    let mut tasks = state
         .frp_install
         .read()
-        .map_err(|_| {
-            api_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "INSTALL_STATUS",
-                "Install status unavailable",
-            )
-        })?
-        .clone();
-    Ok(Json(ApiResponse::ok(task)))
+        .map_err(|_| registry_error())?
+        .values()
+        .cloned()
+        .collect::<Vec<_>>();
+    tasks.sort_by_key(|task| std::cmp::Reverse(task.started_at));
+    let count = tasks.len();
+    Ok(Json(ApiResponse::ok_list(tasks, count)))
 }
 
 pub async fn begin_install(
     State(state): State<ApiState>,
     Json(request): Json<InstallRequest>,
 ) -> ApiResult<InstallTask> {
-    let operation = state
-        .frp_version_operation
-        .clone()
-        .try_lock_owned()
-        .map_err(|_| {
-            api_error(
-                StatusCode::CONFLICT,
-                "FRP_OPERATION_BUSY",
-                "Another version operation is running",
-            )
-        })?;
     let version = request.version.trim().trim_start_matches('v').to_owned();
+    if version.is_empty() {
+        return Err(api_error(
+            StatusCode::BAD_REQUEST,
+            "FRP_VERSION_REQUIRED",
+            "version is required",
+        ));
+    }
     state
         .frp_versions
         .version_path(&version)
@@ -370,21 +449,38 @@ pub async fn begin_install(
         downloaded_bytes: 0,
         total_bytes: None,
         error: None,
+        started_at: chrono::Utc::now(),
+        finished_at: None,
     };
-    *state.frp_install.write().map_err(|_| {
-        api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "INSTALL_STATUS",
-            "Install status unavailable",
-        )
-    })? = Some(task.clone());
+    {
+        let mut tasks = state.frp_install.write().map_err(|_| registry_error())?;
+        // Both the staging directory and the integrity marker belong to one
+        // version, so a second concurrent install of it would corrupt the
+        // first. Other versions proceed independently.
+        if tasks
+            .get(&version)
+            .is_some_and(|existing| existing.status == "running")
+        {
+            return Err(api_error(
+                StatusCode::CONFLICT,
+                "FRP_INSTALL_BUSY",
+                "This version is already being installed",
+            ));
+        }
+        tasks.insert(version.clone(), task.clone());
+    }
+    let task_id = task.id.clone();
     tokio::spawn(async move {
-        let _operation = operation;
         let progress_state = state.frp_install.clone();
+        let progress_version = version.clone();
+        let progress_task = task_id.clone();
         let progress: rustfrp_bin::download::ProgressCallback =
             std::sync::Arc::new(move |update| {
-                if let Ok(mut status) = progress_state.write() {
-                    if let Some(task) = status.as_mut() {
+                if let Ok(mut tasks) = progress_state.write() {
+                    if let Some(task) = tasks
+                        .get_mut(&progress_version)
+                        .filter(|task| task.id == progress_task)
+                    {
                         task.stage = update.stage;
                         if update.stage == "downloading" {
                             task.downloaded_bytes = update.downloaded_bytes;
@@ -397,20 +493,19 @@ pub async fn begin_install(
             .frp_versions
             .install_with_progress(&version, &source, progress)
             .await;
-        if let Ok(mut status) = state.frp_install.write() {
-            if let Some(task) = status.as_mut() {
-                match result {
-                    Ok(_) => {
-                        task.status = "completed";
-                        task.stage = "completed";
-                    }
-                    Err(e) => {
-                        task.status = "failed";
-                        task.error = Some(e.to_string());
-                    }
+        update_task(&state, &version, &task_id, |task| {
+            task.finished_at = Some(chrono::Utc::now());
+            match result {
+                Ok(_) => {
+                    task.status = "completed";
+                    task.stage = "completed";
+                }
+                Err(error) => {
+                    task.status = "failed";
+                    task.error = Some(error.to_string());
                 }
             }
-        };
+        });
     });
     Ok(Json(ApiResponse::ok(task)))
 }

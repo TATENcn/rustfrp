@@ -22,11 +22,38 @@ pub struct AvailableVersion {
     pub published_at: Option<String>,
     pub prerelease: bool,
     pub draft: bool,
+    #[serde(default)]
+    assets: Vec<ReleaseAsset>,
+}
+
+/// One downloadable archive of a GitHub release.
+///
+/// Only the fields the UI needs to describe a build: which file, how large,
+/// and how often it was fetched. The API sends far more, which is ignored.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ReleaseAsset {
+    pub name: String,
+    #[serde(default)]
+    pub size: u64,
+    #[serde(default)]
+    pub download_count: u64,
 }
 
 impl AvailableVersion {
     pub fn version(&self) -> &str {
         self.tag.trim_start_matches('v')
+    }
+
+    /// The GitHub tag, always `v`-prefixed.
+    pub fn tag(&self) -> &str {
+        &self.tag
+    }
+
+    /// The archive this platform installs, if the release ships one.
+    pub fn asset_for(&self, platform: &str) -> Option<&ReleaseAsset> {
+        let wanted =
+            crate::download::asset_filename(&crate::FrpVersion::from_tag(&self.tag), platform);
+        self.assets.iter().find(|asset| asset.name == wanted)
     }
 }
 

@@ -8,6 +8,8 @@ import Shell from "./shell";
 const Overview = lazy(() => import("@/features/overview/page"));
 const Resources = lazy(() => import("@/features/resources/page"));
 const Bindings = lazy(() => import("@/features/bindings/page"));
+const Certificates = lazy(() => import("@/features/certificates/page"));
+const Downloads = lazy(() => import("@/features/downloads/page"));
 const Logs = lazy(() => import("@/features/logs/page"));
 const Settings = lazy(() => import("@/features/settings/page"));
 const Login = lazy(() => import("@/features/auth/login"));
@@ -34,6 +36,8 @@ export default function Router() {
               />
             ))}
             <Route path="bindings" element={<Bindings />} />
+            <Route path="certificates" element={<Certificates />} />
+            <Route path="downloads" element={<Downloads />} />
             <Route path="logs" element={<Logs />} />
             <Route path="status" element={<Settings />} />
             <Route path="*" element={<Navigate to="/" replace />} />

@@ -232,11 +232,16 @@ export interface FrpVersionList {
 
 export interface AvailableFrpVersion {
   version: string
+  tag: string
   published_at: string | null
+  asset_size: number | null
+  download_count: number | null
+  asset_name: string
 }
 
 export interface StatusResponse {
   state: string
+  config_dir: string
   uptime_secs: number
   active_frpc_instances: number
   total_profiles: number

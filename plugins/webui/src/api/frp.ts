@@ -3,7 +3,6 @@ import type {
   ApiEnvelope,
   AvailableFrpVersion,
   FrpVersionList,
-  InstalledFrpVersion,
 } from "@/api/types";
 
 export function listFrpVersions(): Promise<ApiEnvelope<FrpVersionList>> {
@@ -14,16 +13,6 @@ export function listAvailableFrpVersions(): Promise<
   ApiEnvelope<AvailableFrpVersion[]>
 > {
   return apiGet<AvailableFrpVersion[]>("/frp/releases");
-}
-
-export function installFrpVersion(
-  version: string,
-  mirrorBase?: string,
-): Promise<ApiEnvelope<InstalledFrpVersion>> {
-  return apiPost<InstalledFrpVersion>("/frp/versions", {
-    version,
-    mirror_base: mirrorBase || null,
-  });
 }
 
 export function activateFrpVersion(
@@ -47,9 +36,14 @@ export interface InstallTask {
   downloaded_bytes: number;
   total_bytes: number | null;
   error: string | null;
+  started_at: string;
+  finished_at: string | null;
 }
-export const getInstallation = () =>
-  apiGet<InstallTask | null>("/frp/installations");
+
+/** Every install task this daemon knows about; several may run at once. */
+export const getInstallations = () =>
+  apiGet<InstallTask[]>("/frp/installations");
+
 export const beginInstallation = (
   version: string,
   channel: string,
