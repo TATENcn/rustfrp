@@ -41,11 +41,11 @@ RustFRP 不修改 FRP 协议，也不接管流量转发。已有的现代格式 
 </details>
 
 <details>
-<summary>frpc 安装与多版本管理</summary>
+<summary>frpc 版本下载与多版本管理</summary>
 
-安装与启用分开，支持官方源、GHFast、GH-Proxy 和自定义 HTTPS 渠道。
+「运维管理 → 版本下载」自动读取官方发布列表（大小、下载数、发布时间），选择渠道后直接下载；多个版本可并发下载，卡片内显示实时进度条。安装与启用分开，支持官方源、GHFast、GH-Proxy 和自定义 HTTPS 渠道。
 
-![FRP 版本管理](docs/images/webui-versions.png)
+![FRP 版本下载](docs/images/webui-versions.png)
 
 </details>
 
@@ -78,10 +78,11 @@ RustFRP 不修改 FRP 协议，也不接管流量转发。已有的现代格式 
 | 配置管理 | Profile、Proxy、Binding、Visitor 与多环境管理；批量创建 TCP/UDP 映射；端口冲突检查 |
 | FRP 协议 | TCP、UDP、HTTP、HTTPS、STCP、XTCP、SUDP、TCPMUX；Token、OIDC、`user`、`serverUser` |
 | 进程守护 | 启动、停止、重启、热重载、优雅退出、崩溃恢复、重复故障归并 |
-| 版本管理 | Linux、Windows、macOS 的 x86_64/arm64；后台安装；官方源、GHFast、GH-Proxy 或自定义 HTTPS 镜像；按服务器选择版本；官方校验和验证 |
+| 版本管理 | Linux、Windows、macOS 的 x86_64/arm64；发布列表与并发后台下载（含进度条）；官方源、GHFast、GH-Proxy 或自定义 HTTPS 镜像；按服务器选择版本；官方校验和验证 |
 | 迁移备份 | 事务化导入现代 `frpc.toml`；一致性 SQLite 备份导出 |
 | 服务端管理 | Agent 主动拉取配置，ETag 缓存，`frps verify` 校验，原子切换与失败回滚 |
 | 可观测性 | 资源趋势与运行进程侧栏；三种口径的流量统计；日志筛选；可选 Prometheus / Grafana |
+| 证书管理 | https 代理的域名证书：粘贴 PEM、本机路径、Webhook 推送、Certd/URL 拉取；加密存储、原子落盘、按绑定的插件路径生效；不提供下载或导出 |
 | API 与扩展 | REST API、Token/scope 鉴权、按 token 的租户隔离、可选 WASM 插件 |
 
 ## 系统架构
@@ -112,12 +113,22 @@ docker run -d --name rustfrp --restart unless-stopped \
 
 打开 <http://127.0.0.1:7900/>，输入上面的 Token。容器默认不下载 frpc，即使尚未安装 frpc，也能打开前端、编辑配置和使用管理 API。数据保存在 `rustfrp-data` 卷中。
 
-1. 在「系统状态 → FRP 版本」选择版本和下载渠道，安装后设为系统默认。
+1. 在「运维管理 → 版本下载」选择渠道并下载版本，之后可设为系统默认。
 2. 在「服务器配置」添加 frps 连接；需要时为该服务器固定 frpc 版本。
 3. 在「代理规则」创建本地服务映射，再到「代理分配」将代理分配给服务器。
 4. 启动实例，查看日志和流量，验证映射地址。
 
 上面的端口仅绑定本机；远程部署可通过 SSH 转发或 TLS 反向代理访问。容器内的 `127.0.0.1` 指向容器自身，代理宿主机服务时应填写容器可达的宿主机地址。
+
+`https` 代理的域名证书由 frpc 侧持有：frps 只读 SNI 做路由，不在服务端终结 TLS，所以证书要落在这台机器上、由 `https2http` / `https2https` / `tls2raw` 插件的 `crtPath` / `keyPath` 读取。
+
+证书以**域名**为身份，一张证书可以有多份材料（每次续期一份），当前生效的是最后导入的那份；续期替换不会新增证书，也不会动它的绑定。
+
+每张证书有一个派生状态：`active`（可用）、`expiring_soon`（30 天内到期）、`expired`、`not_yet_valid`、`pending`（已配置但还没有材料）。只有前两种会写入磁盘——过期或尚未收到材料的证书被 apply 时会直接拒绝，而不是把能用的文件覆盖掉。`pending` 的证书会附带它各通道最近一次失败的原因，所以「配了但没拉成功」在列表里一眼可见。
+
+更新方式挂在证书自己身上：推送令牌或自动拉取，可在证书之间移动、更换或设为优先。自动拉取由服务守护进程每天检查一次，导入后自动写入已绑定代理的路径并重启对应 frpc 进程（`frpc reload` 不会重新读取 TLS 证书，必须重启）。拉取到的证书必须覆盖该通道填写的域名，否则拒绝——这是「自动替换」能安全开启的前提。
+
+推送端点是平台级设置，在「系统状态 → 证书通道」配置；默认只监听 `127.0.0.1:7901`，但同样的两条路由也挂在控制 API 上，所以经 WebUI 可达的地址就能推送，无需额外开放端口。所有请求都要带 `X-Cert-Ingest-Token`，且证书的每个 SAN 都必须在该令牌允许的域名内。
 
 ### Docker Compose（含监控组件）
 
@@ -178,7 +189,7 @@ GET  /api/v1/config/export
 
 ## FRP 二进制与版本管理
 
-在「系统状态 → FRP 版本」按需安装。下载在后台运行，页面显示进度和错误；安装本身不会切换默认版本或重启实例。版本按 `versions/<version>/<platform>/` 隔离存放。
+在「运维管理 → 版本下载」按需下载。发布列表来自官方 GitHub API，显示归档大小、下载数与发布时间；多个版本可同时下载，每张卡片显示自己的进度条与失败原因。安装本身不会切换默认版本或重启实例。版本按 `versions/<version>/<platform>/` 隔离存放。
 
 - **下载渠道**：GitHub 官方、GHFast（`ghfast.top`）、GH-Proxy 或自定义 HTTPS 地址。第三方仅提供发布归档，SHA256 校验信息仍来自官方；获取失败或校验不符时停止安装。
 - **服务器版本**：每个服务器配置对应一个 frpc 进程，该服务器下的代理共用版本。在服务器列表点击版本按钮，选择固定版本或跟随系统默认；保存后点击「重启并应用版本」生效。
