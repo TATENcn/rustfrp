@@ -135,22 +135,111 @@ jobs:
             dist/*.zip
             dist/*.sha256
 
-  container:
-    name: Publish multi-architecture container
+  container-smoke:
+    name: Container offline startup check
     needs: verify-tag
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
-    # The multi-arch push runs arm64 under QEMU. On 2026-11-15 it pushed the image
-    # and then hung in the build-push post-steps for 40+ minutes, which held the
-    # whole release hostage. Bound it so a stuck push fails this job instead.
-    timeout-minutes: 60
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
 
-      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
 
+      - name: Build container for offline startup check
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: rustfrp:release-smoke
+          cache-from: type=gha,scope=container-amd64
+          cache-to: type=gha,mode=max,scope=container-amd64
+
+      - name: Verify empty offline container serves API and frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'docker logs rustfrp-offline-smoke; docker rm -f -v rustfrp-offline-smoke' EXIT
+          # Override CMD intentionally: offline startup must be the binary default.
+          docker run -d --name rustfrp-offline-smoke --network none \
+            rustfrp:release-smoke --db-path /data/config.db \
+            --config-dir /data/runtime --api-listen 0.0.0.0:7900
+          for attempt in $(seq 1 20); do
+            if docker exec rustfrp-offline-smoke curl -fsS http://127.0.0.1:7900/api/v1/health; then break; fi
+            sleep 1
+          done
+          docker exec rustfrp-offline-smoke curl -fsS http://127.0.0.1:7900/api/v1/health
+          docker exec rustfrp-offline-smoke sh -c \
+            'curl -fsS http://127.0.0.1:7900/ -o /tmp/index.html && grep -q "<html" /tmp/index.html'
+
+  # Each architecture is built on its own native runner. Building arm64 under
+  # QEMU on an amd64 runner compiles the whole workspace at a fraction of native
+  # speed: v0.5.4 took 53 minutes of the 60-minute bound, and v0.6.0 hit the
+  # bound and was cancelled. A native arm64 runner does the same build in
+  # single-digit minutes, so the arm64 image stays in the release.
+  container:
+    name: Container image (${{ matrix.arch }})
+    needs: [verify-tag, container-smoke]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      packages: write
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            os: ubuntu-latest
+          - arch: arm64
+            os: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The arch suffix keeps the per-architecture tags apart; the manifest job
+      # below is what publishes the unsuffixed ones a user pulls.
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/tatencn/rustfrp
+          flavor: |
+            suffix=-${{ matrix.arch }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Build and push ${{ matrix.arch }}
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=container-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=container-${{ matrix.arch }}
+
+  container-manifest:
+    name: Publish multi-architecture container
+    needs: [container]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
       - uses: docker/setup-buildx-action@v4
 
       - name: Log in to GitHub Container Registry
@@ -170,42 +259,19 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest
 
-      - name: Build container for offline startup check
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          platforms: linux/amd64
-          load: true
-          tags: rustfrp:release-smoke
-          cache-from: type=gha
-
-      - name: Verify empty offline container serves API and frontend
+      # Point every user-facing tag at both architecture images. `imagetools
+      # create` copies the manifests by digest, so no layers move again.
+      - name: Combine the per-architecture images
         shell: bash
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           set -euo pipefail
-          trap 'docker logs rustfrp-offline-smoke; docker rm -f -v rustfrp-offline-smoke' EXIT
-          # Override CMD intentionally: offline startup must be the binary default.
-          docker run -d --name rustfrp-offline-smoke --network none \
-            rustfrp:release-smoke --db-path /data/config.db \
-            --config-dir /data/runtime --api-listen 0.0.0.0:7900
-          for attempt in $(seq 1 20); do
-            if docker exec rustfrp-offline-smoke curl -fsS http://127.0.0.1:7900/api/v1/health; then break; fi
-            sleep 1
-          done
-          docker exec rustfrp-offline-smoke curl -fsS http://127.0.0.1:7900/api/v1/health
-          docker exec rustfrp-offline-smoke sh -c \
-            'curl -fsS http://127.0.0.1:7900/ -o /tmp/index.html && grep -q "<html" /tmp/index.html'
-
-      - name: Build and push linux/amd64 and linux/arm64
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          while read -r tag; do
+            [ -n "$tag" ] || continue
+            docker buildx imagetools create \
+              -t "$tag" "$tag-amd64" "$tag-arm64"
+          done <<< "$TAGS"
 
   desktop:
     name: Desktop bundle (${{ matrix.name }})
