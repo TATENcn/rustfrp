@@ -89,6 +89,17 @@ pub fn status_code(err: &ClientError) -> StatusCode {
         // 409 — Duplicate
         ClientError::RecordAlreadyExists(_) => StatusCode::CONFLICT,
 
+        // 409 — Certificate still referenced by a proxy binding
+        ClientError::CertificateStillBound { .. } => StatusCode::CONFLICT,
+
+        // 422 — Certificate input rejected: unparseable, mismatched key, bad target
+        ClientError::CertificateParse(_)
+        | ClientError::CertificateKeyMismatch(_)
+        | ClientError::CertificateTarget(_) => StatusCode::UNPROCESSABLE_ENTITY,
+
+        // 500 — Master key missing or corrupt: the material cannot be decrypted
+        ClientError::CertificateSecrets(_) => StatusCode::INTERNAL_SERVER_ERROR,
+
         // 422 — Validation failures
         ClientError::ConfigValidation(_)
         | ClientError::InvalidIpAddress(_)

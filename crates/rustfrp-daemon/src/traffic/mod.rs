@@ -11,14 +11,12 @@ mod linux;
 #[derive(Debug, Clone, Serialize)]
 pub struct ProfileCollection {
     pub profile_id: i64,
-    pub environment_id: i64,
     pub state: &'static str,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ProxyCollection {
     pub profile_id: i64,
-    pub environment_id: i64,
     pub proxy_id: i64,
     pub name: String,
     pub state: &'static str,
@@ -81,7 +79,7 @@ use std::{
 #[cfg(target_os = "linux")]
 #[derive(Default)]
 struct CounterState {
-    identity: (u32, String, i64),
+    identity: (u32, String),
     previous: HashMap<u64, (u64, u64)>,
     received: u64,
     sent: u64,
@@ -89,11 +87,7 @@ struct CounterState {
 }
 #[cfg(target_os = "linux")]
 impl CounterState {
-    fn update(
-        &mut self,
-        identity: (u32, String, i64),
-        sockets: &[linux::SocketCounter],
-    ) -> (u64, u64) {
+    fn update(&mut self, identity: (u32, String), sockets: &[linux::SocketCounter]) -> (u64, u64) {
         if self.identity != identity {
             *self = Self {
                 identity,
@@ -176,15 +170,13 @@ impl Collector {
                                 .timestamp_nanos_opt()
                                 .unwrap_or_default()
                                 .to_string(),
-                            0,
                         );
                     }
-                    let identity = (index, counter.identity.1.clone(), 0);
+                    let identity = (index, counter.identity.1.clone());
                     let (received_bytes, sent_bytes) = counter.update(identity, &[socket]);
                     store
                         .push_traffic(crate::metrics::TrafficSample {
                             timestamp,
-                            environment_id: 0,
                             profile_id: 0,
                             proxy_id: None,
                             interface: Some(name),
@@ -282,16 +274,8 @@ impl Collector {
         let timestamp = Utc::now();
         for profile in profiles {
             let Some(id) = profile.id else { continue };
-            let environment_id = match db.profile_environment_id(id).await {
-                Ok(id) => id,
-                Err(_) => {
-                    status.state = "database_error";
-                    continue;
-                }
-            };
             let mut item = ProfileCollection {
                 profile_id: id,
-                environment_id,
                 state: "stopped",
             };
             let process = processes.iter().find(|p| p.profile_id == id && p.running);
@@ -395,7 +379,6 @@ impl Collector {
                                                         "{identity}:{}:{}",
                                                         proxy.local_ip, proxy.local_port
                                                     ),
-                                                    environment_id,
                                                 ),
                                                 &local,
                                             );
@@ -403,7 +386,6 @@ impl Collector {
                                             store
                                                 .push_traffic(crate::metrics::TrafficSample {
                                                     timestamp,
-                                                    environment_id,
                                                     profile_id: id,
                                                     proxy_id: Some(proxy_id),
                                                     interface: None,
@@ -423,7 +405,6 @@ impl Collector {
                                         }
                                         status.proxies.push(ProxyCollection {
                                             profile_id: id,
-                                            environment_id,
                                             proxy_id,
                                             name: proxy.name.clone(),
                                             state: local_state,
@@ -448,7 +429,7 @@ impl Collector {
                                         .counters
                                         .entry(id)
                                         .or_default()
-                                        .update((pid, identity, environment_id), &sockets);
+                                        .update((pid, identity), &sockets);
                                     item.state = if sockets.is_empty() {
                                         "no_connection"
                                     } else {
@@ -459,7 +440,6 @@ impl Collector {
                                         store
                                             .push_traffic(crate::metrics::TrafficSample {
                                                 timestamp,
-                                                environment_id,
                                                 profile_id: id,
                                                 received_bytes: received,
                                                 sent_bytes: sent,
@@ -492,7 +472,6 @@ impl Collector {
                 {
                     status.proxies.push(ProxyCollection {
                         profile_id: id,
-                        environment_id,
                         proxy_id: binding.proxy_id,
                         name: proxies
                             .iter()
@@ -523,9 +502,9 @@ mod tests {
         }
     }
     #[test]
-    fn counter_deltas_do_not_double_count_and_reset_on_process_or_environment_change() {
+    fn counter_deltas_do_not_double_count_and_reset_on_identity_change() {
         let mut counters = CounterState::default();
-        let identity = (42, "100".into(), 1);
+        let identity = (42, "100".into());
         assert_eq!(
             counters.update(identity.clone(), &[socket(1, 100, 200)]),
             (0, 0)
@@ -543,12 +522,14 @@ mod tests {
             (70, 90)
         );
         assert_eq!(counters.update(identity.clone(), &[]), (70, 90));
+        // A different identity (a restarted process) is a fresh baseline, not a
+        // negative delta.
         assert_eq!(
-            counters.update((42, "101".into(), 1), &[socket(3, 50, 50)]),
+            counters.update((42, "101".into()), &[socket(3, 50, 50)]),
             (0, 0)
         );
         assert_eq!(
-            counters.update((42, "101".into(), 2), &[socket(3, 80, 80)]),
+            counters.update((43, "101".into()), &[socket(3, 80, 80)]),
             (0, 0)
         );
     }

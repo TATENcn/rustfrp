@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { toast } from "sonner";
 import { getLogs } from "@/api/logs";
-import { data, useActiveEnvironment, useProfiles } from "@/hooks/api";
+import { data, useProfiles } from "@/hooks/api";
 import { useI18n } from "@/i18n";
 import { formatLogLines } from "@/components/logs/format";
 import { AppIcon } from "@/components/icon/AppIcon";
@@ -13,16 +13,13 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Choice, ErrorState, PageHeading } from "@/components/common/page";
 export default function Logs() {
   const { t, text, locale } = useI18n(),
-    profiles = useProfiles(),
-    { environment } = useActiveEnvironment();
+    profiles = useProfiles();
   const [profile, setProfile] = useState(""),
     [stream, setStream] = useState("combined"),
     [lines, setLines] = useState("200"),
     [search, setSearch] = useState(""),
     [cleared, setCleared] = useState(0);
-  const scoped = (profiles.data ?? []).filter(
-    (p) => !environment || environment.profile_ids.includes(p.id!),
-  );
+  const scoped = profiles.data ?? [];
   const selected = Number(profile) || scoped[0]?.id || null;
   const query = useQuery({
     queryKey: ["logs", selected, stream, lines],

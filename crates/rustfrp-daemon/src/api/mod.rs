@@ -11,8 +11,10 @@ pub mod state;
 // Sub-modules for each resource type
 pub mod auth;
 pub mod bindings;
+pub mod cert_ingest;
+pub mod cert_ingest_settings;
+pub mod certificates;
 pub mod config_transfer;
-pub mod environments;
 pub mod frp_versions;
 pub mod logs;
 pub mod metrics;
@@ -181,6 +183,18 @@ async fn whoami(Extension(identity): Extension<AuthIdentity>) -> Json<ApiRespons
 pub fn create_router(state: ApiState, auth: impl AuthMiddleware) -> Router {
     use crate::web;
 
+    // The push endpoint is also served by the control API, so a certificate
+    // manager can reach it at whatever address the operator already uses for the
+    // UI (a frpc `https` proxy, a reverse proxy, a LAN address). The dedicated
+    // listener on 7901 stays for deployments that publish that port instead.
+    //
+    // It keeps its own `X-Cert-Ingest-Token` auth and sits outside the API
+    // prefix, so the bearer middleware ignores it (see `required_scope` callers
+    // in `api::auth`, which pass through anything not under `/api/`).
+    let ingest_routes = crate::cert_ingest::create_ingest_router(crate::cert_ingest::IngestState {
+        db: state.db.clone(),
+    });
+
     // Group 1: API routes (matched first)
     let api_routes = Router::new()
         // Profile CRUD
@@ -193,10 +207,6 @@ pub fn create_router(state: ApiState, auth: impl AuthMiddleware) -> Router {
             axum::routing::get(profiles::get)
                 .put(profiles::update)
                 .delete(profiles::delete),
-        )
-        .route(
-            "/api/v1/profiles/:id/environment",
-            axum::routing::put(environments::assign_profile),
         )
         .route(
             "/api/v1/profiles/:id/proxies",
@@ -217,14 +227,6 @@ pub fn create_router(state: ApiState, auth: impl AuthMiddleware) -> Router {
         .route(
             "/api/v1/profiles/:id/stop",
             axum::routing::post(profiles::stop),
-        )
-        .route(
-            "/api/v1/environments",
-            axum::routing::get(environments::list).post(environments::create),
-        )
-        .route(
-            "/api/v1/environments/:id",
-            axum::routing::put(environments::update).delete(environments::delete),
         )
         // Proxy CRUD
         .route(
@@ -290,6 +292,89 @@ pub fn create_router(state: ApiState, auth: impl AuthMiddleware) -> Router {
             axum::routing::get(metrics::prometheus),
         )
         // Explicit migration import and consistent SQLite backup
+        // Certificate management: metadata only, no download/export route by design
+        .route(
+            "/api/v1/certificates",
+            axum::routing::get(certificates::list),
+        )
+        .route(
+            "/api/v1/certificates/:id",
+            axum::routing::get(certificates::get).delete(certificates::delete),
+        )
+        .route(
+            "/api/v1/certificates/pem",
+            axum::routing::post(certificates::import_pem),
+        )
+        .route(
+            "/api/v1/certificates/upload",
+            axum::routing::post(certificates::import_upload),
+        )
+        .route(
+            "/api/v1/certificates/from-path",
+            axum::routing::post(certificates::import_from_path),
+        )
+        .route(
+            "/api/v1/certificates/:id/apply",
+            axum::routing::post(certificates::apply),
+        )
+        .route(
+            "/api/v1/certificate-bindings",
+            axum::routing::post(certificates::bind),
+        )
+        .route(
+            "/api/v1/certificate-bindings/:id",
+            axum::routing::delete(certificates::unbind),
+        )
+        .route(
+            "/api/v1/cert-ingest",
+            axum::routing::get(cert_ingest_settings::get).put(cert_ingest_settings::update),
+        )
+        // Channels: one resource for push tokens and pull sources.
+        .route(
+            "/api/v1/certificate-sources",
+            axum::routing::get(cert_ingest::list).post(cert_ingest::create),
+        )
+        .route(
+            "/api/v1/certificate-sources/:id",
+            axum::routing::delete(cert_ingest::delete),
+        )
+        .route(
+            "/api/v1/certificate-sources/:id/certificate",
+            axum::routing::put(cert_ingest::attach),
+        )
+        .route(
+            "/api/v1/certificate-sources/:id/primary",
+            axum::routing::post(cert_ingest::promote),
+        )
+        .route(
+            "/api/v1/certificate-sources/:id/run",
+            axum::routing::post(cert_ingest::run),
+        )
+        .route(
+            "/api/v1/certificate-sources/kinds",
+            axum::routing::get(cert_ingest::kinds),
+        )
+        // Aliases kept so existing automation and Certd instructions still work.
+        .route(
+            "/api/v1/cert-ingest-tokens",
+            axum::routing::get(cert_ingest::list).post(cert_ingest::create),
+        )
+        .route(
+            "/api/v1/cert-ingest-tokens/:id",
+            axum::routing::delete(cert_ingest::delete),
+        )
+        .route(
+            "/api/v1/cert-pull-sources",
+            axum::routing::get(cert_ingest::list).post(cert_ingest::create),
+        )
+        .route(
+            "/api/v1/cert-pull-sources/:id",
+            axum::routing::delete(cert_ingest::delete),
+        )
+        .route(
+            "/api/v1/cert-pull-sources/:id/run",
+            axum::routing::post(cert_ingest::run),
+        )
         .route(
             "/api/v1/config/import",
             axum::routing::post(config_transfer::import),
@@ -332,6 +417,7 @@ pub fn create_router(state: ApiState, auth: impl AuthMiddleware) -> Router {
     let auth = Arc::new(auth);
     Router::new()
         .merge(api_routes)
+        .merge(ingest_routes)
         .merge(static_routes)
         .fallback(web::serve_index)
         .layer(
@@ -392,6 +478,21 @@ pub async fn serve_with_listener(
         state.db.clone(),
         state.process_manager.clone(),
     );
+    // Certificate channels fetch on their own schedule; nothing about frpc
+    // supervision depends on it, so it is fire-and-forget.
+    crate::cert_pull::spawn_scheduler(state.db.clone(), state.process_manager.clone());
+
+    // Start the push endpoint from the stored settings. A bind failure is
+    // reported and surfaced through the settings API, never fatal: frpc
+    // supervision must not depend on a port being free.
+    match rustfrp_client::db::settings::IngestConfig::load(&state.db).await {
+        Ok(config) => {
+            if let Err(error) = state.ingest.apply(&config).await {
+                tracing::warn!(%error, "certificate ingest listener not started; fix it under Settings");
+            }
+        }
+        Err(error) => tracing::warn!(%error, "could not read ingest settings"),
+    }
 
     let router = create_router(state, auth);
 

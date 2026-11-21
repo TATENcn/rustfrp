@@ -35,6 +35,16 @@ struct Cli {
     #[arg(long, env = "RUSTFRP_AUTH_POLICY_FILE")]
     auth_policy_file: Option<String>,
 
+    /// Force the certificate ingest listener address, e.g. `0.0.0.0:7901`.
+    ///
+    /// Normally unset: the endpoint is configured in the UI (enabled by default
+    /// on loopback) and stored in the database. This flag exists for container
+    /// and orchestration deployments that must pin the address, and it wins over
+    /// the stored value for the address while still respecting the enable flag.
+    #[cfg(feature = "http-api")]
+    #[arg(long, env = "RUSTFRP_CERT_INGEST_LISTEN")]
+    cert_ingest_listen: Option<String>,
+
     /// Use this frpc binary instead of a managed version.
     #[arg(long, env = "RUSTFRP_FRPC_PATH")]
     frpc_path: Option<PathBuf>,
@@ -91,6 +101,28 @@ async fn main() -> anyhow::Result<()> {
 
     #[cfg(feature = "http-api")]
     {
+        // A pinned address from the environment/CLI is persisted before the API
+        // server starts, so the listener the settings surface reports is the one
+        // that is actually bound. Everything else is configured in the UI.
+        if let Some(listen) = cli.cert_ingest_listen.as_deref() {
+            if let Some((host, port)) = listen.rsplit_once(':') {
+                if let Ok(port) = port.parse::<u16>() {
+                    core.db()
+                        .set_platform_setting(
+                            rustfrp_client::db::settings::CERT_INGEST_LISTEN,
+                            host,
+                        )
+                        .await?;
+                    core.db()
+                        .set_platform_setting(
+                            rustfrp_client::db::settings::CERT_INGEST_PORT,
+                            &port.to_string(),
+                        )
+                        .await?;
+                }
+            }
+        }
+
         let api_token = cli
             .api_token
             .or_else(|| {

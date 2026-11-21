@@ -2,7 +2,7 @@
 
 ## 入口与行为
 
-- **系统状态 → FRP 版本**：安装版本、查看后台进度与来源、设置系统默认或删除未使用版本。
+- **运维管理 → 版本下载**：自动读取官方发布列表（版本、归档大小、下载数、发布时间），按渠道下载，卡片或表格内显示每个版本自己的进度、安装来源，并可设为系统默认或删除未使用版本。
 - **服务器配置 → 每行的 frpc 版本按钮**：选择“跟随系统默认”或固定已安装且校验通过的版本。新建配置默认跟随系统，保存配置后可单独设置。
 - **代理分配**：显示服务器当前运行版本；版本变更未应用时显示“待重启”，点击跳转服务器配置。
 
@@ -28,7 +28,8 @@
 ## API
 
 - `GET/PUT /api/v1/profiles/:id/frpc-version`：读取版本与待重启状态；提交 `{"version": null}` 跟随默认，或指定版本字符串。按租户检查配置权限。
-- `GET/POST /api/v1/frp/installations`：查询任务或创建任务；提交 `version`、`channel`（`official`、`ghfast`、`gh-proxy`、`custom`）及可选 `mirror_base`。
+- `GET/POST /api/v1/frp/installations`：查询全部任务（数组，最新在前）或创建任务；提交 `version`、`channel`（`official`、`ghfast`、`gh-proxy`、`custom`）及可选 `mirror_base`。不同版本可并发下载；同一版本重复提交返回 `FRP_INSTALL_BUSY`。
+- `GET /api/v1/frp/releases`：官方发布列表，含 `tag`、`published_at`、`asset_size`、`download_count` 与 `asset_name`（按守护进程自身平台挑选归档）。
 - 保留旧同步安装 `POST /api/v1/frp/versions` 以兼容现有调用方。
 - 版本注册表和安装任务使用平台级读写权限；服务器版本选择使用对应租户读写权限。
 

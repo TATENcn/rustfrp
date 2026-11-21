@@ -13,6 +13,8 @@
   "nav.proxies": "代理规则",
   "nav.bindings": "代理分配",
   "nav.visitors": "访问者",
+  "nav.certificates": "证书",
+  "nav.downloads": "版本下载",
   "nav.logs": "日志",
   "nav.status": "系统状态",
 

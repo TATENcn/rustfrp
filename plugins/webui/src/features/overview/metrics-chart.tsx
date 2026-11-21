@@ -10,6 +10,52 @@ import {
 import { EmptyState } from "@/components/common/page";
 import { useI18n } from "@/i18n";
 export type ChartPoint = { timestamp: number; [key: string]: number };
+
+/**
+ * Upper bound on points actually drawn.
+ *
+ * The sampler produces one point per second, so an hour is 3 600 points across
+ * roughly 900 CSS pixels: four samples compete for every pixel and the line
+ * reads as noise rather than a trend. Averaging fixed-width buckets both
+ * smooths the curve and cuts the render work. A bucket keeps the mean, which
+ * is the right summary for utilisation — a single 100% sample between 3599 idle
+ * ones is not a trend, it is a blip.
+ */
+const MAX_RENDERED_POINTS = 240;
+
+export function bucketAverages(points: ChartPoint[]): ChartPoint[] {
+  if (points.length <= MAX_RENDERED_POINTS) return points;
+  const size = points.length / MAX_RENDERED_POINTS;
+  const out: ChartPoint[] = [];
+  for (let bucket = 0; bucket < MAX_RENDERED_POINTS; bucket += 1) {
+    const start = Math.floor(bucket * size);
+    const end = Math.min(Math.floor((bucket + 1) * size), points.length);
+    if (end <= start) continue;
+    const slice = points.slice(start, end);
+    const last = slice.at(-1);
+    const first = slice.at(0);
+    if (!last || !first) continue;
+    // The timestamp is the bucket's last sample, so the series stays anchored
+    // to real time instead of drifting half a bucket behind the data.
+    const merged: ChartPoint = { timestamp: last.timestamp };
+    for (const key of Object.keys(first)) {
+      if (key === "timestamp") continue;
+      let sum = 0;
+      let count = 0;
+      for (const point of slice) {
+        const value = point[key];
+        if (typeof value === "number") {
+          sum += value;
+          count += 1;
+        }
+      }
+      merged[key] = count ? sum / count : 0;
+    }
+    out.push(merged);
+  }
+  return out;
+}
+
 export function MetricsChart({
   points,
   config,
@@ -24,6 +70,9 @@ export function MetricsChart({
   domain?: [number, number];
 }) {
   const { locale, text } = useI18n();
+  // Bucket before anything measures the series: the axis label decides whether
+  // to show seconds from the span, and a smoothed hour still spans an hour.
+  const series = bucketAverages(points);
   if (!points.length)
     return (
       <EmptyState
@@ -43,7 +92,7 @@ export function MetricsChart({
     >
       <LineChart
         accessibilityLayer
-        data={points}
+        data={series}
         margin={{ left: 0, right: 16, top: 12, bottom: 0 }}
       >
         <CartesianGrid vertical={false} strokeDasharray="3 3" />
@@ -55,7 +104,10 @@ export function MetricsChart({
             new Date(v).toLocaleTimeString(locale, {
               hour: "2-digit",
               minute: "2-digit",
-                second: (points.at(-1)!.timestamp - points[0]!.timestamp < 300_000) ? "2-digit" : undefined,
+                second:
+                  series.at(-1)!.timestamp - series[0]!.timestamp < 300_000
+                    ? "2-digit"
+                    : undefined,
             })
           }
           tickLine={false}
@@ -103,7 +155,7 @@ export function MetricsChart({
             stroke={`var(--color-${key})`}
             strokeWidth={2}
             strokeDasharray={index === 1 ? "4 3" : undefined}
-            dot={points.length === 1 ? { r: 3 } : false}
+            dot={series.length === 1 ? { r: 3 } : false}
             activeDot={{ r: 4 }}
             isAnimationActive={false}
             connectNulls={false}

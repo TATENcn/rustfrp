@@ -29,7 +29,8 @@ ENTRYPOINT ["rustfrp-control"]
 
 FROM runtime-base AS daemon
 COPY --from=builder /src/target/release/rustfrp-daemon /usr/local/bin/rustfrp-daemon
-EXPOSE 7900
+# 7900 control API; 7901 certificate ingest endpoint (enable/expose in the UI)
+EXPOSE 7900 7901
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD curl --fail --silent http://127.0.0.1:7900/api/v1/health >/dev/null || exit 1

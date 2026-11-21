@@ -9,7 +9,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useI18n } from "@/i18n";
 import { healthCheck } from "@/api/system";
-import { data, useActiveEnvironment, useStatus } from "@/hooks/api";
+import { data, useStatus } from "@/hooks/api";
 import { usePreferences, type ThemeMode } from "@/hooks/preferences";
 import { isDesktop } from "@/lib/desktop";
 import { AppIcon, type IconName } from "@/components/icon/AppIcon";
@@ -47,14 +47,16 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { Choice, PageLoading, RuntimeBadge } from "@/components/common/page";
+import { PageLoading, RuntimeBadge } from "@/components/common/page";
 type NavKey =
   | "dashboard"
   | "profiles"
   | "proxies"
   | "bindings"
   | "visitors"
+  | "certificates"
   | "logs"
+  | "downloads"
   | "status";
 const sections: { key: string; items: [NavKey, string][] }[] = [
   { key: "overview", items: [["dashboard", "/"]] },
@@ -65,12 +67,14 @@ const sections: { key: string; items: [NavKey, string][] }[] = [
       ["proxies", "/proxies"],
       ["bindings", "/bindings"],
       ["visitors", "/visitors"],
+      ["certificates", "/certificates"],
     ],
   },
   {
     key: "management",
     items: [
       ["logs", "/logs"],
+      ["downloads", "/downloads"],
       ["status", "/status"],
     ],
   },
@@ -79,8 +83,6 @@ function Navigation() {
   const { t, text } = useI18n();
   const location = useLocation();
   const { setOpenMobile } = useSidebar();
-  const prefs = usePreferences(),
-    { environments, environment: active } = useActiveEnvironment();
   // Read the running daemon's version rather than hardcoding it: the build in
   // the window is whatever that daemon serves, so a literal here drifts on every
   // release (v0.5.0 shipped a sidebar still claiming v0.4.0).
@@ -111,17 +113,6 @@ function Navigation() {
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
-        <div className="px-4 pt-1 group-data-[collapsible=icon]:hidden">
-          <Choice
-            label={t("app.environment")}
-            value={active?.id}
-            options={(environments.data ?? []).map((e) => ({
-              label: e.name,
-              value: e.id!,
-            }))}
-            onChange={(v) => prefs.selectEnvironment(Number(v))}
-          />
-        </div>
         {sections.map((section) => (
           <SidebarGroup key={section.key}>
             <SidebarGroupLabel>

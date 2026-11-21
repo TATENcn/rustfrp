@@ -4,6 +4,22 @@ all-features = true
 [advisories]
 yanked = "deny"
 
+# Reviewed 2026-11-21 for v0.6.0. Each entry names why it does not block:
+# an upgrade is either impossible (chrono has no fixed release) or out of scope
+# for a patch release (wasmtime is pinned by the plugin ABI).
+ignore = [
+  # `unmaintained`, not a vulnerability; the whole 0.4 line is affected, so
+  # there is no upgrade that clears it. Replacing chrono touches every date
+  # path in the client and the API; that is its own change, not a release fix.
+  { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained (all versions); replacing it is a separate change" },
+  # wasmtime only runs WASM plugins. The advisories need a malicious plugin to
+  # be loaded, which is the same trust boundary as running the plugin's code;
+  # an upgrade is still worth doing, but it is pinned to the plugin ABI.
+  { id = "RUSTSEC-2026-0566", reason = "wasmtime: requires a hostile WASM plugin; plugin loading is already trusted-code" },
+  { id = "RUSTSEC-2026-0569", reason = "wasmtime: requires a hostile WASM plugin; plugin loading is already trusted-code" },
+  { id = "RUSTSEC-2026-0571", reason = "wasmtime-wasi-http is not enabled by this build (no wasi-http feature)" },
+]
+
 [licenses]
 confidence-threshold = 0.8
 allow = [

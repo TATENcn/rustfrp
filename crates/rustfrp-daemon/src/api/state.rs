@@ -49,7 +49,16 @@ pub struct ApiState {
     pub frp_versions: VersionManager,
     pub frp_version_operation: Arc<tokio::sync::Mutex<()>>,
     pub metrics: MetricsStore,
-    pub frp_install: Arc<std::sync::RwLock<Option<super::frp_versions::InstallTask>>>,
+    /// One entry per in-flight or finished install, keyed by version.
+    ///
+    /// Downloads run concurrently: each version unpacks into its own directory,
+    /// so the only shared mutation is this map. Activation and deletion still
+    /// take `frp_version_operation` and consult this map first.
+    pub frp_install:
+        Arc<std::sync::RwLock<std::collections::HashMap<String, super::frp_versions::InstallTask>>>,
+    /// The certificate ingest listener, so the settings API can start, stop, or
+    /// move it without a restart.
+    pub ingest: Arc<crate::cert_ingest::IngestServer>,
 }
 
 impl ApiState {
@@ -60,6 +69,7 @@ impl ApiState {
         config_dir: PathBuf,
         app_state: Arc<RwLock<ClientState>>,
     ) -> Self {
+        let db_for_ingest = db.clone();
         Self {
             process_manager: process_manager.with_database(db.clone()),
             db,
@@ -70,7 +80,10 @@ impl ApiState {
             frp_versions: VersionManager::default(),
             frp_version_operation: Arc::new(tokio::sync::Mutex::new(())),
             metrics: MetricsStore::new(METRICS_HISTORY_CAPACITY),
-            frp_install: Arc::new(std::sync::RwLock::new(None)),
+            frp_install: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            ingest: Arc::new(crate::cert_ingest::IngestServer::new(
+                crate::cert_ingest::IngestState { db: db_for_ingest },
+            )),
         }
     }
 }

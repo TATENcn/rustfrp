@@ -23,9 +23,6 @@ function useSettings() {
       mode === "dark" ||
       (mode === "system" && matchMedia("(prefers-color-scheme: dark)").matches),
   );
-  const [environmentId, setEnvironment] = useState<number | null>(
-    () => Number(localStorage.getItem("rustfrp-environment")) || null,
-  );
   useEffect(() => {
     const media = matchMedia("(prefers-color-scheme: dark)");
     const apply = () => {
@@ -45,11 +42,6 @@ function useSettings() {
     mode,
     dark,
     setMode,
-    environmentId,
-    selectEnvironment: (id: number) => {
-      setEnvironment(id);
-      localStorage.setItem("rustfrp-environment", String(id));
-    },
   };
 }
 const SettingsContext = createContext<ReturnType<typeof useSettings> | null>(

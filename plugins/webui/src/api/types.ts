@@ -232,11 +232,16 @@ export interface FrpVersionList {
 
 export interface AvailableFrpVersion {
   version: string
+  tag: string
   published_at: string | null
+  asset_size: number | null
+  download_count: number | null
+  asset_name: string
 }
 
 export interface StatusResponse {
   state: string
+  config_dir: string
   uptime_secs: number
   active_frpc_instances: number
   total_profiles: number
@@ -244,17 +249,6 @@ export interface StatusResponse {
   total_bindings: number
   total_visitors: number
   processes: ProcessInfo[]
-}
-
-export interface Environment {
-  id?: number
-  name: string
-  description?: string | null
-  color: string
-  is_default: boolean
-  created_at: string
-  updated_at: string
-  profile_ids: number[]
 }
 
 export interface ResourceSample {
@@ -273,7 +267,6 @@ export interface TrafficSample {
   source?: string
   counter_epoch?: string
   timestamp: string
-  environment_id: number
   profile_id: number
   received_bytes: number
   sent_bytes: number
@@ -323,6 +316,6 @@ export interface TrafficCollection {
   state: string
   updated_at: string | null
   host_state?: string
-  proxies?: { profile_id: number; environment_id: number; proxy_id: number; name: string; state: string }[]
-  profiles: { profile_id: number; environment_id: number; state: string }[]
+  proxies?: { profile_id: number; proxy_id: number; name: string; state: string }[]
+  profiles: { profile_id: number; state: string }[]
 }

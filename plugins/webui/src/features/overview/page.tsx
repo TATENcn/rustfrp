@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { getMetricsHistory } from "@/api/metrics";
-import { data, useActiveEnvironment, useStatus } from "@/hooks/api";
+import { data, useStatus } from "@/hooks/api";
 import { useI18n } from "@/i18n";
 import { formatBytes, formatDuration, formatPercent } from "@/i18n/format";
 import { extrapolateUptime } from "@/stores/uptime";
@@ -27,14 +27,13 @@ import { MetricsChart, type ChartPoint } from "./metrics-chart";
 import { TrafficPanel } from "./traffic-panel";
 export default function Overview() {
   const { t, text, locale } = useI18n(),
-    status = useStatus(),
-    { environments, environment } = useActiveEnvironment();
+    status = useStatus();
   const [period, setPeriod] = useState("60"),
     [metric, setMetric] = useState("cpu"),
     [now, setNow] = useState(Date.now());
   const metrics = useQuery({
-    queryKey: ["metrics", environment?.id],
-    queryFn: () => data(getMetricsHistory(environment?.id)),
+    queryKey: ["metrics"],
+    queryFn: () => data(getMetricsHistory()),
     refetchInterval: (q) => (q.state.fetchFailureCount ? 30000 : 5000),
   });
   useEffect(() => {
@@ -58,7 +57,6 @@ export default function Overview() {
   const refresh = () => {
     void status.refetch();
     void metrics.refetch();
-    void environments.refetch();
   };
   return (
     <div className="space-y-6">
@@ -85,7 +83,7 @@ export default function Overview() {
         </Button>
       </PageHeading>
       <ErrorState
-        error={status.error || metrics.error || environments.error}
+        error={status.error || metrics.error}
         retry={refresh}
       />
       {status.isPending ? (
@@ -235,7 +233,6 @@ export default function Overview() {
               </Card>
               <div className="grid min-w-0 gap-6">
                 <TrafficPanel
-                  key={environment?.id}
                   history={metrics.data}
                   cutoff={cutoff}
                   period={period}

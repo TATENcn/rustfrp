@@ -77,7 +77,7 @@ async function fixture(page: Page, authenticated = true) {
       route.fulfill({ json: { success: true, data } });
     const [kind, rawId, action] = path.split("/");
     const id = Number(rawId);
-    if (path === "frp/installations" && method === "GET") return ok(null);
+    if (path === "frp/installations" && method === "GET") return ok([]);
     if (path === "status")
       return ok({
         state: "running",
@@ -199,7 +199,16 @@ async function fixture(page: Page, authenticated = true) {
         stderr_path: "/tmp/stderr",
       });
     if (path === "frp/releases")
-      return ok([{ version: "0.70.1", published_at: null }]);
+      return ok(
+        ["0.70.2", "0.70.1"].map((version) => ({
+          version,
+          tag: `v${version}`,
+          published_at: "2026-10-14T00:00:00Z",
+          asset_size: 13959168,
+          download_count: 166576,
+          asset_name: `frp_${version}_linux_amd64.tar.gz`,
+        })),
+      );
     if (path === "frp/versions" && method === "GET")
       return ok({
         active: "0.70.1",
@@ -387,12 +396,12 @@ test("logs support stream filters, ANSI colors and escaped HTML", async ({
   await expect(page.locator(".log-console")).toContainText("INFO ready");
   expect(writes).toHaveLength(0);
 });
-test("system actions preserve import/export, mirror validation and version confirmation", async ({
+test("downloads page lists releases and deletes an installed version", async ({
   page,
 }) => {
   const { writes } = await fixture(page);
-  await page.goto("/#/status");
-  await page.getByRole("tab", { name: "FRP versions", exact: true }).click();
+  await page.goto("/#/downloads");
+  await page.getByRole("button", { name: "List", exact: true }).click();
   await page
     .getByRole("row")
     .filter({ hasText: "0.69.0" })
@@ -410,7 +419,7 @@ test("system actions preserve import/export, mirror validation and version confi
       ),
     )
     .toBe(true);
-  await page.getByRole("tab", { name: "Import & export", exact: true }).click();
+  await page.goto("/#/status?tab=transfer");
   await page.locator("input[type=file]").setInputFiles({
     name: "sample.toml",
     mimeType: "text/plain",
@@ -515,9 +524,11 @@ test("batch ports create typed proxy records and reject name conflicts", async (
     .getByRole("button", { name: "Save", exact: true })
     .click();
   await expect(page.getByRole("dialog")).toBeVisible();
-  await expect(page.locator("[data-sonner-toast]").last()).toContainText(
-    "9000",
-  );
+  // Scope by content, not position: the successful first batch leaves its own
+  // toast in the stack, and toast order depends on which one expires first.
+  await expect(
+    page.locator("[data-sonner-toast]").filter({ hasText: "9000" }),
+  ).toBeVisible();
   expect(
     writes.filter((w) => w.path === "proxies" && w.method === "POST"),
   ).toHaveLength(3);
@@ -809,28 +820,29 @@ test("installer submits accelerator channel and shows background task progress",
         downloaded_bytes: 524288,
         total_bytes: 1048576,
         error: null,
+        started_at: "2026-11-16T00:00:00Z",
+        finished_at: null,
       };
     }
-    await route.fulfill({ json: { success: true, data: task } });
+    const list = task ? [task] : [];
+    await route.fulfill({
+      json: { success: true, data: route.request().method() === "GET" ? list : task },
+    });
   });
-  await page.goto("/#/status?tab=versions");
-  await page.getByLabel("Version", { exact: true }).fill("0.70.1");
+  await page.goto("/#/downloads");
   await page
     .getByRole("combobox", { name: "Download channel", exact: true })
     .click();
   await page
     .getByRole("option", { name: "GHFast · ghfast.top", exact: true })
     .click();
-  await page
-    .getByRole("button", { name: "Install version", exact: true })
-    .click();
+  const card = page.locator("article").filter({ hasText: "v0.70.2" });
+  await card.getByRole("button", { name: "Download", exact: true }).click();
   await expect.poll(() => submitted?.channel).toBe("ghfast");
+  await expect(card.locator("progress")).toHaveAttribute("value", "50");
   await expect(
-    page.getByRole("status").filter({ hasText: "Downloading archive" }),
-  ).toContainText("50%");
-  await expect(
-    page.getByRole("button", { name: "Install version", exact: true }),
-  ).toBeDisabled();
+    card.getByRole("button", { name: "Download", exact: true }),
+  ).toHaveCount(0);
   await page.screenshot({
     path: "test-results/frpc-installation.png",
     animations: "disabled",
@@ -840,7 +852,7 @@ test("installer submits accelerator channel and shows background task progress",
     page.getByText("Checksum mismatch", { exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Install version", exact: true }),
+    page.getByRole("button", { name: "Retry", exact: true }),
   ).toBeEnabled();
 });
 

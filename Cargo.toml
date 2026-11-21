@@ -16,13 +16,19 @@ members = [
 exclude = ["plugins/gui/src-tauri"]
 
 [workspace.package]
-version = "0.5.4"
+version = "0.6.0"
 edition = "2021"
 license = "AGPL-3.0-only"
 repository = "https://github.com/taten/rustfrp"
 rust-version = "1.95"
 
 [workspace.dependencies]
+# Internal crates: declared once so a version bump touches one line.
+rustfrp-common = { version = "0.6.0", path = "crates/common" }
+rustfrp-client = { version = "0.6.0", path = "crates/client" }
+rustfrp-bin = { version = "0.6.0", path = "crates/rustfrp-bin" }
+rustfrp-daemon = { version = "0.6.0", path = "crates/rustfrp-daemon" }
+rustfrp-sdk = { version = "0.6.0", path = "crates/rustfrp-sdk" }
 # === 异步运行时 ===
 tokio = { version = "1", features = ["full"] }
 

@@ -15,6 +15,7 @@ import {
   CardContent,
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { IngestSettingsCard } from "@/features/certificates/ingest-settings";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import {
   ActionButton,
@@ -22,7 +23,6 @@ import {
   PageHeading,
 } from "@/components/common/page";
 import { ProcessTable } from "@/components/common/process-table";
-import { Versions } from "./versions";
 import { Transfer } from "./transfer";
 export default function Settings() {
   const [params, setParams] = useSearchParams();
@@ -52,8 +52,8 @@ export default function Settings() {
       <PageHeading
         title={t("nav.status")}
         description={text(
-          "管理服务运行、FRP 版本与配置备份。",
-          "Manage your service, FRP versions, and configuration backups.",
+          "管理服务运行状态与配置导入导出。FRP 版本下载已移至「版本下载」。",
+          "Manage the running service and configuration import/export. FRP downloads moved to “FRP downloads”.",
         )}
       >
         <Button
@@ -74,11 +74,11 @@ export default function Settings() {
           <TabsTrigger value="runtime">
             {text("运行状态", "Runtime")}
           </TabsTrigger>
-          <TabsTrigger value="versions">
-            {text("FRP 版本", "FRP versions")}
-          </TabsTrigger>
           <TabsTrigger value="transfer">
             {text("导入导出", "Import & export")}
+          </TabsTrigger>
+          <TabsTrigger value="certificates">
+            {text("证书通道", "Certificate channels")}
           </TabsTrigger>
         </TabsList>
         <TabsContent value="runtime" className="space-y-6">
@@ -177,11 +177,22 @@ export default function Settings() {
             <ProcessTable processes={status.data?.processes ?? []} />
           </div>
         </TabsContent>
-        <TabsContent value="versions">
-          <Versions />
-        </TabsContent>
         <TabsContent value="transfer">
           <Transfer />
+        </TabsContent>
+        <TabsContent value="certificates" className="space-y-6">
+          <div>
+            <h2 className="text-base font-semibold">
+              {text("证书接收端点", "Certificate ingest endpoint")}
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {text(
+                "Certd 推送证书的目标地址。这是平台级设置：端口与推送地址在这里统一配置，单个证书用哪个通道在「证书」页决定。",
+                "Where Certd pushes certificates. This is a platform-wide setting: the port and push URL are configured here, while each certificate chooses its channel on the Certificates page.",
+              )}
+            </p>
+          </div>
+          <IngestSettingsCard />
         </TabsContent>
       </Tabs>
     </div>

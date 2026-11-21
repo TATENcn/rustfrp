@@ -20,7 +20,6 @@ export function trafficAnalysis(samples: TrafficSample[], cutoff: number) {
     const timestamp = Date.parse(sample.timestamp);
     if (!Number.isFinite(timestamp)) continue;
     const key = [
-      sample.environment_id,
       sample.profile_id,
       sample.proxy_id ?? "",
       sample.interface ?? "",

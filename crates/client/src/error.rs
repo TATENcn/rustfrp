@@ -25,6 +25,22 @@ pub enum ClientError {
     #[error("Record already exists: {0}")]
     RecordAlreadyExists(String),
 
+    // === Certificate management errors (CERT) ===
+    #[error("Certificate input could not be parsed: {0}")]
+    CertificateParse(String),
+
+    #[error("Certificate secrets operation failed: {0}")]
+    CertificateSecrets(String),
+
+    #[error("Certificate key does not match the certificate: {0}")]
+    CertificateKeyMismatch(String),
+
+    #[error("Certificate is bound to {count} proxy configuration(s); unbind it first")]
+    CertificateStillBound { count: usize },
+
+    #[error("Certificate target is invalid: {0}")]
+    CertificateTarget(String),
+
     // === Config validation errors (CFG) ===
     #[error("Configuration validation failed: {0}")]
     ConfigValidation(String),
@@ -79,6 +95,12 @@ impl ClientError {
             ClientError::DatabaseQuery(_) => "DB_003",
             ClientError::RecordNotFound { .. } => "DB_004",
             ClientError::RecordAlreadyExists(_) => "DB_005",
+            // CERT
+            ClientError::CertificateParse(_) => "CERT_001",
+            ClientError::CertificateSecrets(_) => "CERT_002",
+            ClientError::CertificateKeyMismatch(_) => "CERT_003",
+            ClientError::CertificateStillBound { .. } => "CERT_004",
+            ClientError::CertificateTarget(_) => "CERT_005",
             // CFG
             ClientError::ConfigValidation(_) => "CFG_001",
             ClientError::InvalidIpAddress(_) => "CFG_002",
@@ -106,6 +128,11 @@ impl ClientError {
             ClientError::DatabaseQuery(_) => "error.db.query",
             ClientError::RecordNotFound { .. } => "error.db.record_not_found",
             ClientError::RecordAlreadyExists(_) => "error.db.record_exists",
+            ClientError::CertificateParse(_) => "error.cert.parse",
+            ClientError::CertificateSecrets(_) => "error.cert.secrets",
+            ClientError::CertificateKeyMismatch(_) => "error.cert.key_mismatch",
+            ClientError::CertificateStillBound { .. } => "error.cert.still_bound",
+            ClientError::CertificateTarget(_) => "error.cert.target",
             ClientError::ConfigValidation(_) => "error.config.validation",
             ClientError::InvalidIpAddress(_) => "error.config.invalid_ip",
             ClientError::InvalidPort(_) => "error.config.invalid_port",

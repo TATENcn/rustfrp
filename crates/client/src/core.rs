@@ -405,12 +405,17 @@ mod tests {
         #[cfg(unix)]
         {
             let recorded = std::fs::read_to_string(&marker).unwrap_or_default();
+            // Match the generated artifact name, not the bare id: the stub records
+            // a full path, and a temporary directory whose name happens to contain
+            // the id's digit would make a substring check pass for the wrong reason.
+            let kept = format!("{}-kept-running.toml", ids[0].0);
+            let stopped = format!("{}-user-stopped.toml", ids[1].0);
             assert!(
-                recorded.contains(&ids[0].0.to_string()),
+                recorded.contains(&kept),
                 "the kept profile must be attempted, got: {recorded:?}"
             );
             assert!(
-                !recorded.contains(&ids[1].0.to_string()),
+                !recorded.contains(&stopped),
                 "the stopped profile must never be attempted, got: {recorded:?}"
             );
         }

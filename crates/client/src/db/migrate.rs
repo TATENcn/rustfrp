@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
 /// 当前最新的 schema 版本
-const LATEST_VERSION: i32 = 20;
+const LATEST_VERSION: i32 = 24;
 
 /// 运行所有待执行的迁移
 ///
@@ -103,6 +103,10 @@ fn apply_migration(conn: &Connection, version: i32) -> Result<()> {
         18 => migrate_v18(&tx)?,
         19 => migrate_v19(&tx)?,
         20 => migrate_v20(&tx)?,
+        21 => migrate_v21(&tx)?,
+        22 => migrate_v22(&tx)?,
+        23 => migrate_v23(&tx)?,
+        24 => migrate_v24(&tx)?,
         _ => {
             return Err(ClientError::DatabaseMigration(format!(
                 "Unknown migration version: {version}"
@@ -1035,6 +1039,408 @@ fn migrate_v20(tx: &rusqlite::Transaction) -> Result<()> {
     Ok(())
 }
 
+/// V21: certificate management.
+///
+/// These tables belong to the platform, not to FRP: nothing here is serialized
+/// into a generated TOML. The only FRP-facing effect is that an apply writes the
+/// file named by a proxy's `plugin.crtPath` / `keyPath`, which are FRP-native
+/// fields (ARCH-004 / CFG-001).
+///
+/// Certificate bodies and keys are stored as XChaCha20-Poly1305 blobs, not as
+/// PEM text, so the database never contains a readable private key.
+fn migrate_v21(tx: &rusqlite::Transaction) -> Result<()> {
+    tx.execute(
+        "CREATE TABLE IF NOT EXISTS certificate (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id          TEXT    NOT NULL DEFAULT 'default',
+            primary_domain     TEXT    NOT NULL,
+            sans_json          TEXT    NOT NULL DEFAULT '[]',
+            issuer             TEXT    NOT NULL DEFAULT '',
+            serial             TEXT    NOT NULL DEFAULT '',
+            fingerprint_sha256 TEXT    NOT NULL,
+            key_algo           TEXT    NOT NULL DEFAULT '',
+            not_before         TEXT    NOT NULL,
+            not_after          TEXT    NOT NULL,
+            source             TEXT    NOT NULL,
+            source_detail      TEXT,
+            enc_cert_der       BLOB    NOT NULL,
+            enc_chain_der      BLOB,
+            enc_key_der        BLOB    NOT NULL,
+            created_at         TEXT    NOT NULL,
+            updated_at         TEXT    NOT NULL
+        )",
+        [],
+    )
+    .map_err(|e| ClientError::DatabaseMigration(format!("Failed to create certificate: {e}")))?;
+
+    tx.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_certificate_fingerprint
+            ON certificate (tenant_id, fingerprint_sha256)",
+        [],
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to index certificate fingerprint: {e}"))
+    })?;
+
+    tx.execute(
+        "CREATE INDEX IF NOT EXISTS idx_certificate_expiry ON certificate (tenant_id, not_after)",
+        [],
+    )
+    .ok();
+
+    tx.execute(
+        "CREATE TABLE IF NOT EXISTS certificate_binding (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id           TEXT    NOT NULL DEFAULT 'default',
+            cert_id             INTEGER NOT NULL,
+            proxy_id            INTEGER NOT NULL,
+            applied_fingerprint TEXT,
+            applied_at          TEXT,
+            last_error          TEXT,
+            created_at          TEXT    NOT NULL,
+            updated_at          TEXT    NOT NULL,
+            FOREIGN KEY (cert_id) REFERENCES certificate(id) ON DELETE RESTRICT,
+            FOREIGN KEY (proxy_id) REFERENCES local_proxy(id) ON DELETE CASCADE
+        )",
+        [],
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to create certificate_binding: {e}"))
+    })?;
+
+    // One proxy holds one certificate: a second certificate for the same proxy
+    // is an import mistake, not a configuration to reconcile.
+    tx.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_certificate_binding_proxy
+            ON certificate_binding (proxy_id)",
+        [],
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to index certificate bindings: {e}"))
+    })?;
+
+    tx.execute(
+        "CREATE TABLE IF NOT EXISTS cert_ingest_token (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id    TEXT    NOT NULL DEFAULT 'default',
+            name         TEXT    NOT NULL,
+            token_sha256 TEXT    NOT NULL,
+            domains_json TEXT    NOT NULL DEFAULT '[]',
+            expires_at   TEXT,
+            revoked_at   TEXT,
+            last_used_at TEXT,
+            use_count    INTEGER NOT NULL DEFAULT 0,
+            created_at   TEXT    NOT NULL
+        )",
+        [],
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to create cert_ingest_token: {e}"))
+    })?;
+
+    tx.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_cert_ingest_token_sha
+            ON cert_ingest_token (token_sha256)",
+        [],
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to index ingest token digest: {e}"))
+    })?;
+
+    tx.execute(
+        "CREATE TABLE IF NOT EXISTS cert_pull_source (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id    TEXT    NOT NULL DEFAULT 'default',
+            name         TEXT    NOT NULL,
+            kind         TEXT    NOT NULL,
+            base_url     TEXT    NOT NULL,
+            domain       TEXT    NOT NULL,
+            enc_secret   BLOB,
+            enabled      INTEGER NOT NULL DEFAULT 1,
+            last_run_at  TEXT,
+            last_status  TEXT,
+            last_error   TEXT,
+            created_at   TEXT    NOT NULL,
+            updated_at   TEXT    NOT NULL
+        )",
+        [],
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to create cert_pull_source: {e}"))
+    })?;
+
+    tracing::info!("V21 Migration: Add certificate management tables");
+    Ok(())
+}
+
+/// V22: platform settings that an operator changes at runtime.
+///
+/// A key/value table rather than a column per setting: these are switches read by
+/// long-lived tasks (the ingest listener), and adding another one must not mean
+/// another migration.
+fn migrate_v22(tx: &rusqlite::Transaction) -> Result<()> {
+    tx.execute(
+        "CREATE TABLE IF NOT EXISTS platform_setting (
+            key        TEXT PRIMARY KEY,
+            value      TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )",
+        [],
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to create platform_setting: {e}"))
+    })?;
+
+    tracing::info!("V22 Migration: Add platform settings");
+    Ok(())
+}
+
+/// V23: certificate identity by domain, material split out, channels unified.
+///
+/// The v21 shape made the fingerprint the identity of a certificate, which is
+/// wrong for renewal: every reissue is a new fingerprint, so "replace the
+/// certificate for example.com" created a new row instead of updating one. This
+/// migration makes `(tenant_id, primary_domain)` the identity and moves the
+/// material — fingerprint, validity, encrypted bodies — into
+/// `certificate_material`, one row per issued bundle.
+///
+/// Channels (push token, Certd pull, plain URL pull) become rows of
+/// `certificate_source` attached to a certificate, so a certificate can exist
+/// before it has any material and its channels can change without re-importing.
+/// Legacy rows from `cert_ingest_token` / `cert_pull_source` are carried over
+/// with `certificate_id = NULL`, which keeps them working as unbound channels.
+fn migrate_v23(tx: &rusqlite::Transaction) -> Result<()> {
+    // The rebuild below deletes rows that `certificate_binding` and
+    // `certificate_material` point at, so FK checks must be deferred to commit.
+    tx.execute_batch("PRAGMA defer_foreign_keys = ON")
+        .map_err(|e| {
+            ClientError::DatabaseMigration(format!("Failed to defer foreign keys: {e}"))
+        })?;
+
+    // --- 1. Material moves to its own table, one row per issued bundle. ------
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS certificate_material (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id          TEXT    NOT NULL DEFAULT 'default',
+            certificate_id     INTEGER NOT NULL,
+            fingerprint_sha256 TEXT    NOT NULL,
+            sans_json          TEXT    NOT NULL DEFAULT '[]',
+            issuer             TEXT    NOT NULL DEFAULT '',
+            serial             TEXT    NOT NULL DEFAULT '',
+            key_algo           TEXT    NOT NULL DEFAULT '',
+            not_before         TEXT    NOT NULL,
+            not_after          TEXT    NOT NULL,
+            source             TEXT    NOT NULL DEFAULT '',
+            source_detail      TEXT,
+            enc_cert_der       BLOB    NOT NULL,
+            enc_chain_der      BLOB,
+            enc_key_der        BLOB    NOT NULL,
+            created_at         TEXT    NOT NULL,
+            updated_at         TEXT    NOT NULL,
+            FOREIGN KEY (certificate_id) REFERENCES certificate(id) ON DELETE CASCADE
+        )",
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to create certificate_material: {e}"))
+    })?;
+
+    tx.execute(
+        "INSERT INTO certificate_material
+            (tenant_id, certificate_id, fingerprint_sha256, sans_json, issuer, serial, key_algo,
+             not_before, not_after, source, source_detail,
+             enc_cert_der, enc_chain_der, enc_key_der, created_at, updated_at)
+         SELECT tenant_id, id, fingerprint_sha256, sans_json, issuer, serial, key_algo,
+                not_before, not_after, source, source_detail,
+                enc_cert_der, enc_chain_der, enc_key_der, created_at, updated_at
+           FROM certificate",
+        [],
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to copy certificate material: {e}"))
+    })?;
+
+    // --- 2. Collapse rows that share a domain. ------------------------------
+    // A renewal used to append a row; here they become one identity with several
+    // material versions, and the newest is what the UI reports.
+    tx.execute_batch(
+        "CREATE TABLE _cert_dedupe (old_id INTEGER PRIMARY KEY, keep_id INTEGER NOT NULL);
+         INSERT INTO _cert_dedupe
+         SELECT id, MIN(id) OVER (PARTITION BY tenant_id, primary_domain) FROM certificate;",
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to map duplicate certificates: {e}"))
+    })?;
+
+    tx.execute(
+        "UPDATE certificate_material SET certificate_id =
+            (SELECT keep_id FROM _cert_dedupe WHERE old_id = certificate_material.certificate_id)",
+        [],
+    )
+    .map_err(|e| ClientError::DatabaseMigration(format!("Failed to repoint material: {e}")))?;
+
+    tx.execute(
+        "UPDATE certificate_binding SET cert_id =
+            (SELECT keep_id FROM _cert_dedupe WHERE old_id = certificate_binding.cert_id)",
+        [],
+    )
+    .map_err(|e| ClientError::DatabaseMigration(format!("Failed to repoint bindings: {e}")))?;
+
+    tx.execute(
+        "DELETE FROM certificate WHERE id NOT IN (SELECT keep_id FROM _cert_dedupe)",
+        [],
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to collapse certificate rows: {e}"))
+    })?;
+
+    tx.execute_batch("DROP TABLE _cert_dedupe").map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to drop the dedupe map: {e}"))
+    })?;
+
+    // --- 3. `certificate` keeps identity only. -----------------------------
+    // The fingerprint and expiry indexes must go before their columns can be
+    // dropped; SQLite refuses a DROP COLUMN that an index still references.
+    tx.execute_batch(
+        "DROP INDEX IF EXISTS idx_certificate_fingerprint;
+         DROP INDEX IF EXISTS idx_certificate_expiry;",
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to drop certificate indexes: {e}"))
+    })?;
+
+    for column in [
+        "fingerprint_sha256",
+        "sans_json",
+        "issuer",
+        "serial",
+        "key_algo",
+        "not_before",
+        "not_after",
+        "source",
+        "source_detail",
+        "enc_cert_der",
+        "enc_chain_der",
+        "enc_key_der",
+    ] {
+        tx.execute(&format!("ALTER TABLE certificate DROP COLUMN {column}"), [])
+            .map_err(|e| {
+                ClientError::DatabaseMigration(format!("Failed to drop certificate.{column}: {e}"))
+            })?;
+    }
+
+    tx.execute_batch(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_certificate_domain
+            ON certificate (tenant_id, primary_domain);
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_certificate_material_fingerprint
+            ON certificate_material (certificate_id, fingerprint_sha256);
+         CREATE INDEX IF NOT EXISTS idx_certificate_material_recent
+            ON certificate_material (certificate_id, not_after);",
+    )
+    .map_err(|e| ClientError::DatabaseMigration(format!("Failed to index certificates: {e}")))?;
+
+    // --- 4. One table for every way a certificate gets updated. -------------
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS certificate_source (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id      TEXT    NOT NULL DEFAULT 'default',
+            certificate_id INTEGER,
+            kind           TEXT    NOT NULL,
+            name           TEXT    NOT NULL,
+            domain         TEXT    NOT NULL DEFAULT '',
+            base_url       TEXT    NOT NULL DEFAULT '',
+            enc_secret     BLOB,
+            domains_json   TEXT    NOT NULL DEFAULT '[]',
+            token_sha256   TEXT,
+            expires_at     TEXT,
+            revoked_at     TEXT,
+            last_used_at   TEXT,
+            use_count      INTEGER NOT NULL DEFAULT 0,
+            is_primary     INTEGER NOT NULL DEFAULT 0,
+            enabled        INTEGER NOT NULL DEFAULT 1,
+            last_run_at    TEXT,
+            last_status    TEXT,
+            last_error     TEXT,
+            next_run_at    TEXT,
+            created_at     TEXT    NOT NULL,
+            updated_at     TEXT    NOT NULL,
+            FOREIGN KEY (certificate_id) REFERENCES certificate(id) ON DELETE CASCADE
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_certificate_source_primary
+            ON certificate_source (certificate_id) WHERE is_primary = 1;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_certificate_source_token
+            ON certificate_source (tenant_id, token_sha256) WHERE token_sha256 IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_certificate_source_certificate
+            ON certificate_source (tenant_id, certificate_id);",
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to create certificate_source: {e}"))
+    })?;
+
+    // Pull sources keep their behaviour; the domain decides whether they are
+    // already bound to an existing certificate.
+    tx.execute(
+        "INSERT INTO certificate_source
+            (tenant_id, certificate_id, kind, name, domain, base_url, enc_secret,
+             is_primary, enabled, last_run_at, last_status, last_error, created_at, updated_at)
+         SELECT s.tenant_id,
+                (SELECT c.id FROM certificate c
+                  WHERE c.tenant_id = s.tenant_id AND c.primary_domain = s.domain),
+                s.kind, s.name, s.domain, s.base_url, s.enc_secret,
+                0, s.enabled, s.last_run_at, s.last_status, s.last_error,
+                s.created_at, s.updated_at
+           FROM cert_pull_source s",
+        [],
+    )
+    .map_err(|e| ClientError::DatabaseMigration(format!("Failed to move pull sources: {e}")))?;
+
+    // Push tokens keep working as unbound channels: their allowlist is stored in
+    // `domains_json` until they are attached to a certificate.
+    tx.execute(
+        "INSERT INTO certificate_source
+            (tenant_id, certificate_id, kind, name, domains_json, token_sha256,
+             expires_at, revoked_at, last_used_at, use_count, is_primary, enabled,
+             created_at, updated_at)
+         SELECT tenant_id, NULL, 'push', name, domains_json, token_sha256,
+                expires_at, revoked_at, last_used_at, use_count, 0, 1,
+                created_at, created_at
+           FROM cert_ingest_token",
+        [],
+    )
+    .map_err(|e| ClientError::DatabaseMigration(format!("Failed to move ingest tokens: {e}")))?;
+
+    tx.execute_batch(
+        "DROP TABLE IF EXISTS cert_pull_source;
+         DROP TABLE IF EXISTS cert_ingest_token;",
+    )
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to drop legacy channel tables: {e}"))
+    })?;
+
+    tracing::info!("V23 Migration: certificate identity by domain, channels unified");
+    Ok(())
+}
+
+/// V24: remove deployment environments.
+///
+/// The platform is single-user: one daemon, one SQLite file, one operator. An
+/// environment was a second grouping axis on top of that, and it never worked as
+/// one — the UI could switch it but not create it, and switching also rewrote
+/// the profile's `tenant_id`, silently moving a server between tenants.
+///
+/// `tenant_id` survives on `frps_profile` and `local_proxy` because it still
+/// separates API tokens; nothing here removes that.
+fn migrate_v24(tx: &rusqlite::Transaction) -> Result<()> {
+    // Dependants first: the mapping table references `environment`.
+    tx.execute_batch("DROP TABLE IF EXISTS profile_environment;")
+        .map_err(|e| {
+            ClientError::DatabaseMigration(format!("Failed to drop profile_environment: {e}"))
+        })?;
+    tx.execute_batch("DROP TABLE IF EXISTS environment;")
+        .map_err(|e| ClientError::DatabaseMigration(format!("Failed to drop environment: {e}")))?;
+    tracing::info!("V24 Migration: remove deployment environments");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1057,6 +1463,184 @@ mod tests {
             )
             .unwrap();
         assert_eq!(table_count, 3);
+    }
+
+    /// Upgrading a v21/v22 database must collapse same-domain rows into one
+    /// identity, keep the newest material, and carry old channels over.
+    #[test]
+    fn v23_merges_same_domain_certificates_and_keeps_channels() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        ensure_meta_table(&conn).unwrap();
+        for version in 1..=22 {
+            apply_migration(&conn, version).unwrap();
+        }
+
+        // Two certificates for one domain, as a renewal used to produce.
+        for (id, fingerprint, not_after) in [
+            (1, "old-fingerprint", "2026-01-01T00:00:00+00:00"),
+            (2, "new-fingerprint", "2027-01-01T00:00:00+00:00"),
+        ] {
+            conn.execute(
+                "INSERT INTO certificate
+                    (id, tenant_id, primary_domain, sans_json, issuer, serial,
+                     fingerprint_sha256, key_algo, not_before, not_after,
+                     source, source_detail, enc_cert_der, enc_chain_der, enc_key_der,
+                     created_at, updated_at)
+                 VALUES (?1, 'default', 'a.example.com', '[\"a.example.com\"]', 'CA', 's',
+                         ?2, 'rsa', '2025-01-01T00:00:00+00:00', ?3, 'manual', NULL,
+                         x'01', NULL, x'02', '2025-01-01T00:00:00+00:00',
+                         '2025-01-01T00:00:00+00:00')",
+                rusqlite::params![id, fingerprint, not_after],
+            )
+            .unwrap();
+        }
+        // A proxy + binding on the older row, which must follow the merge.
+        conn.execute(
+            "INSERT INTO local_proxy (id, name, proxy_type, local_ip, local_port,
+                                      created_at, updated_at)
+             VALUES (1, 'web', 'https', '127.0.0.1', 80, 'x', 'x')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO certificate_binding (tenant_id, cert_id, proxy_id, created_at, updated_at)
+             VALUES ('default', 1, 1, 'x', 'x')",
+            [],
+        )
+        .unwrap();
+        // A legacy token and a legacy pull source.
+        conn.execute(
+            "INSERT INTO cert_ingest_token (tenant_id, name, token_sha256, domains_json, created_at)
+             VALUES ('default', 'certd', 'abc123', '[\"a.example.com\"]', 'x')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO cert_pull_source (tenant_id, name, kind, base_url, domain, created_at, updated_at)
+             VALUES ('default', 'pull', 'certd', 'https://certd', 'a.example.com', 'x', 'x')",
+            [],
+        )
+        .unwrap();
+
+        apply_migration(&conn, 23).unwrap();
+
+        let identities: i64 = conn
+            .query_row("SELECT COUNT(*) FROM certificate", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(identities, 1, "one row per domain after the merge");
+
+        let kept_id: i64 = conn
+            .query_row(
+                "SELECT id FROM certificate WHERE primary_domain = 'a.example.com'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(kept_id, 1, "the oldest id is the identity that survives");
+
+        let materials: i64 = conn
+            .query_row("SELECT COUNT(*) FROM certificate_material", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(materials, 2, "both issued bundles survive as material rows");
+
+        let binding_cert: i64 = conn
+            .query_row("SELECT cert_id FROM certificate_binding", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(binding_cert, kept_id, "bindings follow the merged identity");
+
+        let newest: String = conn
+            .query_row(
+                "SELECT fingerprint_sha256 FROM certificate_material
+                  ORDER BY not_after DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(newest, "new-fingerprint");
+
+        // Channels survive, and the one whose domain matches is already attached.
+        let (pull_kind, pull_cert): (String, Option<i64>) = conn
+            .query_row(
+                "SELECT kind, certificate_id FROM certificate_source WHERE kind != 'push'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(pull_kind, "certd");
+        assert_eq!(
+            pull_cert,
+            Some(kept_id),
+            "a matching pull source binds itself"
+        );
+
+        let push_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM certificate_source WHERE kind = 'push'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(push_count, 1, "legacy tokens become unbound push channels");
+    }
+
+    /// V24 removes the environment tables while leaving tenant ownership on the
+    /// rows that still use it.
+    #[test]
+    fn v24_drops_environments_but_keeps_tenant_ownership() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        ensure_meta_table(&conn).unwrap();
+        for version in 1..=23 {
+            apply_migration(&conn, version).unwrap();
+        }
+        // A profile with an environment mapping, as a pre-V24 database has.
+        conn.execute(
+            "INSERT INTO frps_profile (id, name, server_addr, server_port, token, tenant_id,
+                                       created_at, updated_at)
+             VALUES (1, 'p', '127.0.0.1', 7000, '', 'default', 'x', 'x')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO profile_environment (profile_id, environment_id)
+             SELECT 1, id FROM environment LIMIT 1",
+            [],
+        )
+        .unwrap();
+
+        apply_migration(&conn, 24).unwrap();
+
+        for table in ["environment", "profile_environment"] {
+            let exists: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(exists, 0, "{table} must be gone");
+        }
+
+        // Tenant ownership is what still separates API tokens, so it stays.
+        let tenant: String = conn
+            .query_row(
+                "SELECT tenant_id FROM frps_profile WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(tenant, "default");
+        conn.query_row("SELECT tenant_id FROM local_proxy LIMIT 0", [], |_| Ok(()))
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(()),
+                other => Err(other),
+            })
+            .expect("local_proxy still carries tenant_id");
     }
 
     #[test]

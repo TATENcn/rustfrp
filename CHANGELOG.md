@@ -1,5 +1,173 @@
 # Changelog
 
+## [Unreleased]
+
+## [0.6.0] - 2026-11-21
+
+### Added
+
+- The `tls2raw` client plugin is now a first-class certificate target, next to
+  `https2http` / `https2https`. It terminates TLS inside frpc and forwards raw
+  TCP to the backend, so it carries the same `crtPath` / `keyPath` pair — but
+  binding or applying a certificate to it used to be rejected as "not a
+  certificate plugin". The proxy editor renders its certificate fields and the
+  type picker offers it.
+- Certificate management for `https` proxies. FRP does not terminate TLS on the
+  server — `frps` only reads the SNI and routes — so the domain certificate has
+  to exist on the frpc host at the `crtPath` / `keyPath` its `https2http` plugin
+  declares. The daemon now stores certificates, writes those files atomically
+  with `0600` permissions and `rename`, and rolls back to the previous file when
+  a write fails. Certificates are imported by pasting PEM, reading a local path,
+  webhook push, or an automatic pull from the Certd open API or a plain URL.
+  There is deliberately no download, export, or PFX route: a certificate and its
+  key never leave the host and never appear in an API response.
+- Certificate bodies and keys are stored as XChaCha20-Poly1305 blobs keyed by a
+  per-installation master key in `cert_store.key` (mode `0600`) beside the
+  database, so a copied database file does not leak a private key.
+- The certificate ingest listener is configured from the UI and enabled by
+  default on loopback. That endpoint never returns certificate material, every
+  request needs a token, and a token can only cover the domains it was issued
+  for, so requiring an operator to switch it on first would make Certd
+  integration look broken. Enabling "reachable from other hosts" rebinds it to
+  `0.0.0.0` and takes effect immediately, without restarting the daemon. A port
+  conflict is reported in the panel and never stops the daemon from starting.
+  It exposes exactly two routes (`POST /ingest/v1/certs` and
+  `GET /ingest/v1/healthz`), authenticating only through the
+  `X-Cert-Ingest-Token` header — never a URL path, which callers' logs would
+  record. A token only accepts certificates whose every SAN it is allowed to
+  serve; a wildcard covers one label, matching TLS wildcard semantics.
+  `--cert-ingest-listen` remains as a pin for container deployments that must
+  fix the address.
+- In the Compose stack the ingest port is published to the host loopback only,
+  not to every interface. A Certd in the same stack reaches the daemon over the
+  Compose network (`http://daemon:7901/ingest/v1/certs`); an external one needs
+  `RUSTFRP_CERT_INGEST_BIND=0.0.0.0`.
+- The proxy editor now offers a structured certificate picker for
+  `https2http` / `https2https` plugins, with the raw plugin JSON still available
+  for fields the form does not model.
+- `GET /api/v1/status` reports `config_dir`, so the UI can suggest certificate
+  paths the daemon is able to create.
+- The certificates page groups its push and pull channels behind two summary
+  cards — the ingest listener's live address and the pull sources' health —
+  and each card opens one dialog holding the endpoint settings, tokens and
+  pull sources. They no longer stack as full-width panels under the list.
+- FRP version downloads have their own page under 「运维管理 → 版本下载」. It
+  reads the official release list and shows each build's archive size for this
+  platform, download count and publish date, with a channel picker (official /
+  GHFast / GH-Proxy / custom HTTPS) and card and list layouts. Rows are dense:
+  version and status badges, one line of metadata, the archive URL as a plain
+  link, then the actions, so the whole list fits without scrolling.
+- Several versions download concurrently and each row shows its own progress
+  bar and byte counter. The daemon now keeps a task per version instead of one
+  global task, so a slow download no longer blocks the next one. Requesting a
+  version that is already downloading returns `FRP_INSTALL_BUSY`, and that
+  version cannot be deleted until its download finishes.
+
+### Removed
+
+- Deployment environments. The platform is single-user: one daemon, one SQLite
+  file, one operator. Environments were a second grouping axis on top of that,
+  and the shape never worked — the UI could switch an environment but had no way
+  to create one, so the selector was a one-item dropdown, and switching also
+  rewrote the profile's `tenant_id`, silently moving a server between tenants.
+  The tables are gone (schema V24) along with `/api/v1/environments`,
+  `profile_environment`, the sidebar selector, the per-row environment picker,
+  and the `environment_id` parameter on `/status` and `/metrics/history`.
+  `tenant_id` stays on profiles and proxies: it still separates API tokens, which
+  is the isolation that actually exists.
+
+### Changed
+
+- Certificates carry a status, and it is derived rather than stored: `active`,
+  `expiring_soon`, `expired`, `not_yet_valid` or `pending`. The five states are
+  distinct answers to "can I serve this?", and collapsing them into a day count
+  hid the case that actually hurts — a certificate that was configured but never
+  arrived. `status_reason` says why in one sentence, `usable` is exactly
+  `status` in `{active, expiring_soon}`, and `channel_error` carries the last
+  failure from any attached channel so a `pending` certificate can explain
+  itself instead of showing a blank row.
+- Applying a certificate that cannot be served is refused instead of overwriting
+  a working file with one every client rejects. The check lives in
+  `apply_certificate`, so the API and the automatic renewal path get the same
+  answer, and it fires before anything is written.
+- Configuring a pull channel creates the certificate it will fill, so the list
+  shows `*.example.com · pending` immediately instead of staying empty until the
+  first fetch succeeds. A channel whose first fetch fails used to leave the page
+  looking untouched, which reads as "my configuration was not saved".
+- A certificate is now identified by its domain, not by its fingerprint, and its
+  material lives in its own table. Renewal was previously modelled as "a new
+  certificate appears": every reissue has a new fingerprint, so replacing the
+  certificate for `example.com` appended a row instead of updating one, and the
+  rows piled up until an operator deleted them by hand. There is now one
+  `certificate` row per `(tenant, primary_domain)` and one
+  `certificate_material` row per issued bundle, so a renewal replaces what is
+  served while keeping the identity — and therefore its bindings — intact.
+  "Newest" means the most recently stored bundle, not the one expiring last: a
+  reissue with a shorter validity must still win, or the daemon would keep
+  serving the older certificate.
+- How a certificate gets updated is now a property *of that certificate*, not a
+  pair of global panels. Push tokens and pull sources became rows of
+  `certificate_source`; a channel can be attached to a certificate, moved to a
+  different one, detached, or marked preferred, so switching a certificate
+  between push and pull no longer means deleting and re-creating credentials.
+  A certificate may exist before it has any material, which is what lets an
+  operator configure the source first and let the first push or fetch fill it
+  in. The two summary cards on the Certificates page are gone; the endpoint
+  settings moved to System Status → Certificate channels, and each certificate
+  manages its own channels.
+- Pull channels run on their own: the daemon checks once a day, imports what it
+  fetched, applies it to every bound proxy, and restarts the frpc process that
+  serves it. Before this, nothing called the pull path except a manual API call,
+  and an applied certificate needed a manual process restart because `frpc
+  reload` keeps the TLS certificate it loaded at startup.
+- Both directions now validate the domain, and record which one failed. A push
+  may only submit a certificate whose every SAN the token allows, and a token
+  attached to a certificate may only replace that certificate's domain
+  (`CERT_008` otherwise). A pull may only install a certificate that covers the
+  channel's target domain; containment is required, not equality, because a CA
+  may reissue with extra SANs. Creating a pull channel rejects a target the
+  attached certificate does not cover, so the mistake surfaces before the first
+  fetch.
+
+### Fixed
+
+- Every Certd pull failed with `no message (code 20002)` on a host whose clock
+  was wrong, and the message hid why. Certd reports failures in `message`, a
+  field the response envelope never declared, so every rejection was reported as
+  "no message" with only a numeric code. The envelope now reads `message` (with
+  `msg` as an alias for older builds) and appends the likely cause for the codes
+  that have one.
+- The resource chart's "last hour" could show far less than an hour. The buffer
+  was bounded by count only (3 600 samples at 1 Hz), so an eight-hour clock
+  correction left it holding nine hours of samples and the one-hour filter
+  retained just the two minutes after the jump. Samples are now evicted by age
+  as well as by count, so the window the UI offers is the window the data
+  covers.
+- A pull now recovers from a skewed clock instead of failing forever. Certd's
+  rejection is a timestamp check, and its `Date` header says what "now" is, so a
+  request that comes back `20002` is retried once, signed with the server's
+  clock. That is the only way a daemon with no privileges can work on a machine
+  whose time is wrong — observed here as an eight-hour RTC offset, where the pull
+  now succeeds on the retry and logs both values.
+- The certificate push URL shown in the UI was built from the listener's bind
+  address, so an operator reaching the console over a domain or a LAN address
+  was told `http://127.0.0.1:7901/ingest/v1/certs` — an address only the host
+  itself can dial. The push route is now also mounted on the control API, and the
+  daemon resolves the advertised URL from the request (`Host`, then
+  `X-Forwarded-Host`/`X-Forwarded-Proto`) so it always names the address the
+  browser actually used; `RUSTFRP_CERT_INGEST_PUBLIC_URL` pins it for a proxy
+  that rewrites paths or remaps ports. The response carries `url_source` so the
+  UI can say whether the value was configured, derived from the request, or
+  fell back to the bind address, and the token snippet in the same dialog now
+  uses the same value instead of recomputing it from `window.location`.
+- A certificate pull source that stores no credentials (a plain URL, an
+  anonymous fetch) failed on every run with `DB_003: Invalid column type Null`
+  instead of fetching. The nullable `enc_secret` column was read as
+  `Option<Vec<u8>>`, where rusqlite rejects NULL on the inner column; the row is
+  now read as `Option<Option<Vec<u8>>>`, so "no secret" is distinct from "no
+  such source" — and a source that disappears mid-run now reports
+  `RecordNotFound` rather than an empty credential.
+
 ## [0.5.4] - 2026-11-15
 
 ### Fixed

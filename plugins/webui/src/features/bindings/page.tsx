@@ -15,7 +15,6 @@ import {
   useBindings,
   useProfiles,
   useProxies,
-  useActiveEnvironment,
 } from "@/hooks/api";
 import { useI18n } from "@/i18n";
 import { AppIcon } from "@/components/icon/AppIcon";
@@ -45,8 +44,7 @@ export default function Bindings() {
   const { t, text } = useI18n(),
     profiles = useProfiles(),
     proxies = useProxies(),
-    bindings = useBindings(),
-    { environments, environment } = useActiveEnvironment();
+    bindings = useBindings();
   const [active, setActive] = useState<FrpsProfile | null>(null),
     [selected, setSelected] = useState<number[]>([]),
     [search, setSearch] = useState("");
@@ -59,9 +57,7 @@ export default function Bindings() {
     (bindings.data ?? [])
       .filter((b) => b.profile_id === id && b.enabled)
       .map((b) => b.proxy_id);
-  const visible = (profiles.data ?? []).filter(
-    (p) => !environment || environment.profile_ids.includes(p.id!),
-  );
+  const visible = profiles.data ?? [];
   const filtered = (proxies.data ?? []).filter((p) =>
     `${p.name} ${p.proxy_type} ${p.local_ip} ${p.local_port}`
       .toLowerCase()
@@ -87,14 +83,12 @@ export default function Bindings() {
         error={
           profiles.error ||
           proxies.error ||
-          bindings.error ||
-          environments.error
+          bindings.error
         }
         retry={() => {
           void profiles.refetch();
           void proxies.refetch();
           void bindings.refetch();
-          void environments.refetch();
         }}
       />
       {profiles.isPending || proxies.isPending || bindings.isPending ? (

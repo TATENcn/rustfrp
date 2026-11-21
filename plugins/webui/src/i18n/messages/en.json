@@ -13,6 +13,8 @@
   "nav.proxies": "Proxies",
   "nav.bindings": "Proxy assignments",
   "nav.visitors": "Visitors",
+  "nav.certificates": "Certificates",
+  "nav.downloads": "FRP downloads",
   "nav.logs": "Logs",
   "nav.status": "System Status",
 
