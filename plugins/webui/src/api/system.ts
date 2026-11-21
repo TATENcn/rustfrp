@@ -1,9 +1,8 @@
 import { apiGet, apiPost } from '@/api/client'
 import type { ApiEnvelope, StatusResponse, ReloadResponse, ReloadTaskStatus, HealthResponse } from '@/api/types'
 
-export function getStatus(environmentId?: number | null): Promise<ApiEnvelope<StatusResponse>> {
-  const query = environmentId ? `?environment_id=${environmentId}` : ''
-  return apiGet<StatusResponse>(`/status${query}`)
+export function getStatus(): Promise<ApiEnvelope<StatusResponse>> {
+  return apiGet<StatusResponse>('/status')
 }
 
 export function triggerReload(): Promise<ApiEnvelope<ReloadResponse>> {

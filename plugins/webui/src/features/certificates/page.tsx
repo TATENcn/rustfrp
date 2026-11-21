@@ -543,7 +543,7 @@ function BindDialog({
 }
 
 function ImportDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { t, text } = useI18n();
+  const { text } = useI18n();
   const [tab, setTab] = useState("pem");
   const [cert, setCert] = useState("");
   const [key, setKey] = useState("");

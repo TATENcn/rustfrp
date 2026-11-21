@@ -8,7 +8,6 @@ const sample = (
   epoch = "one",
 ) => ({
   timestamp: new Date(seconds * 1000).toISOString(),
-  environment_id: 1,
   profile_id: profile,
   received_bytes: received,
   sent_bytes: sent,

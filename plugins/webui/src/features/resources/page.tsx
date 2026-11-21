@@ -3,7 +3,6 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { apiDelete, apiGet, apiPost, apiPut } from "@/api/client";
-import { assignProfile } from "@/api/environments";
 import type { FrpsProfile, LocalProxy, LocalVisitor } from "@/api/types";
 import {
   command,
@@ -11,7 +10,6 @@ import {
   useAction,
   useBindings,
   useProfiles,
-  useActiveEnvironment,
 } from "@/hooks/api";
 import { useI18n } from "@/i18n";
 import {
@@ -45,8 +43,7 @@ export default function Resources({ kind }: { kind: EntityKind }) {
     queryFn: () => data(apiGet<Entity[]>(`/${kind}`)),
   });
   const profiles = useProfiles(),
-    bindings = useBindings(),
-    { environments, environment: active } = useActiveEnvironment();
+    bindings = useBindings();
   const [search, setSearch] = useState(""),
     [protocol, setProtocol] = useState("all"),
     [editing, setEditing] = useState<Entity | null>(null),
@@ -87,10 +84,6 @@ export default function Resources({ kind }: { kind: EntityKind }) {
     text("删除成功", "Deleted"),
     () => setDeleting(null),
   );
-  const assign = useAction(
-    ({ id, environment }: { id: number; environment: number }) =>
-      data(assignProfile(id, environment)),
-  );
   const getProtocol = (row: Entity) =>
     "transport_protocol" in row
       ? row.transport_protocol
@@ -99,9 +92,6 @@ export default function Resources({ kind }: { kind: EntityKind }) {
         : row.visitor_type;
   const rows = (query.data ?? []).filter(
     (row) =>
-      (kind !== "profiles" ||
-        !active ||
-        active.profile_ids.includes(row.id!)) &&
       (protocol === "all" || getProtocol(row) === protocol) &&
       [
         row.name,
@@ -148,28 +138,6 @@ export default function Resources({ kind }: { kind: EntityKind }) {
               ? text("已启用", "Enabled")
               : text("未启用", "Disabled")}
           </Badge>
-        ),
-      },
-      {
-        key: "environment",
-        title: t("app.environment"),
-        cell: (row) => (
-          <Choice
-            label={t("app.environment")}
-            value={
-              environments.data?.find((e) => e.profile_ids.includes(row.id!))
-                ?.id
-            }
-            options={(environments.data ?? []).map((e) => ({
-              value: e.id!,
-              label: e.name,
-            }))}
-            disabled={assign.isPending}
-            onChange={(v) =>
-              assign.mutate({ id: row.id!, environment: Number(v) })
-            }
-            className="h-8 w-32"
-          />
         ),
       },
     );
@@ -329,13 +297,11 @@ export default function Resources({ kind }: { kind: EntityKind }) {
       <ErrorState
         error={
           query.error ||
-          environments.error ||
           profiles.error ||
           (kind === "proxies" && bindings.error)
         }
         retry={() => {
           void query.refetch();
-          void environments.refetch();
           void profiles.refetch();
           void bindings.refetch();
         }}

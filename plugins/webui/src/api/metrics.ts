@@ -1,10 +1,8 @@
 import { apiGet, apiPost } from '@/api/client'
 import type { ApiEnvelope, MetricsHistory, TrafficSample } from '@/api/types'
 
-export function getMetricsHistory(environmentId?: number, limit = 36_000): Promise<ApiEnvelope<MetricsHistory>> {
-  const query = new URLSearchParams({ limit: String(limit) })
-  if (environmentId) query.set('environment_id', String(environmentId))
-  return apiGet<MetricsHistory>(`/metrics/history?${query}`)
+export function getMetricsHistory(limit = 36_000): Promise<ApiEnvelope<MetricsHistory>> {
+  return apiGet<MetricsHistory>(`/metrics/history?limit=${limit}`)
 }
 
 export function ingestTraffic(sample: TrafficSample): Promise<ApiEnvelope<null>> {

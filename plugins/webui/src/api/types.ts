@@ -251,17 +251,6 @@ export interface StatusResponse {
   processes: ProcessInfo[]
 }
 
-export interface Environment {
-  id?: number
-  name: string
-  description?: string | null
-  color: string
-  is_default: boolean
-  created_at: string
-  updated_at: string
-  profile_ids: number[]
-}
-
 export interface ResourceSample {
   timestamp: string
   daemon_cpu_percent: number
@@ -278,7 +267,6 @@ export interface TrafficSample {
   source?: string
   counter_epoch?: string
   timestamp: string
-  environment_id: number
   profile_id: number
   received_bytes: number
   sent_bytes: number
@@ -328,6 +316,6 @@ export interface TrafficCollection {
   state: string
   updated_at: string | null
   host_state?: string
-  proxies?: { profile_id: number; environment_id: number; proxy_id: number; name: string; state: string }[]
-  profiles: { profile_id: number; environment_id: number; state: string }[]
+  proxies?: { profile_id: number; proxy_id: number; name: string; state: string }[]
+  profiles: { profile_id: number; state: string }[]
 }
