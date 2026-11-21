@@ -18,7 +18,7 @@ chrono.workspace = true
 wasmtime = { workspace = true, optional = true }
 
 # Zero network dependencies
-dirs = "5"
+dirs = "7"
 
 [features]
 default = []
