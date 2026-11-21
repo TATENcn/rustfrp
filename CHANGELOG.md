@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-21
+
 ### Added
 
 - The `tls2raw` client plugin is now a first-class certificate target, next to
@@ -60,6 +62,19 @@
   global task, so a slow download no longer blocks the next one. Requesting a
   version that is already downloading returns `FRP_INSTALL_BUSY`, and that
   version cannot be deleted until its download finishes.
+
+### Removed
+
+- Deployment environments. The platform is single-user: one daemon, one SQLite
+  file, one operator. Environments were a second grouping axis on top of that,
+  and the shape never worked — the UI could switch an environment but had no way
+  to create one, so the selector was a one-item dropdown, and switching also
+  rewrote the profile's `tenant_id`, silently moving a server between tenants.
+  The tables are gone (schema V24) along with `/api/v1/environments`,
+  `profile_environment`, the sidebar selector, the per-row environment picker,
+  and the `environment_id` parameter on `/status` and `/metrics/history`.
+  `tenant_id` stays on profiles and proxies: it still separates API tokens, which
+  is the isolation that actually exists.
 
 ### Changed
 
