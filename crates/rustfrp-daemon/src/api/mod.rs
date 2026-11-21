@@ -350,7 +350,10 @@ pub fn create_router(state: ApiState, auth: impl AuthMiddleware) -> Router {
             "/api/v1/certificate-sources/:id/run",
             axum::routing::post(cert_ingest::run),
         )
-        .route("/api/v1/certificate-sources/kinds", axum::routing::get(cert_ingest::kinds))
+        .route(
+            "/api/v1/certificate-sources/kinds",
+            axum::routing::get(cert_ingest::kinds),
+        )
         // Aliases kept so existing automation and Certd instructions still work.
         .route(
             "/api/v1/cert-ingest-tokens",

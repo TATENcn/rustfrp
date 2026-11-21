@@ -209,7 +209,10 @@ pub fn classify(
             if start > chrono::Utc::now() {
                 return (
                     CertificateStatus::NotYetValid,
-                    Some(format!("validity starts at {}", &not_before[..not_before.len().min(19)])),
+                    Some(format!(
+                        "validity starts at {}",
+                        &not_before[..not_before.len().min(19)]
+                    )),
                 );
             }
         }
@@ -255,8 +258,14 @@ mod status_tests {
 
     #[test]
     fn expiry_boundaries_are_ordered() {
-        assert_eq!(classify(Some(&at(-10)), Some(&at(-1))).0, CertificateStatus::Expired);
-        assert_eq!(classify(Some(&at(-10)), Some(&at(1))).0, CertificateStatus::ExpiringSoon);
+        assert_eq!(
+            classify(Some(&at(-10)), Some(&at(-1))).0,
+            CertificateStatus::Expired
+        );
+        assert_eq!(
+            classify(Some(&at(-10)), Some(&at(1))).0,
+            CertificateStatus::ExpiringSoon
+        );
         assert_eq!(
             classify(Some(&at(-10)), Some(&at(EXPIRING_SOON_DAYS))).0,
             CertificateStatus::ExpiringSoon

@@ -154,7 +154,15 @@ const SOURCE_COLUMNS: &str = "id, tenant_id, certificate_id, kind, name, domain,
 
 /// Digest lookup row: id, tenant, allowed domains, certificate, name, expiry,
 /// revocation.
-type TokenRow = (i64, String, String, Option<i64>, String, Option<String>, Option<String>);
+type TokenRow = (
+    i64,
+    String,
+    String,
+    Option<i64>,
+    String,
+    Option<String>,
+    Option<String>,
+);
 
 /// What a presented token resolved to.
 pub struct TokenGrant {
@@ -168,11 +176,7 @@ pub struct TokenGrant {
 
 impl Database {
     /// Create a channel. A push channel returns its plaintext token exactly once.
-    pub async fn create_source(
-        &self,
-        tenant: &str,
-        input: SourceInput,
-    ) -> Result<CreatedSource> {
+    pub async fn create_source(&self, tenant: &str, input: SourceInput) -> Result<CreatedSource> {
         validate_source_input(&input)?;
 
         let cipher = self.cert_cipher()?;
@@ -192,8 +196,8 @@ impl Database {
             if let Some(key_secret) = &secret.key_secret {
                 payload.insert("key_secret".into(), key_secret.clone().into());
             }
-            let json =
-                serde_json::to_vec(&payload).map_err(|e| ClientError::ConfigValidation(e.to_string()))?;
+            let json = serde_json::to_vec(&payload)
+                .map_err(|e| ClientError::ConfigValidation(e.to_string()))?;
             Some(cipher.encrypt(&json)?)
         };
 
@@ -227,11 +231,9 @@ impl Database {
         // hint that anything was configured.
         let certificate_id = match (input.certificate_id, input.kind.is_pull()) {
             (Some(id), _) => Some(id),
-            (None, true) if !domain.is_empty() => Some(
-                self.ensure_certificate(tenant, &domain)
-                    .await?
-                    .id,
-            ),
+            (None, true) if !domain.is_empty() => {
+                Some(self.ensure_certificate(tenant, &domain).await?.id)
+            }
             (None, _) => None,
         };
 
@@ -360,9 +362,10 @@ impl Database {
               LIMIT ?2",
         )?;
         let rows = stmt
-            .query_map(params![chrono::Utc::now().to_rfc3339(), limit as i64], |row| {
-                Ok((row.get(0)?, row.get(1)?))
-            })?
+            .query_map(
+                params![chrono::Utc::now().to_rfc3339(), limit as i64],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(rows)
     }

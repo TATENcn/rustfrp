@@ -320,7 +320,9 @@ mod window_tests {
         // Fill half the buffer an hour ago, as a skewed clock would have.
         for i in 0..100 {
             store
-                .push_resource(sample(start - chrono::Duration::hours(9) + chrono::Duration::seconds(i)))
+                .push_resource(sample(
+                    start - chrono::Duration::hours(9) + chrono::Duration::seconds(i),
+                ))
                 .await;
         }
         assert_eq!(store.resources(usize::MAX).await.len(), 100);
@@ -328,7 +330,11 @@ mod window_tests {
         // One sample "now" must discard all of them.
         store.push_resource(sample(start)).await;
         let kept = store.resources(usize::MAX).await;
-        assert_eq!(kept.len(), 1, "only the current sample is inside the window");
+        assert_eq!(
+            kept.len(),
+            1,
+            "only the current sample is inside the window"
+        );
         assert_eq!(kept[0].timestamp, start);
     }
 
@@ -338,7 +344,9 @@ mod window_tests {
         let start = chrono::Utc::now();
         for i in 0..60 {
             store
-                .push_resource(sample(start - chrono::Duration::minutes(59) + chrono::Duration::seconds(i)))
+                .push_resource(sample(
+                    start - chrono::Duration::minutes(59) + chrono::Duration::seconds(i),
+                ))
                 .await;
         }
         store.push_resource(sample(start)).await;

@@ -319,7 +319,10 @@ impl Database {
     /// A `Pending` certificate is not broken, it is waiting — and the reason it
     /// is still waiting is the failure of a channel. Keeping the two together in
     /// one response is what lets the UI say why instead of showing an empty row.
-    async fn latest_source_errors(&self, tenant: &str) -> Result<std::collections::HashMap<i64, String>> {
+    async fn latest_source_errors(
+        &self,
+        tenant: &str,
+    ) -> Result<std::collections::HashMap<i64, String>> {
         let conn = self.lock().await;
         let mut stmt = conn.prepare(
             "SELECT certificate_id, last_error
@@ -346,7 +349,10 @@ impl Database {
         let row = {
             let conn = self.lock().await;
             conn.query_row(
-                &format!("{} WHERE c.id = ?1 AND c.tenant_id = ?2", CertificateRow::SELECT),
+                &format!(
+                    "{} WHERE c.id = ?1 AND c.tenant_id = ?2",
+                    CertificateRow::SELECT
+                ),
                 params![id, tenant],
                 CertificateRow::from_row,
             )
@@ -359,11 +365,7 @@ impl Database {
 
         let mut certificate = row.into_certificate();
         certificate.bindings = self.list_certificate_bindings(tenant, Some(id)).await?;
-        certificate.channel_error = self
-            .latest_source_errors(tenant)
-            .await?
-            .get(&id)
-            .cloned();
+        certificate.channel_error = self.latest_source_errors(tenant).await?.get(&id).cloned();
         Ok(certificate)
     }
 
@@ -371,11 +373,7 @@ impl Database {
     ///
     /// The pull path uses this to find (or create) the identity a channel
     /// belongs to before it has fetched anything.
-    pub async fn certificate_for_domain(
-        &self,
-        tenant: &str,
-        domain: &str,
-    ) -> Result<Certificate> {
+    pub async fn certificate_for_domain(&self, tenant: &str, domain: &str) -> Result<Certificate> {
         let row = {
             let conn = self.lock().await;
             conn.query_row(

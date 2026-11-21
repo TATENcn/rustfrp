@@ -293,11 +293,7 @@ pub async fn apply(
             let Some(profile) = state.db.get_profile(profile_id).await.ok() else {
                 continue;
             };
-            if let Err(error) = state
-                .process_manager
-                .start(profile_id, &profile.name)
-                .await
-            {
+            if let Err(error) = state.process_manager.start(profile_id, &profile.name).await {
                 reload_errors.push(format!("profile {profile_id}: {error}"));
             }
         }
@@ -314,7 +310,6 @@ pub async fn apply(
             .collect(),
     })))
 }
-
 
 pub async fn delete(
     State(state): State<ApiState>,

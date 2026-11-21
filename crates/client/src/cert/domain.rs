@@ -117,8 +117,16 @@ mod tests {
 
     #[test]
     fn pull_accepts_a_certificate_that_covers_the_target() {
-        assert!(covers_target(&sans(&["a.example.com"]), "a.example.com", "a.example.com"));
-        assert!(covers_target(&sans(&["*.example.com"]), "*.example.com", "a.example.com"));
+        assert!(covers_target(
+            &sans(&["a.example.com"]),
+            "a.example.com",
+            "a.example.com"
+        ));
+        assert!(covers_target(
+            &sans(&["*.example.com"]),
+            "*.example.com",
+            "a.example.com"
+        ));
         // A wider certificate is fine: CAs reissue with extra SANs.
         assert!(covers_target(
             &sans(&["a.example.com", "b.example.com"]),
@@ -129,11 +137,23 @@ mod tests {
 
     #[test]
     fn pull_rejects_a_certificate_for_the_wrong_domain() {
-        assert!(!covers_target(&sans(&["evil.test"]), "evil.test", "a.example.com"));
+        assert!(!covers_target(
+            &sans(&["evil.test"]),
+            "evil.test",
+            "a.example.com"
+        ));
         // A wildcard for a parent domain does not cover a subdomain's own name.
-        assert!(!covers_target(&sans(&["*.other.test"]), "*.other.test", "a.example.com"));
+        assert!(!covers_target(
+            &sans(&["*.other.test"]),
+            "*.other.test",
+            "a.example.com"
+        ));
         // And a deeper wildcard must not be treated as a parent match.
-        assert!(!covers_target(&sans(&["*.b.example.com"]), "*.b.example.com", "a.example.com"));
+        assert!(!covers_target(
+            &sans(&["*.b.example.com"]),
+            "*.b.example.com",
+            "a.example.com"
+        ));
     }
 
     #[test]

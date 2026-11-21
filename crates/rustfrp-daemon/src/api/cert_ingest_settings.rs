@@ -217,19 +217,19 @@ fn request_origin(headers: &HeaderMap) -> Option<String> {
     }
     // Without a proxy hint the connection is plain HTTP: the control API binds
     // loopback or a LAN address and does not terminate TLS itself.
-    Some(format!("{}://{host}", scheme.unwrap_or_else(|| "http".into())))
+    Some(format!(
+        "{}://{host}",
+        scheme.unwrap_or_else(|| "http".into())
+    ))
 }
 
 /// Reject anything that would turn the echoed value into an injection vector.
 fn is_plausible_host(host: &str) -> bool {
     !host.is_empty()
         && host.len() <= 255
-        && host
-            .bytes()
-            .all(|byte| {
-                byte.is_ascii_alphanumeric()
-                    || matches!(byte, b'.' | b'-' | b':' | b'[' | b']' | b'_' )
-            })
+        && host.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b':' | b'[' | b']' | b'_')
+        })
 }
 
 fn public_url_override() -> Option<String> {
@@ -360,10 +360,7 @@ mod tests {
         let settings = settings_for(
             &config(),
             Some("127.0.0.1:7901".into()),
-            &headers(&[(
-                "forwarded",
-                "for=10.0.0.2;proto=https;host=example.com",
-            )]),
+            &headers(&[("forwarded", "for=10.0.0.2;proto=https;host=example.com")]),
         );
         assert_eq!(
             settings.url.as_deref(),

@@ -6,7 +6,6 @@
 //! - GET  /api/v1/reload/{task_id} — check reload task status
 //! - GET  /api/v1/health           — health check
 
-
 use axum::extract::{Extension, Path, State};
 use axum::http::StatusCode;
 use axum::Json;

@@ -14,9 +14,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde::Deserialize;
 
-use rustfrp_client::db::cert_ingest::{
-    CertificateSource, CreatedSource, SourceInput, SourceKind,
-};
+use rustfrp_client::db::cert_ingest::{CertificateSource, CreatedSource, SourceInput, SourceKind};
 
 use super::auth::AuthIdentity;
 use super::response::{api_error, ApiResponse};

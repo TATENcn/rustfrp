@@ -72,8 +72,14 @@ pub async fn pull_once(
         Err(error) => {
             // Keep the same interval on failure: backing off would let an
             // intermittent error hide a certificate that is about to expire.
-            db.record_source_run(id, tenant, "failed", Some(&error.to_string()), Some(&next_run()))
-                .await?;
+            db.record_source_run(
+                id,
+                tenant,
+                "failed",
+                Some(&error.to_string()),
+                Some(&next_run()),
+            )
+            .await?;
             Err(error)
         }
     }
@@ -370,11 +376,13 @@ async fn certd_request(
     let status = response.status();
     let body = read_bounded(response).await.map_err(CertdFailure::Other)?;
     if !status.is_success() {
-        return Err(CertdFailure::Other(ClientError::CertificateTarget(format!(
-            "Certd returned HTTP {}: {}",
-            status.as_u16(),
-            truncate(&body, 200)
-        ))));
+        return Err(CertdFailure::Other(ClientError::CertificateTarget(
+            format!(
+                "Certd returned HTTP {}: {}",
+                status.as_u16(),
+                truncate(&body, 200)
+            ),
+        )));
     }
 
     // Certd answers both plain `{crt,...}` and `{code,message,data:{crt,...}}`.
@@ -392,10 +400,12 @@ async fn certd_request(
                         return Err(CertdFailure::Clock(server_time));
                     }
                 }
-                return Err(CertdFailure::Other(ClientError::CertificateTarget(format!(
-                    "Certd rejected the request: {message} (code {code}){}",
-                    certd_hint(code),
-                ))));
+                return Err(CertdFailure::Other(ClientError::CertificateTarget(
+                    format!(
+                        "Certd rejected the request: {message} (code {code}){}",
+                        certd_hint(code),
+                    ),
+                )));
             }
         }
     }

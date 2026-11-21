@@ -286,7 +286,10 @@ async fn ingest_token_is_hashed_and_domain_scoped() {
         .unwrap();
     assert_eq!(grant.tenant, "default");
     assert_eq!(grant.allowed_domains, vec!["test.example.com".to_string()]);
-    assert!(grant.certificate_id.is_none(), "an unbound token stays unbound");
+    assert!(
+        grant.certificate_id.is_none(),
+        "an unbound token stays unbound"
+    );
 
     assert!(db
         .authenticate_source_token("wrong-token-value-xxxxxxxx")
@@ -295,7 +298,9 @@ async fn ingest_token_is_hashed_and_domain_scoped() {
         .is_none());
 
     // Deleting the channel invalidates its token immediately.
-    db.delete_source(created.source.id, "default").await.unwrap();
+    db.delete_source(created.source.id, "default")
+        .await
+        .unwrap();
     assert!(db
         .authenticate_source_token(&plaintext)
         .await
@@ -387,10 +392,16 @@ fn _assert_secrets_is_not_serializable(_: CertificateSecrets) {}
 async fn a_certificate_can_exist_before_any_material_arrives() {
     let (_dir, db) = database().await;
 
-    let certificate = db.ensure_certificate("default", "Test.Example.com").await.unwrap();
+    let certificate = db
+        .ensure_certificate("default", "Test.Example.com")
+        .await
+        .unwrap();
     assert_eq!(certificate.primary_domain, "test.example.com");
     assert!(certificate.material_id.is_none());
-    assert!(certificate.days_remaining.is_none(), "no expiry before material");
+    assert!(
+        certificate.days_remaining.is_none(),
+        "no expiry before material"
+    );
     assert!(certificate.not_after.is_empty());
     // A certificate with no material is `pending`, and the reason lives in
     // `status_reason` rather than the free-form warning list.
@@ -413,7 +424,10 @@ async fn a_certificate_can_exist_before_any_material_arrives() {
     assert!(error.to_string().contains("no material yet"), "{error}");
 
     // Ensuring twice must not create a second identity.
-    let again = db.ensure_certificate("default", "test.example.com").await.unwrap();
+    let again = db
+        .ensure_certificate("default", "test.example.com")
+        .await
+        .unwrap();
     assert_eq!(again.id, certificate.id);
     assert_eq!(db.list_certificates("default").await.unwrap().len(), 1);
 }
@@ -469,8 +483,14 @@ async fn reissuing_a_certificate_updates_instead_of_duplicating() {
 #[tokio::test]
 async fn a_channel_can_move_between_certificates() {
     let (_dir, db) = database().await;
-    let first = db.ensure_certificate("default", "a.example.com").await.unwrap();
-    let second = db.ensure_certificate("default", "b.example.com").await.unwrap();
+    let first = db
+        .ensure_certificate("default", "a.example.com")
+        .await
+        .unwrap();
+    let second = db
+        .ensure_certificate("default", "b.example.com")
+        .await
+        .unwrap();
 
     let push = db
         .create_source(
@@ -525,7 +545,10 @@ async fn a_channel_can_move_between_certificates() {
 #[tokio::test]
 async fn only_one_channel_per_certificate_is_primary() {
     let (_dir, db) = database().await;
-    let certificate = db.ensure_certificate("default", "a.example.com").await.unwrap();
+    let certificate = db
+        .ensure_certificate("default", "a.example.com")
+        .await
+        .unwrap();
 
     let push = db
         .create_source(
@@ -563,7 +586,10 @@ async fn only_one_channel_per_certificate_is_primary() {
         .unwrap();
 
     assert!(push.source.is_primary, "the first channel is primary");
-    assert!(!pull.source.is_primary, "a second channel does not steal it");
+    assert!(
+        !pull.source.is_primary,
+        "a second channel does not steal it"
+    );
 
     let promoted = db
         .set_primary_source(pull.source.id, "default")
@@ -605,7 +631,9 @@ async fn a_pull_channel_target_must_be_covered_by_the_certificate() {
     };
 
     // A covered domain is accepted.
-    db.create_source("default", input("test.example.com")).await.unwrap();
+    db.create_source("default", input("test.example.com"))
+        .await
+        .unwrap();
 
     // `other.test` is not in the certificate's SANs.
     let error = db
@@ -613,7 +641,9 @@ async fn a_pull_channel_target_must_be_covered_by_the_certificate() {
         .await
         .unwrap_err();
     assert!(
-        error.to_string().contains("does not cover the channel's domain"),
+        error
+            .to_string()
+            .contains("does not cover the channel's domain"),
         "{error}"
     );
 
@@ -713,7 +743,10 @@ async fn a_pull_channel_creates_the_certificate_it_will_fill() {
 
     // The channel is bound, and the certificate exists with no material yet.
     assert!(created.source.certificate_id.is_some());
-    assert!(created.source.is_primary, "its only channel is the primary one");
+    assert!(
+        created.source.is_primary,
+        "its only channel is the primary one"
+    );
 
     let certificates = db.list_certificates("default").await.unwrap();
     assert_eq!(certificates.len(), 1, "the certificate is visible at once");
@@ -774,7 +807,10 @@ async fn a_push_channel_does_not_invent_a_certificate() {
 #[tokio::test]
 async fn apply_refuses_a_certificate_that_cannot_be_served() {
     let (dir, db) = database().await;
-    let certificate = db.ensure_certificate("default", "test.example.com").await.unwrap();
+    let certificate = db
+        .ensure_certificate("default", "test.example.com")
+        .await
+        .unwrap();
     assert_eq!(
         certificate.status,
         rustfrp_client::cert::CertificateStatus::Pending
@@ -783,10 +819,7 @@ async fn apply_refuses_a_certificate_that_cannot_be_served() {
     let crt_path = dir.path().join("fullchain.pem");
     let key_path = dir.path().join("privkey.pem");
     let proxy = proxy_with_certificate_paths(dir.path());
-    let proxy_id = db
-        .insert_proxy_for_tenant(&proxy, "default")
-        .await
-        .unwrap();
+    let proxy_id = db.insert_proxy_for_tenant(&proxy, "default").await.unwrap();
     db.bind_certificate(certificate.id, proxy_id, "default")
         .await
         .unwrap();

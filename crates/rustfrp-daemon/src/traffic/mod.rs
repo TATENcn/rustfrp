@@ -87,11 +87,7 @@ struct CounterState {
 }
 #[cfg(target_os = "linux")]
 impl CounterState {
-    fn update(
-        &mut self,
-        identity: (u32, String),
-        sockets: &[linux::SocketCounter],
-    ) -> (u64, u64) {
+    fn update(&mut self, identity: (u32, String), sockets: &[linux::SocketCounter]) -> (u64, u64) {
         if self.identity != identity {
             *self = Self {
                 identity,

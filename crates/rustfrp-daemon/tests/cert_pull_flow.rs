@@ -84,7 +84,11 @@ async fn send(router: &axum::Router, request: Request<Body>) -> (StatusCode, Str
     (status, String::from_utf8_lossy(&bytes).to_string())
 }
 
-async fn post_json(router: &axum::Router, uri: &str, body: serde_json::Value) -> (StatusCode, String) {
+async fn post_json(
+    router: &axum::Router,
+    uri: &str,
+    body: serde_json::Value,
+) -> (StatusCode, String) {
     send(
         router,
         Request::builder()
@@ -170,7 +174,10 @@ async fn a_pull_imports_the_certificate_and_rewrites_bound_files() {
         .unwrap();
     assert!(stored.material_id.is_some());
     assert_eq!(stored.primary_domain, "test.example.com");
-    assert_eq!(harness.db.list_certificates("default").await.unwrap().len(), 1);
+    assert_eq!(
+        harness.db.list_certificates("default").await.unwrap().len(),
+        1
+    );
 
     // Bind, then pull again: the files must already be correct without a manual
     // apply, because a renewal is expected to reach the proxy on its own.
@@ -179,7 +186,11 @@ async fn a_pull_imports_the_certificate_and_rewrites_bound_files() {
         .bind_certificate(certificate.id, proxy_id, "default")
         .await
         .unwrap();
-    let applied = harness.db.apply_stale_certificates("default").await.unwrap();
+    let applied = harness
+        .db
+        .apply_stale_certificates("default")
+        .await
+        .unwrap();
     assert_eq!(applied, 1, "the stale binding is rewritten");
     assert!(std::fs::read_to_string(&crt_path)
         .unwrap()
@@ -300,10 +311,7 @@ async fn a_bound_push_token_rejects_a_certificate_for_another_certificate() {
             .method("POST")
             .uri("/ingest/v1/certs")
             .header("content-type", "application/json")
-            .header(
-                "x-cert-ingest-token",
-                created.plaintext.as_deref().unwrap(),
-            )
+            .header("x-cert-ingest-token", created.plaintext.as_deref().unwrap())
             .body(Body::from(json!({ "crt": CERT, "key": KEY }).to_string()))
             .unwrap(),
     )
@@ -337,9 +345,10 @@ async fn an_unbound_pull_channel_resolves_its_certificate_by_domain() {
         .await
         .unwrap();
 
-    let report = rustfrp_daemon::cert_pull::pull_once(&harness.db, None, created.source.id, "default")
-        .await
-        .unwrap();
+    let report =
+        rustfrp_daemon::cert_pull::pull_once(&harness.db, None, created.source.id, "default")
+            .await
+            .unwrap();
     assert_eq!(report.primary_domain.as_deref(), Some("test.example.com"));
 
     let attached = harness
@@ -387,7 +396,11 @@ async fn a_pull_for_an_unknown_domain_creates_the_certificate() {
         .unwrap();
 
     let certificates = harness.db.list_certificates("default").await.unwrap();
-    assert_eq!(certificates.len(), 1, "the fetch must not create a second row");
+    assert_eq!(
+        certificates.len(),
+        1,
+        "the fetch must not create a second row"
+    );
     assert_eq!(certificates[0].primary_domain, "test.example.com");
     assert_eq!(certificates[0].id, before[0].id);
     assert!(certificates[0].material_id.is_some());

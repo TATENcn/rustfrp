@@ -255,11 +255,8 @@ async fn ingest_certificate(
     // A token may only submit certificates for the domains it was issued for.
     // Check every SAN, not just the primary one: a wildcard or multi-SAN
     // certificate must not become a way to serve an unrelated host.
-    let disallowed = domain::disallowed(
-        &parsed.sans,
-        &parsed.primary_domain,
-        &grant.allowed_domains,
-    );
+    let disallowed =
+        domain::disallowed(&parsed.sans, &parsed.primary_domain, &grant.allowed_domains);
     if !disallowed.is_empty() {
         tracing::warn!(
             domain = %parsed.primary_domain,
@@ -280,7 +277,11 @@ async fn ingest_certificate(
             Ok(certificate) => certificate,
             Err(error) => return failure(StatusCode::NOT_FOUND, error.code(), &error.to_string()),
         };
-        if !domain::covers_target(&parsed.sans, &parsed.primary_domain, &expected.primary_domain) {
+        if !domain::covers_target(
+            &parsed.sans,
+            &parsed.primary_domain,
+            &expected.primary_domain,
+        ) {
             tracing::warn!(
                 certificate_id = attached,
                 expected = %expected.primary_domain,

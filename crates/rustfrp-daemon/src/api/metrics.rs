@@ -60,9 +60,10 @@ pub async fn history(
         }
     }
     traffic.retain(|sample| allowed.contains(&sample.profile_id));
-    traffic_collection
-        .profiles
-        .retain(|item| allowed.contains(&item.profile_id) && query.profile_id.is_none_or(|id| id == item.profile_id));
+    traffic_collection.profiles.retain(|item| {
+        allowed.contains(&item.profile_id)
+            && query.profile_id.is_none_or(|id| id == item.profile_id)
+    });
     for sample in &mut resources {
         sample.processes.retain(|p| allowed.contains(&p.profile_id));
     }
@@ -71,11 +72,13 @@ pub async fn history(
         .proxy_traffic()
         .await
         .into_iter()
-        .filter(|s| allowed.contains(&s.profile_id) && query.profile_id.is_none_or(|id| id == s.profile_id))
+        .filter(|s| {
+            allowed.contains(&s.profile_id) && query.profile_id.is_none_or(|id| id == s.profile_id)
+        })
         .collect();
-    traffic_collection
-        .proxies
-        .retain(|s| allowed.contains(&s.profile_id) && query.profile_id.is_none_or(|id| id == s.profile_id));
+    traffic_collection.proxies.retain(|s| {
+        allowed.contains(&s.profile_id) && query.profile_id.is_none_or(|id| id == s.profile_id)
+    });
     let host_traffic = state.metrics.host_traffic().await;
     Json(ApiResponse::ok(HistoryResponse {
         resources,
@@ -198,10 +201,7 @@ fn latest_traffic_by_profile(samples: Vec<TrafficSample>) -> Vec<TrafficSample> 
 mod tests {
     use super::*;
     use rustfrp_client::{
-        config::model::FrpsProfile,
-        db::Database,
-        process::manager::ProcessManager,
-        ClientState,
+        config::model::FrpsProfile, db::Database, process::manager::ProcessManager, ClientState,
     };
     use rustfrp_common::signal::SignalHandler;
     use std::sync::Arc;

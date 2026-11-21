@@ -1213,7 +1213,9 @@ fn migrate_v23(tx: &rusqlite::Transaction) -> Result<()> {
     // The rebuild below deletes rows that `certificate_binding` and
     // `certificate_material` point at, so FK checks must be deferred to commit.
     tx.execute_batch("PRAGMA defer_foreign_keys = ON")
-        .map_err(|e| ClientError::DatabaseMigration(format!("Failed to defer foreign keys: {e}")))?;
+        .map_err(|e| {
+            ClientError::DatabaseMigration(format!("Failed to defer foreign keys: {e}"))
+        })?;
 
     // --- 1. Material moves to its own table, one row per issued bundle. ------
     tx.execute_batch(
@@ -1238,7 +1240,9 @@ fn migrate_v23(tx: &rusqlite::Transaction) -> Result<()> {
             FOREIGN KEY (certificate_id) REFERENCES certificate(id) ON DELETE CASCADE
         )",
     )
-    .map_err(|e| ClientError::DatabaseMigration(format!("Failed to create certificate_material: {e}")))?;
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to create certificate_material: {e}"))
+    })?;
 
     tx.execute(
         "INSERT INTO certificate_material
@@ -1251,7 +1255,9 @@ fn migrate_v23(tx: &rusqlite::Transaction) -> Result<()> {
            FROM certificate",
         [],
     )
-    .map_err(|e| ClientError::DatabaseMigration(format!("Failed to copy certificate material: {e}")))?;
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to copy certificate material: {e}"))
+    })?;
 
     // --- 2. Collapse rows that share a domain. ------------------------------
     // A renewal used to append a row; here they become one identity with several
@@ -1261,7 +1267,9 @@ fn migrate_v23(tx: &rusqlite::Transaction) -> Result<()> {
          INSERT INTO _cert_dedupe
          SELECT id, MIN(id) OVER (PARTITION BY tenant_id, primary_domain) FROM certificate;",
     )
-    .map_err(|e| ClientError::DatabaseMigration(format!("Failed to map duplicate certificates: {e}")))?;
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to map duplicate certificates: {e}"))
+    })?;
 
     tx.execute(
         "UPDATE certificate_material SET certificate_id =
@@ -1281,10 +1289,13 @@ fn migrate_v23(tx: &rusqlite::Transaction) -> Result<()> {
         "DELETE FROM certificate WHERE id NOT IN (SELECT keep_id FROM _cert_dedupe)",
         [],
     )
-    .map_err(|e| ClientError::DatabaseMigration(format!("Failed to collapse certificate rows: {e}")))?;
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to collapse certificate rows: {e}"))
+    })?;
 
-    tx.execute_batch("DROP TABLE _cert_dedupe")
-        .map_err(|e| ClientError::DatabaseMigration(format!("Failed to drop the dedupe map: {e}")))?;
+    tx.execute_batch("DROP TABLE _cert_dedupe").map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to drop the dedupe map: {e}"))
+    })?;
 
     // --- 3. `certificate` keeps identity only. -----------------------------
     // The fingerprint and expiry indexes must go before their columns can be
@@ -1293,7 +1304,9 @@ fn migrate_v23(tx: &rusqlite::Transaction) -> Result<()> {
         "DROP INDEX IF EXISTS idx_certificate_fingerprint;
          DROP INDEX IF EXISTS idx_certificate_expiry;",
     )
-    .map_err(|e| ClientError::DatabaseMigration(format!("Failed to drop certificate indexes: {e}")))?;
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to drop certificate indexes: {e}"))
+    })?;
 
     for column in [
         "fingerprint_sha256",
@@ -1359,7 +1372,9 @@ fn migrate_v23(tx: &rusqlite::Transaction) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_certificate_source_certificate
             ON certificate_source (tenant_id, certificate_id);",
     )
-    .map_err(|e| ClientError::DatabaseMigration(format!("Failed to create certificate_source: {e}")))?;
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to create certificate_source: {e}"))
+    })?;
 
     // Pull sources keep their behaviour; the domain decides whether they are
     // already bound to an existing certificate.
@@ -1397,7 +1412,9 @@ fn migrate_v23(tx: &rusqlite::Transaction) -> Result<()> {
         "DROP TABLE IF EXISTS cert_pull_source;
          DROP TABLE IF EXISTS cert_ingest_token;",
     )
-    .map_err(|e| ClientError::DatabaseMigration(format!("Failed to drop legacy channel tables: {e}")))?;
+    .map_err(|e| {
+        ClientError::DatabaseMigration(format!("Failed to drop legacy channel tables: {e}"))
+    })?;
 
     tracing::info!("V23 Migration: certificate identity by domain, channels unified");
     Ok(())
@@ -1514,17 +1531,25 @@ mod tests {
         assert_eq!(identities, 1, "one row per domain after the merge");
 
         let kept_id: i64 = conn
-            .query_row("SELECT id FROM certificate WHERE primary_domain = 'a.example.com'", [], |row| row.get(0))
+            .query_row(
+                "SELECT id FROM certificate WHERE primary_domain = 'a.example.com'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(kept_id, 1, "the oldest id is the identity that survives");
 
         let materials: i64 = conn
-            .query_row("SELECT COUNT(*) FROM certificate_material", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM certificate_material", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(materials, 2, "both issued bundles survive as material rows");
 
         let binding_cert: i64 = conn
-            .query_row("SELECT cert_id FROM certificate_binding", [], |row| row.get(0))
+            .query_row("SELECT cert_id FROM certificate_binding", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(binding_cert, kept_id, "bindings follow the merged identity");
 
@@ -1547,7 +1572,11 @@ mod tests {
             )
             .unwrap();
         assert_eq!(pull_kind, "certd");
-        assert_eq!(pull_cert, Some(kept_id), "a matching pull source binds itself");
+        assert_eq!(
+            pull_cert,
+            Some(kept_id),
+            "a matching pull source binds itself"
+        );
 
         let push_count: i64 = conn
             .query_row(
@@ -1599,9 +1628,11 @@ mod tests {
 
         // Tenant ownership is what still separates API tokens, so it stays.
         let tenant: String = conn
-            .query_row("SELECT tenant_id FROM frps_profile WHERE id = 1", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT tenant_id FROM frps_profile WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(tenant, "default");
         conn.query_row("SELECT tenant_id FROM local_proxy LIMIT 0", [], |_| Ok(()))
