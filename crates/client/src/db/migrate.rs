@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
 /// 当前最新的 schema 版本
-const LATEST_VERSION: i32 = 23;
+const LATEST_VERSION: i32 = 24;
 
 /// 运行所有待执行的迁移
 ///
@@ -106,6 +106,7 @@ fn apply_migration(conn: &Connection, version: i32) -> Result<()> {
         21 => migrate_v21(&tx)?,
         22 => migrate_v22(&tx)?,
         23 => migrate_v23(&tx)?,
+        24 => migrate_v24(&tx)?,
         _ => {
             return Err(ClientError::DatabaseMigration(format!(
                 "Unknown migration version: {version}"
@@ -1402,6 +1403,27 @@ fn migrate_v23(tx: &rusqlite::Transaction) -> Result<()> {
     Ok(())
 }
 
+/// V24: remove deployment environments.
+///
+/// The platform is single-user: one daemon, one SQLite file, one operator. An
+/// environment was a second grouping axis on top of that, and it never worked as
+/// one — the UI could switch it but not create it, and switching also rewrote
+/// the profile's `tenant_id`, silently moving a server between tenants.
+///
+/// `tenant_id` survives on `frps_profile` and `local_proxy` because it still
+/// separates API tokens; nothing here removes that.
+fn migrate_v24(tx: &rusqlite::Transaction) -> Result<()> {
+    // Dependants first: the mapping table references `environment`.
+    tx.execute_batch("DROP TABLE IF EXISTS profile_environment;")
+        .map_err(|e| {
+            ClientError::DatabaseMigration(format!("Failed to drop profile_environment: {e}"))
+        })?;
+    tx.execute_batch("DROP TABLE IF EXISTS environment;")
+        .map_err(|e| ClientError::DatabaseMigration(format!("Failed to drop environment: {e}")))?;
+    tracing::info!("V24 Migration: remove deployment environments");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1535,6 +1557,59 @@ mod tests {
             )
             .unwrap();
         assert_eq!(push_count, 1, "legacy tokens become unbound push channels");
+    }
+
+    /// V24 removes the environment tables while leaving tenant ownership on the
+    /// rows that still use it.
+    #[test]
+    fn v24_drops_environments_but_keeps_tenant_ownership() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        ensure_meta_table(&conn).unwrap();
+        for version in 1..=23 {
+            apply_migration(&conn, version).unwrap();
+        }
+        // A profile with an environment mapping, as a pre-V24 database has.
+        conn.execute(
+            "INSERT INTO frps_profile (id, name, server_addr, server_port, token, tenant_id,
+                                       created_at, updated_at)
+             VALUES (1, 'p', '127.0.0.1', 7000, '', 'default', 'x', 'x')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO profile_environment (profile_id, environment_id)
+             SELECT 1, id FROM environment LIMIT 1",
+            [],
+        )
+        .unwrap();
+
+        apply_migration(&conn, 24).unwrap();
+
+        for table in ["environment", "profile_environment"] {
+            let exists: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(exists, 0, "{table} must be gone");
+        }
+
+        // Tenant ownership is what still separates API tokens, so it stays.
+        let tenant: String = conn
+            .query_row("SELECT tenant_id FROM frps_profile WHERE id = 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(tenant, "default");
+        conn.query_row("SELECT tenant_id FROM local_proxy LIMIT 0", [], |_| Ok(()))
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(()),
+                other => Err(other),
+            })
+            .expect("local_proxy still carries tenant_id");
     }
 
     #[test]

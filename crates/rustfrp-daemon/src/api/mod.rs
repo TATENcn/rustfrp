@@ -15,7 +15,6 @@ pub mod cert_ingest;
 pub mod cert_ingest_settings;
 pub mod certificates;
 pub mod config_transfer;
-pub mod environments;
 pub mod frp_versions;
 pub mod logs;
 pub mod metrics;
@@ -210,10 +209,6 @@ pub fn create_router(state: ApiState, auth: impl AuthMiddleware) -> Router {
                 .delete(profiles::delete),
         )
         .route(
-            "/api/v1/profiles/:id/environment",
-            axum::routing::put(environments::assign_profile),
-        )
-        .route(
             "/api/v1/profiles/:id/proxies",
             axum::routing::put(profiles::replace_proxies),
         )
@@ -232,14 +227,6 @@ pub fn create_router(state: ApiState, auth: impl AuthMiddleware) -> Router {
         .route(
             "/api/v1/profiles/:id/stop",
             axum::routing::post(profiles::stop),
-        )
-        .route(
-            "/api/v1/environments",
-            axum::routing::get(environments::list).post(environments::create),
-        )
-        .route(
-            "/api/v1/environments/:id",
-            axum::routing::put(environments::update).delete(environments::delete),
         )
         // Proxy CRUD
         .route(

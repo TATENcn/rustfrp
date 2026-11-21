@@ -106,7 +106,6 @@ fn required_scope(method: &Method, path: &str) -> &'static str {
             || path.starts_with("/api/v1/visitors")
             || path.starts_with("/api/v1/bindings")
             || path.starts_with("/api/v1/logs")
-            || path.starts_with("/api/v1/environments")
             // Certificates and their credentials belong to a tenant: one token
             // must never see another tenant's domain certificates.
             || path.starts_with("/api/v1/certificates")

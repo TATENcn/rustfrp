@@ -51,7 +51,6 @@ pub struct EbpfStatus {
 pub struct TrafficSample {
     #[serde(default = "chrono::Utc::now")]
     pub timestamp: chrono::DateTime<chrono::Utc>,
-    pub environment_id: i64,
     pub profile_id: i64,
     pub received_bytes: u64,
     pub sent_bytes: u64,
@@ -197,21 +196,13 @@ impl MetricsStore {
             .collect()
     }
 
-    pub async fn traffic(
-        &self,
-        environment_id: Option<i64>,
-        profile_id: Option<i64>,
-        limit: usize,
-    ) -> Vec<TrafficSample> {
+    pub async fn traffic(&self, profile_id: Option<i64>, limit: usize) -> Vec<TrafficSample> {
         self.traffic
             .read()
             .await
             .iter()
             .rev()
-            .filter(|sample| {
-                environment_id.is_none_or(|id| sample.environment_id == id)
-                    && profile_id.is_none_or(|id| sample.profile_id == id)
-            })
+            .filter(|sample| profile_id.is_none_or(|id| sample.profile_id == id))
             .take(limit.min(self.capacity.saturating_mul(10)))
             .cloned()
             .collect::<Vec<_>>()
@@ -265,7 +256,6 @@ mod tests {
             store
                 .push_traffic(TrafficSample {
                     timestamp: chrono::Utc::now(),
-                    environment_id: 7,
                     profile_id,
                     received_bytes: 1,
                     sent_bytes: 2,
@@ -277,9 +267,9 @@ mod tests {
                 })
                 .await;
         }
-        assert_eq!(store.traffic(None, None, 100).await.len(), 20);
-        assert_eq!(store.traffic(Some(7), Some(1), 100).await.len(), 10);
-        assert!(store.traffic(Some(8), None, 100).await.is_empty());
+        assert_eq!(store.traffic(None, 100).await.len(), 20);
+        assert_eq!(store.traffic(Some(1), 100).await.len(), 10);
+        assert!(store.traffic(Some(99), 100).await.is_empty());
     }
 
     #[test]

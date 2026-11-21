@@ -69,21 +69,11 @@ pub async fn create(
     profile.created_at = now.clone();
     profile.updated_at = now;
 
-    let environment_id = state
-        .db
-        .default_environment_for_tenant(&identity.tenant)
-        .await
-        .map_err(api_error)?;
     let id = state
         .db
         .insert_profile_for_tenant(&profile, &identity.tenant)
         .await
         .map_err(api_error)?;
-
-    if let Err(error) = state.db.set_profile_environment(id, environment_id).await {
-        let _ = state.db.delete_profile(id).await;
-        return Err(api_error(error));
-    }
     profile.id = Some(id);
     Ok((
         axum::http::StatusCode::CREATED,

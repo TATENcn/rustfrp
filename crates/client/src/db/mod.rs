@@ -17,7 +17,6 @@ pub mod admin_endpoint;
 pub mod binding;
 pub mod cert_ingest;
 pub mod certificate;
-pub mod environment;
 pub mod migrate;
 pub mod profile;
 pub mod proxy;

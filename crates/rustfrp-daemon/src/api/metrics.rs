@@ -13,7 +13,6 @@ use crate::metrics::{ResourceSample, TrafficSample, METRICS_HISTORY_CAPACITY};
 
 #[derive(Debug, Default, Deserialize)]
 pub struct HistoryQuery {
-    pub environment_id: Option<i64>,
     pub profile_id: Option<i64>,
     pub limit: Option<usize>,
 }
@@ -40,7 +39,6 @@ pub async fn history(
     let mut traffic = state
         .metrics
         .traffic(
-            query.environment_id,
             query.profile_id,
             query.limit.unwrap_or(METRICS_HISTORY_CAPACITY * 10),
         )
@@ -62,13 +60,9 @@ pub async fn history(
         }
     }
     traffic.retain(|sample| allowed.contains(&sample.profile_id));
-    traffic_collection.profiles.retain(|item| {
-        allowed.contains(&item.profile_id)
-            && query
-                .environment_id
-                .is_none_or(|id| id == item.environment_id)
-            && query.profile_id.is_none_or(|id| id == item.profile_id)
-    });
+    traffic_collection
+        .profiles
+        .retain(|item| allowed.contains(&item.profile_id) && query.profile_id.is_none_or(|id| id == item.profile_id));
     for sample in &mut resources {
         sample.processes.retain(|p| allowed.contains(&p.profile_id));
     }
@@ -77,17 +71,11 @@ pub async fn history(
         .proxy_traffic()
         .await
         .into_iter()
-        .filter(|s| {
-            allowed.contains(&s.profile_id)
-                && query.environment_id.is_none_or(|id| id == s.environment_id)
-                && query.profile_id.is_none_or(|id| id == s.profile_id)
-        })
+        .filter(|s| allowed.contains(&s.profile_id) && query.profile_id.is_none_or(|id| id == s.profile_id))
         .collect();
-    traffic_collection.proxies.retain(|s| {
-        allowed.contains(&s.profile_id)
-            && query.environment_id.is_none_or(|id| id == s.environment_id)
-            && query.profile_id.is_none_or(|id| id == s.profile_id)
-    });
+    traffic_collection
+        .proxies
+        .retain(|s| allowed.contains(&s.profile_id) && query.profile_id.is_none_or(|id| id == s.profile_id));
     let host_traffic = state.metrics.host_traffic().await;
     Json(ApiResponse::ok(HistoryResponse {
         resources,
@@ -132,35 +120,6 @@ pub async fn ingest_traffic(
             }),
         ));
     }
-    let expected = state
-        .db
-        .profile_environment_id(sample.profile_id)
-        .await
-        .map_err(|error| {
-            (
-                super::response::status_code(&error),
-                Json(ApiResponse {
-                    success: false,
-                    data: None,
-                    count: None,
-                    error: Some(ApiError::from_client_error(&error)),
-                }),
-            )
-        })?;
-    if sample.environment_id != expected {
-        return Err((
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(ApiResponse {
-                success: false,
-                data: None,
-                count: None,
-                error: Some(ApiError::generic(
-                    "METRIC_ENV_MISMATCH",
-                    "profile does not belong to the supplied environment".into(),
-                )),
-            }),
-        ));
-    }
     sample.timestamp = chrono::Utc::now();
     sample.source = "external".into();
     sample.proxy_id = None;
@@ -171,7 +130,7 @@ pub async fn ingest_traffic(
 
 pub async fn prometheus(State(state): State<ApiState>) -> Response<Body> {
     let resources = state.metrics.resources(1).await;
-    let traffic = state.metrics.traffic(None, None, 360).await;
+    let traffic = state.metrics.traffic(None, 360).await;
     let mut output = String::from(
         "# HELP rustfrp_daemon_cpu_percent Daemon CPU usage percent.\n\
          # TYPE rustfrp_daemon_cpu_percent gauge\n\
@@ -205,16 +164,16 @@ pub async fn prometheus(State(state): State<ApiState>) -> Response<Body> {
     }
     for sample in latest_traffic_by_profile(traffic) {
         output.push_str(&format!(
-            "rustfrp_traffic_received_bytes{{environment_id=\"{}\",profile_id=\"{}\"}} {}\n",
-            sample.environment_id, sample.profile_id, sample.received_bytes
+            "rustfrp_traffic_received_bytes{{profile_id=\"{}\"}} {}\n",
+            sample.profile_id, sample.received_bytes
         ));
         output.push_str(&format!(
-            "rustfrp_traffic_sent_bytes{{environment_id=\"{}\",profile_id=\"{}\"}} {}\n",
-            sample.environment_id, sample.profile_id, sample.sent_bytes
+            "rustfrp_traffic_sent_bytes{{profile_id=\"{}\"}} {}\n",
+            sample.profile_id, sample.sent_bytes
         ));
         output.push_str(&format!(
-            "rustfrp_active_connections{{environment_id=\"{}\",profile_id=\"{}\"}} {}\n",
-            sample.environment_id, sample.profile_id, sample.active_connections
+            "rustfrp_active_connections{{profile_id=\"{}\"}} {}\n",
+            sample.profile_id, sample.active_connections
         ));
     }
     Response::builder()
@@ -230,7 +189,7 @@ pub async fn prometheus(State(state): State<ApiState>) -> Response<Body> {
 fn latest_traffic_by_profile(samples: Vec<TrafficSample>) -> Vec<TrafficSample> {
     let mut latest = std::collections::BTreeMap::new();
     for sample in samples {
-        latest.insert((sample.environment_id, sample.profile_id), sample);
+        latest.insert(sample.profile_id, sample);
     }
     latest.into_values().collect()
 }
@@ -240,7 +199,7 @@ mod tests {
     use super::*;
     use rustfrp_client::{
         config::model::FrpsProfile,
-        db::{environment::Environment, Database},
+        db::Database,
         process::manager::ProcessManager,
         ClientState,
     };
@@ -248,8 +207,11 @@ mod tests {
     use std::sync::Arc;
     use tokio::sync::RwLock;
 
+    /// A token may only see traffic for profiles in its own tenant. This is the
+    /// property worth testing: `tenant` still separates API callers even though
+    /// there is no environment axis any more.
     #[tokio::test]
-    async fn traffic_history_and_collection_status_are_tenant_and_environment_scoped() {
+    async fn traffic_history_is_scoped_to_the_calling_tenant() {
         let root = tempfile::tempdir().unwrap();
         let db = Database::open(root.path().join("test.db").to_str().unwrap())
             .await
@@ -271,20 +233,8 @@ mod tests {
             })
             .await
             .unwrap();
-        let env = db
-            .insert_environment(&Environment {
-                name: "other".into(),
-                tenant_id: "other".into(),
-                is_default: true,
-                ..Default::default()
-            })
-            .await
-            .unwrap();
-        db.set_profile_environment(second, env).await.unwrap();
-        // Tenancy lives on the profile itself, so move the profile rather than
-        // relying on its environment.
         db.set_profile_tenant(second, "other").await.unwrap();
-        let own_env = db.profile_environment_id(first).await.unwrap();
+
         let manager = ProcessManager::new(
             root.path().into(),
             "/unused/frpc".into(),
@@ -296,14 +246,13 @@ mod tests {
             root.path().into(),
             Arc::new(RwLock::new(ClientState::Ready)),
         );
-        for (profile_id, environment_id) in [(first, own_env), (second, env)] {
+        for (profile_id, received) in [(first, 100), (second, 100)] {
             state
                 .metrics
                 .push_traffic(TrafficSample {
                     timestamp: chrono::Utc::now(),
                     profile_id,
-                    environment_id,
-                    received_bytes: 100,
+                    received_bytes: received,
                     sent_bytes: 200,
                     active_connections: 1,
                     source: "linux_tcp".into(),
@@ -312,14 +261,11 @@ mod tests {
                     interface: None,
                 })
                 .await;
-        }
-        for (profile_id, environment_id) in [(first, own_env), (second, env)] {
             state
                 .metrics
                 .push_traffic(TrafficSample {
                     timestamp: chrono::Utc::now(),
                     profile_id,
-                    environment_id,
                     received_bytes: 300,
                     sent_bytes: 400,
                     active_connections: 1,
@@ -337,26 +283,22 @@ mod tests {
                 profiles: vec![
                     crate::traffic::ProfileCollection {
                         profile_id: first,
-                        environment_id: own_env,
                         state: "collecting",
                     },
                     crate::traffic::ProfileCollection {
                         profile_id: second,
-                        environment_id: env,
                         state: "collecting",
                     },
                 ],
                 proxies: vec![
                     crate::traffic::ProxyCollection {
                         profile_id: first,
-                        environment_id: own_env,
                         proxy_id: 123,
                         name: "own".into(),
                         state: "collecting",
                     },
                     crate::traffic::ProxyCollection {
                         profile_id: second,
-                        environment_id: env,
                         proxy_id: 123,
                         name: "other".into(),
                         state: "collecting",
@@ -365,37 +307,24 @@ mod tests {
                 ..Default::default()
             })
             .await;
+
         let identity = AuthIdentity {
             name: "test".into(),
             tenant: "default".into(),
             scopes: vec![],
         };
         let Json(response) = history(
-            State(state.clone()),
-            Query(HistoryQuery::default()),
-            Extension(identity.clone()),
-        )
-        .await;
-        let payload = response.data.unwrap();
-        assert_eq!(payload.proxy_traffic.len(), 1);
-        assert_eq!(payload.proxy_traffic[0].profile_id, first);
-        assert_eq!(payload.traffic_collection.proxies.len(), 1);
-        assert_eq!(payload.traffic.len(), 1);
-        assert_eq!(payload.traffic[0].profile_id, first);
-        assert_eq!(payload.traffic_collection.profiles.len(), 1);
-        let Json(response) = history(
             State(state),
-            Query(HistoryQuery {
-                environment_id: Some(env),
-                ..Default::default()
-            }),
+            Query(HistoryQuery::default()),
             Extension(identity),
         )
         .await;
         let payload = response.data.unwrap();
-        assert!(payload.traffic.is_empty());
-        assert!(payload.proxy_traffic.is_empty());
-        assert!(payload.traffic_collection.proxies.is_empty());
-        assert!(payload.traffic_collection.profiles.is_empty());
+        assert_eq!(payload.traffic.len(), 1, "only the caller's tenant");
+        assert_eq!(payload.traffic[0].profile_id, first);
+        assert_eq!(payload.proxy_traffic.len(), 1);
+        assert_eq!(payload.proxy_traffic[0].profile_id, first);
+        assert_eq!(payload.traffic_collection.proxies.len(), 1);
+        assert_eq!(payload.traffic_collection.profiles.len(), 1);
     }
 }

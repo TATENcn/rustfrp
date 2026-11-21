@@ -105,14 +105,22 @@ impl Database {
             }
         })?;
         let id = tx.last_insert_rowid();
-        tx.execute(
-            "INSERT INTO profile_environment (profile_id, environment_id)
-             SELECT ?1, id FROM environment WHERE tenant_id = 'default' AND is_default = 1",
-            [id],
-        )
-        .map_err(ClientError::DatabaseQuery)?;
         tx.commit().map_err(ClientError::DatabaseQuery)?;
         Ok(id)
+    }
+
+    /// Whether a profile belongs to `tenant`.
+    ///
+    /// The tenant lives on the profile row itself, so this is one lookup; the
+    /// previous indirect path went through `environment`, which no longer exists.
+    pub async fn profile_belongs_to_tenant(&self, profile_id: i64, tenant: &str) -> Result<bool> {
+        let conn = self.lock().await;
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM frps_profile WHERE id = ?1 AND tenant_id = ?2)",
+            rusqlite::params![profile_id, tenant],
+            |row| row.get(0),
+        )
+        .map_err(ClientError::DatabaseQuery)
     }
 
     /// Move a profile to another tenant.
